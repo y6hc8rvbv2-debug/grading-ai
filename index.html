@@ -1,14 +1,18 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<title>AIテスト採点</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+<title>小学生テスト採点AI</title>
 
 <style>
 body{
 font-family:sans-serif;
-background:#f9fafb;
+background:#f5f7fb;
 padding:40px;
+max-width:700px;
+margin:auto;
 }
 
 .card{
@@ -24,6 +28,22 @@ color:white;
 border:none;
 padding:12px 24px;
 border-radius:12px;
+cursor:pointer;
+font-size:16px;
+}
+
+.score{
+font-size:56px;
+font-weight:bold;
+color:#4f46e5;
+}
+
+.result{
+margin-top:24px;
+}
+
+.loading{
+color:#666;
 }
 </style>
 </head>
@@ -33,10 +53,53 @@ border-radius:12px;
 <h1>📘 小学生テスト採点AI</h1>
 
 <div class="card">
-<input type="file">
+
+<input type="file" id="imageInput" />
+
 <br><br>
-<button>採点する</button>
+
+<button onclick="gradeTest()">
+採点する
+</button>
+
+<div class="result" id="result"></div>
+
 </div>
+
+<script>
+
+async function gradeTest(){
+
+const result = document.getElementById("result");
+
+result.innerHTML =
+"<div class='loading'>AIが採点中です...</div>";
+
+try{
+
+const response = await fetch("/api/grade",{
+method:"POST"
+});
+
+const data = await response.json();
+
+result.innerHTML = `
+<div class="score">${data.score}点</div>
+<p>${data.comment}</p>
+`;
+
+}catch(error){
+
+result.innerHTML =
+"エラーが発生しました";
+
+}
+
+}
+
+</script>
 
 </body>
 </html>
+
+
