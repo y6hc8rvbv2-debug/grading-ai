@@ -60,8 +60,18 @@ as $$
   select exists (select 1 from public.profiles where id = auth.uid() and role = target)
 $$;
 
--- 新規サインアップ時に profiles を自動作成する。
--- school_id は招待メタデータ（raw_user_meta_data->>'school_id'）から受け取る。
+-- 教職員アカウントの作成時に profiles を自動作成する。
+-- school_id と role は app_metadata（raw_app_meta_data）から受け取る。
+--
+-- user_metadata（raw_user_meta_data）は使わないこと。
+-- user_metadata はブラウザの supabase.auth.signUp() から誰でも書けるため、
+-- そこを信じると、誰でも任意の学校の管理者としてサインアップできてしまう。
+-- app_metadata は service_role（サーバー側の招待処理）からしか書けない。
+--
+-- 招待の手順（サーバー側）:
+--   admin.auth.admin.inviteUserByEmail(email)            -- auth.users に行ができる
+--   admin.auth.admin.updateUserById(id, { app_metadata: { school_id, role } })
+--                                                        -- ここで profiles が作られる
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -71,22 +81,24 @@ as $$
 declare
   sid uuid;
 begin
-  sid := nullif(new.raw_user_meta_data->>'school_id','')::uuid;
+  sid := nullif(new.raw_app_meta_data->>'school_id','')::uuid;
 
-  -- 招待メタデータに school_id が無い場合は profiles を作らない。
+  -- app_metadata に school_id が無い場合は profiles を作らない。
   -- profiles が無いユーザーは current_school_id() が null になり、
   -- RLS によりどのデータにもアクセスできない（安全側に倒す）。
   if sid is null then
     return new;
   end if;
 
+  -- 既に profiles がある場合は何もしない（所属・役割の変更は profiles 側で行う）
   insert into public.profiles (id, school_id, role, display_name)
   values (
     new.id,
     sid,
-    coalesce(nullif(new.raw_user_meta_data->>'role',''), 'teacher')::public.user_role,
+    coalesce(nullif(new.raw_app_meta_data->>'role',''), 'teacher')::public.user_role,
     coalesce(new.raw_user_meta_data->>'display_name','')
-  );
+  )
+  on conflict (id) do nothing;
   return new;
 end;
 $$;
@@ -94,6 +106,13 @@ $$;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- 招待後に app_metadata を付与したときにも profiles を作る
+create trigger on_auth_user_app_meta_updated
+  after update of raw_app_meta_data on auth.users
+  for each row
+  when (old.raw_app_meta_data is distinct from new.raw_app_meta_data)
+  execute function public.handle_new_user();
 
 -- ----------------------------------------------------------------------------
 -- 2. マスタ（クラス / 生徒 / テスト / 設問 / 採点基準）
@@ -185,7 +204,8 @@ create table public.rubrics (
   strict_quality    boolean not null default false,
   praise_full       boolean not null default true,
   updated_at        timestamptz not null default now(),
-  unique (school_id, test_id)
+  -- test_id が null（学校の既定値）同士も重複とみなす（PostgreSQL 15 以降）
+  unique nulls not distinct (school_id, test_id)
 );
 
 -- ----------------------------------------------------------------------------
@@ -307,11 +327,13 @@ create table public.audit_logs (
 );
 create index audit_school_idx on public.audit_logs(school_id, created_at desc);
 
+-- Supabase では pgcrypto が extensions スキーマに入るため、search_path に含める。
+-- public だけだと digest() が見つからず、監査ログの INSERT がすべて失敗する。
 create or replace function public.audit_chain()
 returns trigger
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   last_hash text;
@@ -339,11 +361,13 @@ create trigger audit_chain_before
   for each row execute function public.audit_chain();
 
 -- 改ざん検知：連鎖が途切れていないかを確認する
+-- security invoker にして audit_logs の RLS を効かせる。
+-- （security definer だと、学校IDさえ渡せば他校の監査ログの件数や ID が見えてしまう）
 create or replace function public.verify_audit_chain(p_school_id uuid)
 returns table (id bigint, ok boolean)
 language sql
 stable
-security definer
+security invoker
 set search_path = public
 as $$
   select a.id,
@@ -424,6 +448,12 @@ create policy profiles_update_self on public.profiles
   using (id = auth.uid())
   with check (id = auth.uid() and school_id = public.current_school_id());
 
+-- 自分で変えてよいのは表示名と UI 言語だけ。
+-- 列単位で絞らないと、教員が自分の role を 'admin' に書き換えて管理者になれてしまう。
+-- 役割の変更は管理者がサーバー側（service_role）で行う。
+revoke update on public.profiles from anon, authenticated;
+grant update (display_name, ui_lang) on public.profiles to authenticated;
+
 -- マスタと採点データ：同一校なら読み書きできる（教職員アカウント前提）
 do $$
 declare
@@ -460,7 +490,7 @@ create policy audit_select on public.audit_logs
   using (school_id = public.current_school_id());
 create policy audit_insert on public.audit_logs
   for insert to authenticated
-  with check (school_id = public.current_school_id());
+  with check (school_id = public.current_school_id() and actor_id = auth.uid());
 
 revoke update, delete on public.audit_logs from authenticated;
 
@@ -496,3 +526,8 @@ begin
   return n;
 end;
 $$;
+
+-- 全校の答案を消す関数なので、ブラウザ（anon / authenticated）からは呼べなくする。
+-- Supabase は public の関数を既定で anon / authenticated にも公開するため、明示的に取り消す。
+revoke execute on function public.purge_expired_submissions() from public, anon, authenticated;
+grant  execute on function public.purge_expired_submissions() to service_role;

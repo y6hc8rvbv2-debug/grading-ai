@@ -25,8 +25,18 @@
 
 `docs/SUPABASE-SETUP.md` のステップ1〜4を実行する。
 
-**重要**: このSQLは実際のPostgreSQLで実行検証されていない。初回の `Run` でエラーが出る可能性がある。
-エラーが出たら、エラー文を元に `0001_init.sql` を修正する。よくある想定箇所:
+**2026-09-27 ローカル検証済み**: `bash supabase/tests/run.sh` で PostgreSQL 16 + Supabase 模擬環境に流し、
+RLS・トリガー・監査ログのテスト（`supabase/tests/rls_test.sql`）が全て通る。検証中に見つけて直したもの:
+- サインアップ時の `user_metadata` で任意校の管理者になれた → `app_metadata` から読むよう変更
+- 教員が `profiles.role` を自分で `admin` に書き換えられた → 更新可能列を `display_name` / `ui_lang` に限定
+- 監査ログの `digest()` が Supabase（pgcrypto は `extensions` スキーマ）で見つからず INSERT が全て失敗 → search_path に追加
+- `verify_audit_chain` が security definer で他校のログを覗けた → security invoker に変更
+- `purge_expired_submissions` を未ログインでも実行できた → service_role のみに限定
+- 監査ログの `actor_id` を他人に偽れた / 学校既定ルーブリックが重複できた / `submission_links` に UPDATE ポリシーがなかった
+
+スキーマを変えたら必ず `bash supabase/tests/run.sh` を通すこと（root 環境では `su postgres -c "bash supabase/tests/run.sh"`）。
+
+Supabase 本番でしか確かめられない箇所（エラーが出たらここを疑う）:
 - `auth.users` へのトリガー作成権限
 - `storage.objects` へのポリシー作成（`0002` は `0001` の `current_school_id()` に依存するので順序厳守）
 - ビューの `security_invoker` オプション（PostgreSQL 15以降で有効）
@@ -171,9 +181,11 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
 
 引き継ぎ時点で確定していないこと。作業の前に確認が必要。
 
-1. **SQLの実行検証が未了** — 作成環境にPostgreSQLがなく、実際に流していない
+1. **SQLは Supabase 本番で未実行** — ローカル（PostgreSQL 16 + 模擬環境）では実行・テスト済み。Supabase 固有の権限まわりは本番で初めて確かめられる
 2. **プロトタイプは単一ファイルのまま** — Next.jsのディレクトリ構成へ未分割
 3. **採点AIが未接続** — 現在はローカルのルールベース採点（`gradeSubmission()`）がデモとして動作
 4. **複合機スキャン連携が画面のみ** — 実際のメール受信→採点キュー投入は未実装
 5. **多言語は主要12言語のみ実翻訳** — 残りは英語フォールバック
 6. **既存の `api/grade.js` / `index.html` は旧・仮実装** — `api/grade.js` は OpenAI を呼ぶが結果を使わず固定値を返す。Next.js 移植時に `app/api/grade/route.ts`（Claude API）へ置き換えて削除する
+7. **他校のIDを外部キーに指定できる** — 例: 学校Aの教員が学校Bの `test_id` を参照する `submissions` を作れる。読み取りはRLSで防がれるが整合性は崩れる。複合外部キー `(school_id, id)` で塞ぐのが本筋（未対応）
+8. **役割（role）の変更画面がない** — RLS上、教員は自分の role を変えられない。管理者による変更は service_role のサーバー処理として実装する必要がある

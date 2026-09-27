@@ -73,6 +73,11 @@ create policy submission_links_select on public.submission_links
 create policy submission_links_insert on public.submission_links
   for insert to authenticated
   with check (school_id = public.current_school_id());
+-- 期限の延長などに使う。used_count の加算は Edge Function（service_role）が行う。
+create policy submission_links_update on public.submission_links
+  for update to authenticated
+  using (school_id = public.current_school_id())
+  with check (school_id = public.current_school_id());
 create policy submission_links_delete on public.submission_links
   for delete to authenticated
   using (school_id = public.current_school_id());

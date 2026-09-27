@@ -21,6 +21,9 @@
 
 ## ステップ2　スキーマを流し込む
 
+> このSQLはローカルの PostgreSQL 16 で実行・テスト済みです（`bash supabase/tests/run.sh`）。
+> ただし Supabase 固有の権限（`auth.users` へのトリガー、`storage.objects` へのポリシー）はローカルでは模擬環境なので、エラーが出たらエラー文をそのまま貼ってください。
+
 1. 左メニューの **SQL Editor** を開きます。
 2. 「New query」を押します。
 3. `supabase/migrations/0001_init.sql` の中身を**全部**貼り付けます。
@@ -82,7 +85,19 @@ on conflict (id) do update
 
 **ここまでで確認できること**：`select * from public.profiles;` で1行返る。
 
-> 2人目以降は、招待時のメタデータに `school_id` を入れれば自動で作られます（`handle_new_user` トリガー）。この手作業は最初の1人だけです。
+> 2人目以降は、サーバー側（service_role）で招待し、**app_metadata** に `school_id` と `role` を入れると自動で作られます（`handle_new_user` トリガー）。この手作業は最初の1人だけです。
+>
+> ```ts
+> const admin = createAdminClient();
+> const { data } = await admin.auth.admin.inviteUserByEmail(email);
+> await admin.auth.admin.updateUserById(data.user.id, {
+>   app_metadata: { school_id: schoolId, role: "teacher" },
+> });
+> ```
+>
+> **user_metadata（`signUp` の `options.data` や `inviteUserByEmail` の `data`）には入れないでください。** user_metadata はブラウザから誰でも書けるため、トリガーはそこを読みません。
+>
+> あわせて **Authentication → Sign In / Providers** で「Allow new users to sign up」を **オフ** にしてください。教職員は招待のみで作る運用です。
 
 ---
 
