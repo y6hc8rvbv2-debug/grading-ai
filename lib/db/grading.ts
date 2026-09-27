@@ -1,64 +1,87 @@
 // ============================================================================
-// テスト採点ver.3 — データアクセス層
+// テスト採点ver.3 — データアクセス層（Supabase）
 //
-// アプリ側（単一ファイル JSX 版）の型に合わせて camelCase へ変換して返す。
-// これにより、既存のビュー実装をほとんど書き換えずに永続化へ移行できる。
+// DB の snake_case を、画面が使う lib/types.ts の形（camelCase）へ変換して返す。
+// ブラウザの Supabase クライアント（anon キー + ログインセッション）で動くので、
+// 読み書きできる範囲はすべて RLS が決める。service_role はここでは使わない。
+//
+// 合計点と status は DB のトリガーが計算する。ここで合計を計算し直さないこと。
 // ============================================================================
 import { createClient } from "@/lib/supabase/client";
+import { DEFAULT_RUBRIC, typeLabelOf } from "@/lib/grading/engine";
+import type {
+  AuditRow, ClassRoom, GradingInput, Item, ItemPatch, Mark, NewTestInput, Profile,
+  QType, Quality, QuestionStat, RateRow, Retention, ReviewEntry, Rubric, School,
+  Student, Submission, Test, Workspace,
+} from "@/lib/types";
 
-/* ---------------------------------------------------------------- 型 */
-export type Mark = "○" | "△" | "×" | "-";
 
-export type Item = {
-  id: string;
-  qno: number;
-  label: string;
-  unit: string;
-  type: string;
-  typeLabel: string;
-  points: number;
-  detected: string;
-  confidence: number;
-  blank: boolean;
-  mark: Mark;
-  earned: number;
-  needReview: boolean;
-  reason: string;
-  comment: string;
-};
 
-export type Submission = {
-  id: string;
-  testId: string;
-  studentId: string;
-  classId: string;
-  source: string;
-  status: string;
-  pages: number;
-  progress: number;
-  quality: any;
-  imagePaths: string[];
-  edited: boolean;
-  reviewedBy: string | null;
-  uploadedAt: string;
-  result: { items: Item[]; total: number; blank: boolean };
-};
+const EMPTY_QUALITY: Quality = { scores: {}, issues: [], fixes: [], ok: true, avg: 0 };
 
-const TYPE_LABEL: Record<string, string> = {
-  calc: "計算", choice: "選択", fill: "穴埋め",
-  short: "短文記述", long: "長文記述", graph: "作図・グラフ",
-};
+/* ---------------------------------------------------------- ログイン情報 */
+
+/** ログイン中の教職員と所属校。profiles が無い（学校に未所属）なら profile は null。 */
+export async function loadSession(): Promise<{
+  userId: string; email: string; profile: Profile | null; school: School | null;
+} | null> {
+  const sb = createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return null;
+
+  const { data: p, error } = await sb
+    .from("profiles").select("*").eq("id", user.id).maybeSingle();
+  if (error) throw error;
+  if (!p) return { userId: user.id, email: user.email ?? "", profile: null, school: null };
+
+  const { data: sc, error: e2 } = await sb
+    .from("schools").select("*").eq("id", p.school_id).single();
+  if (e2) throw e2;
+
+  return {
+    userId: user.id,
+    email: user.email ?? "",
+    profile: {
+      id: p.id, schoolId: p.school_id, role: p.role,
+      displayName: p.display_name, uiLang: p.ui_lang,
+    },
+    school: {
+      id: sc.id, name: sc.name, code: sc.code,
+      retention: sc.retention, plan: sc.plan,
+    },
+  };
+}
+
+/** 表示言語を保存する（本人が変えてよい列だけ更新できる） */
+export async function saveUiLang(userId: string, lang: string) {
+  const sb = createClient();
+  const { error } = await sb.from("profiles").update({ ui_lang: lang }).eq("id", userId);
+  if (error) throw error;
+}
+
+export async function signOut() {
+  await createClient().auth.signOut();
+}
 
 /* ------------------------------------------------------- 読み込み */
 
-/** 画面初期化に必要なマスタと採点データをまとめて読む */
-export async function loadWorkspace() {
+function mapQuestion(q: any) {
+  return {
+    id: q.id, no: q.no, big: q.big, label: q.label, type: q.qtype as QType,
+    typeLabel: typeLabelOf(q.qtype), unit: q.unit,
+    points: q.points, difficulty: q.difficulty,
+    correct: q.correct, model: q.model_answer,
+  };
+}
+
+/** 画面初期化に必要なマスタ（クラス・生徒・テスト・設問）をまとめて読む */
+export async function loadWorkspace(): Promise<Workspace> {
   const sb = createClient();
 
   const [classes, students, tests, questions] = await Promise.all([
     sb.from("classes").select("*").order("grade").order("name"),
     sb.from("students").select("*").order("number"),
-    sb.from("tests").select("*").order("exam_date", { ascending: false }),
+    sb.from("tests").select("*").order("exam_date", { ascending: false, nullsFirst: false }),
     sb.from("questions").select("*").order("no"),
   ]);
 
@@ -72,46 +95,91 @@ export async function loadWorkspace() {
     qByTest.set(q.test_id, list);
   });
 
-  return {
-    classes: (classes.data ?? []).map((c) => ({
-      id: c.id, grade: c.grade, name: c.name, label: c.label,
-      teacher: c.teacher_label, size: 0,
-    })),
-    students: (students.data ?? []).map((s) => ({
-      id: s.id, classId: s.class_id, number: s.number, examNo: s.exam_no,
-      anonId: s.anon_id, initials: s.initials, support: s.support, note: s.note,
-    })),
-    tests: (tests.data ?? []).map((t) => ({
+  const studentRows: Student[] = (students.data ?? []).map((s) => ({
+    id: s.id, classId: s.class_id, number: s.number, examNo: s.exam_no,
+    anonId: s.anon_id, initials: s.initials, support: s.support, note: s.note,
+  }));
+
+  const classRows: ClassRoom[] = (classes.data ?? []).map((c) => ({
+    id: c.id, grade: c.grade, name: c.name, label: c.label,
+    teacher: c.teacher_label,
+    size: studentRows.filter((s) => s.classId === c.id).length,
+  }));
+
+  const testRows: Test[] = (tests.data ?? []).map((t) => {
+    const qs = (qByTest.get(t.id) ?? []).map(mapQuestion);
+    const sum = qs.reduce((a, q) => a + q.points, 0);
+    return {
       id: t.id, name: t.name, subject: t.subject, grade: t.grade,
-      term: t.term, date: t.exam_date, testNo: t.test_no,
-      units: t.units ?? [], maxScore: t.max_score,
-      questions: (qByTest.get(t.id) ?? []).map((q) => ({
-        id: q.id, no: q.no, big: q.big, label: q.label, type: q.qtype,
-        typeLabel: TYPE_LABEL[q.qtype] ?? q.qtype, unit: q.unit,
-        points: q.points, difficulty: q.difficulty,
-        correct: q.correct, model: q.model_answer,
-      })),
-    })),
+      term: t.term, date: t.exam_date ?? "", testNo: t.test_no,
+      units: t.units ?? [],
+      maxScore: t.max_score || sum,
+      bigCount: qs.reduce((a, q) => Math.max(a, q.big), 0),
+      questions: qs,
+    };
+  });
+
+  return { classes: classRows, students: studentRows, tests: testRows };
+}
+
+const SUBMISSION_SELECT = `
+  id, test_id, student_id, class_id, source, status, pages, total_score,
+  progress, quality, image_paths, is_blank, edited, uploaded_at,
+  reviewed_at, reviewer:profiles!submissions_reviewed_by_fkey ( display_name ),
+  submission_items (
+    id, qno, detected, confidence, mark, earned, is_blank,
+    need_review, reason, comment,
+    questions ( label, unit, qtype, points )
+  )
+`;
+
+function mapItem(i: any): Item {
+  const qtype = (i.questions?.qtype ?? "short") as QType;
+  return {
+    id: i.id,
+    qno: i.qno,
+    label: i.questions?.label ?? `問${i.qno}`,
+    unit: i.questions?.unit ?? "",
+    type: qtype,
+    typeLabel: typeLabelOf(qtype),
+    points: i.questions?.points ?? 0,
+    detected: i.detected,
+    confidence: Number(i.confidence),
+    blank: i.is_blank,
+    mark: i.mark as Mark,
+    earned: i.earned,
+    needReview: i.need_review,
+    reason: i.reason,
+    comment: i.comment,
   };
 }
 
-/** 採点済みの答案を読む。件数が多いので既定は直近200件。 */
+function mapSubmission(s: any): Submission {
+  const items: Item[] = (s.submission_items ?? [])
+    .map(mapItem)
+    .sort((a: Item, b: Item) => a.qno - b.qno);
+  const q = s.quality && Object.keys(s.quality).length ? s.quality : EMPTY_QUALITY;
+  return {
+    id: s.id, testId: s.test_id, studentId: s.student_id, classId: s.class_id,
+    source: s.source, status: s.status, pages: s.pages, progress: s.progress,
+    quality: { ...EMPTY_QUALITY, ...q },
+    imagePaths: s.image_paths ?? [],
+    edited: s.edited,
+    // 確認済みなら確認した教員の表示名（表示名が未設定でも「教員」と出す）
+    reviewedBy: s.reviewed_at ? (s.reviewer?.display_name || "教員") : "",
+    uploadedAt: s.uploaded_at,
+    result: { items, total: s.total_score, blank: s.is_blank },
+  };
+}
+
+/** 答案を読む。件数が多いので既定は直近200件。 */
 export async function loadSubmissions(opts: {
   testId?: string; classId?: string; limit?: number;
 } = {}): Promise<Submission[]> {
   const sb = createClient();
   let q = sb
     .from("submissions")
-    .select(`
-      id, test_id, student_id, class_id, source, status, pages, total_score,
-      progress, quality, image_paths, is_blank, edited, uploaded_at,
-      reviewed_by, profiles:reviewed_by ( display_name ),
-      submission_items (
-        id, qno, detected, confidence, mark, earned, is_blank,
-        need_review, reason, comment,
-        questions ( label, unit, qtype, points )
-      )
-    `)
+    .select(SUBMISSION_SELECT)
     .is("deleted_at", null)
     .order("uploaded_at", { ascending: false })
     .limit(opts.limit ?? 200);
@@ -121,76 +189,49 @@ export async function loadSubmissions(opts: {
 
   const { data, error } = await q;
   if (error) throw error;
+  return (data ?? []).map(mapSubmission);
+}
 
-  return (data ?? []).map((s: any) => {
-    const items: Item[] = (s.submission_items ?? [])
-      .sort((a: any, b: any) => a.qno - b.qno)
-      .map((i: any) => ({
-        id: i.id,
-        qno: i.qno,
-        label: i.questions?.label ?? `問${i.qno}`,
-        unit: i.questions?.unit ?? "",
-        type: i.questions?.qtype ?? "short",
-        typeLabel: TYPE_LABEL[i.questions?.qtype] ?? "",
-        points: i.questions?.points ?? 0,
-        detected: i.detected,
-        confidence: Number(i.confidence),
-        blank: i.is_blank,
-        mark: i.mark as Mark,
-        earned: i.earned,
-        needReview: i.need_review,
-        reason: i.reason,
-        comment: i.comment,
-      }));
-
-    return {
-      id: s.id, testId: s.test_id, studentId: s.student_id, classId: s.class_id,
-      source: s.source, status: s.status, pages: s.pages, progress: s.progress,
-      quality: s.quality ?? {}, imagePaths: s.image_paths ?? [],
-      edited: s.edited, reviewedBy: s.profiles?.display_name ?? null,
-      uploadedAt: s.uploaded_at,
-      result: { items, total: s.total_score, blank: s.is_blank },
-    };
-  });
+/** 答案1枚を読み直す（修正後にトリガーが計算した合計点・状態を取り込むため） */
+export async function loadSubmission(id: string): Promise<Submission | null> {
+  const sb = createClient();
+  const { data, error } = await sb
+    .from("submissions").select(SUBMISSION_SELECT).eq("id", id).maybeSingle();
+  if (error) throw error;
+  return data ? mapSubmission(data) : null;
 }
 
 /* --------------------------------------------------------- 書き込み */
 
-/** 採点結果を1枚保存する。合計点は DB のトリガーが再計算する。 */
-export async function saveGrading(input: {
-  schoolId: string;
-  testId: string;
-  studentId: string;
-  classId: string;
-  source: string;
-  pages: number;
-  quality: any;
-  imagePaths: string[];
-  isBlank: boolean;
-  items: Array<{
-    questionId: string; qno: number; detected: string; confidence: number;
-    mark: Mark; earned: number; blank: boolean; needReview: boolean;
-    reason: string; comment: string; bbox?: any; aiRaw?: any;
-  }>;
-}) {
+/** 採点結果を1枚保存する。合計点と status は DB のトリガーが決める。 */
+export async function saveGrading(schoolId: string, input: GradingInput) {
   const sb = createClient();
+
+  // 保存時点の状態。白紙と画質不良は入力された事実なのでここで決める。
+  // それ以外は processing（progress=100）で保存し、設問の追加でトリガーが done / review を判定する。
+  // 画像だけ保存する場合は uploaded（AI採点待ち・progress 0）。
+  const status = input.pending ? "uploaded"
+    : input.isBlank ? "blank" : !input.quality.ok ? "quality" : "processing";
 
   // 同じテスト×生徒の再提出は上書きする（unique 制約に合わせる）
   const { data: sub, error } = await sb
     .from("submissions")
     .upsert(
       {
-        school_id: input.schoolId,
+        school_id: schoolId,
         test_id: input.testId,
         student_id: input.studentId,
         class_id: input.classId,
         source: input.source,
         pages: input.pages,
         quality: input.quality,
-        image_paths: input.imagePaths,
         is_blank: input.isBlank,
-        status: input.isBlank ? "blank" : "processing",
-        progress: 100,
+        status,
+        progress: input.pending ? 0 : 100,
+        edited: false,
+        reviewed_by: null,
+        reviewed_at: null,
+        uploaded_at: new Date().toISOString(),
       },
       { onConflict: "test_id,student_id" }
     )
@@ -201,7 +242,7 @@ export async function saveGrading(input: {
   if (input.items.length) {
     const { error: e2 } = await sb.from("submission_items").upsert(
       input.items.map((i) => ({
-        school_id: input.schoolId,
+        school_id: schoolId,
         submission_id: sub.id,
         question_id: i.questionId,
         qno: i.qno,
@@ -222,14 +263,23 @@ export async function saveGrading(input: {
   }
 
   await writeAudit({
-    schoolId: input.schoolId,
+    schoolId,
     action: "grading.create",
     targetTable: "submissions",
     targetId: sub.id,
-    detail: { items: input.items.length, blank: input.isBlank },
+    detail: { items: input.items.length, blank: input.isBlank, pending: !!input.pending },
   });
 
   return sub.id as string;
+}
+
+/** 答案画像のパスを答案に記録する */
+export async function attachImages(submissionId: string, paths: string[]) {
+  const sb = createClient();
+  const { error } = await sb
+    .from("submissions").update({ image_paths: paths, pages: Math.max(1, paths.length) })
+    .eq("id", submissionId);
+  if (error) throw error;
 }
 
 /** 教師が1問だけ修正する。合計点と状態はトリガーが追従する。 */
@@ -237,7 +287,7 @@ export async function updateItem(params: {
   schoolId: string;
   submissionId: string;
   itemId: string;
-  patch: Partial<{ mark: Mark; earned: number; comment: string; needReview: boolean }>;
+  patch: ItemPatch;
 }) {
   const sb = createClient();
   const { patch } = params;
@@ -254,7 +304,9 @@ export async function updateItem(params: {
     .eq("id", params.itemId);
   if (error) throw error;
 
-  await sb.from("submissions").update({ edited: true }).eq("id", params.submissionId);
+  const { error: e2 } = await sb
+    .from("submissions").update({ edited: true }).eq("id", params.submissionId);
+  if (e2) throw e2;
 
   await writeAudit({
     schoolId: params.schoolId,
@@ -265,13 +317,10 @@ export async function updateItem(params: {
   });
 }
 
-/** 返却前の「確認済み」を記録する */
-export async function markReviewed(schoolId: string, submissionId: string, actorId: string) {
+/** 返却前の「確認済み」を記録する。要確認の印も外れ、status はトリガーが判定し直す。 */
+export async function markReviewed(schoolId: string, submissionId: string) {
   const sb = createClient();
-  const { error } = await sb
-    .from("submissions")
-    .update({ reviewed_by: actorId, reviewed_at: new Date().toISOString() })
-    .eq("id", submissionId);
+  const { error } = await sb.rpc("mark_submission_reviewed", { p_submission_id: submissionId });
   if (error) throw error;
 
   await writeAudit({
@@ -280,56 +329,205 @@ export async function markReviewed(schoolId: string, submissionId: string, actor
   });
 }
 
-/* --------------------------------------------------------- 分析 */
+/* ------------------------------------------------ テスト・採点基準・学校 */
 
-/** 単元別の定着度。集計はビュー側（Postgres）で行う。 */
-export async function unitMastery(testId: string, classId?: string) {
+/** テストと設問をまとめて登録する */
+export async function createTest(schoolId: string, userId: string, input: NewTestInput) {
+  const sb = createClient();
+  const maxScore = input.questions.reduce((a, q) => a + q.points, 0);
+  const { data: t, error } = await sb
+    .from("tests")
+    .insert({
+      school_id: schoolId,
+      name: input.name,
+      subject: input.subject,
+      grade: input.grade,
+      term: input.term,
+      exam_date: input.date || null,
+      test_no: input.testNo,
+      units: input.units,
+      max_score: maxScore,
+      created_by: userId,
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+
+  const { error: e2 } = await sb.from("questions").insert(
+    input.questions.map((q, i) => ({
+      school_id: schoolId,
+      test_id: t.id,
+      no: i + 1,
+      big: Math.floor(i / 4) + 1,
+      label: `大問${Math.floor(i / 4) + 1}-(${(i % 4) + 1})`,
+      qtype: q.type,
+      unit: q.unit,
+      points: q.points,
+      difficulty: q.difficulty,
+      correct: q.correct,
+      model_answer: q.model,
+    }))
+  );
+  if (e2) {
+    // 設問の登録に失敗したら、中身の無いテストを残さない
+    await sb.from("tests").delete().eq("id", t.id);
+    throw e2;
+  }
+
+  await writeAudit({
+    schoolId, action: "test.create", targetTable: "tests", targetId: t.id,
+    detail: { name: input.name, questions: input.questions.length },
+  });
+  return t.id as string;
+}
+
+/** 学校の既定の採点基準（test_id が null の行）。未登録なら初期値。 */
+export async function loadRubric(): Promise<Rubric> {
+  const sb = createClient();
+  const { data, error } = await sb
+    .from("rubrics").select("*").is("test_id", null).maybeSingle();
+  if (error) throw error;
+  if (!data) return DEFAULT_RUBRIC;
+  return {
+    matchRate: data.match_rate, partialStep: data.partial_step,
+    reviewThreshold: data.review_threshold,
+    allowKana: data.allow_kana, allowSpell: data.allow_spell,
+    unitPartial: data.unit_partial, workPartial: data.work_partial,
+    caseSensitive: data.case_sensitive, outsideBox: data.outside_box,
+    requireTeacher: data.require_teacher, autoModel: data.auto_model,
+    strictQuality: data.strict_quality, praiseFull: data.praise_full,
+  };
+}
+
+export async function saveRubric(schoolId: string, r: Rubric) {
+  const sb = createClient();
+  const row = {
+    school_id: schoolId,
+    test_id: null,
+    match_rate: r.matchRate, partial_step: r.partialStep,
+    review_threshold: r.reviewThreshold,
+    allow_kana: r.allowKana, allow_spell: r.allowSpell,
+    unit_partial: r.unitPartial, work_partial: r.workPartial,
+    case_sensitive: r.caseSensitive, outside_box: r.outsideBox,
+    require_teacher: r.requireTeacher, auto_model: r.autoModel,
+    strict_quality: r.strictQuality, praise_full: r.praiseFull,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await sb.from("rubrics").upsert(row, { onConflict: "school_id,test_id" });
+  if (error) throw error;
+  await writeAudit({
+    schoolId, action: "rubric.update", targetTable: "rubrics", targetId: null, detail: r,
+  });
+}
+
+/** 答案画像の保存期間を変える（管理者のみ。RLS で他の役割は0行更新になる） */
+export async function updateRetention(schoolId: string, retention: Retention) {
+  const sb = createClient();
+  const { data, error } = await sb
+    .from("schools").update({ retention }).eq("id", schoolId).select("id");
+  if (error) throw error;
+  if (!data?.length) {
+    const e: any = new Error("保存期間を変更できるのは学校の管理者だけです。管理者に依頼してください。");
+    e.code = "42501";
+    throw e;
+  }
+  await writeAudit({
+    schoolId, action: "school.retention", targetTable: "schools", targetId: schoolId,
+    detail: { retention },
+  });
+}
+
+/* --------------------------------------------------------- 分析 */
+// 集計は Postgres のビューで行う。ここでは行の形を整えるだけ。
+// クラスを指定しないときは、クラス別の集計行を単元ごとに足し合わせる。
+
+function mergeRates(rows: any[], keyOf: (r: any) => string): RateRow[] {
+  const m = new Map<string, RateRow>();
+  rows.forEach((r) => {
+    const k = keyOf(r);
+    const cur = m.get(k) ?? { key: k, earned: 0, points: 0, rate: 0, n: 0 };
+    cur.earned += Number(r.earned);
+    cur.points += Number(r.points);
+    cur.n = (cur.n ?? 0) + Number(r.item_count ?? 0);
+    m.set(k, cur);
+  });
+  return [...m.values()]
+    .map((r) => ({ ...r, rate: r.points ? Math.round((1000 * r.earned) / r.points) / 10 : 0 }))
+    .sort((a, b) => a.rate - b.rate);
+}
+
+/** 単元別の定着度 */
+export async function unitMastery(testId: string, classId?: string): Promise<RateRow[]> {
   const sb = createClient();
   let q = sb.from("v_unit_mastery").select("*").eq("test_id", testId);
   if (classId) q = q.eq("class_id", classId);
   const { data, error } = await q;
   if (error) throw error;
+  return mergeRates(data ?? [], (r) => r.unit);
+}
+
+/** 設問形式別の得点率 */
+export async function typeMastery(testId: string, classId?: string): Promise<RateRow[]> {
+  const sb = createClient();
+  let q = sb.from("v_qtype_mastery").select("*").eq("test_id", testId);
+  if (classId) q = q.eq("class_id", classId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return mergeRates(data ?? [], (r) => typeLabelOf(r.qtype));
+}
+
+/** 設問別の正答率 */
+export async function questionStats(testId: string, classId?: string): Promise<QuestionStat[]> {
+  const sb = createClient();
+  const { data, error } = classId
+    ? await sb.from("v_question_stats_by_class").select("*").eq("test_id", testId).eq("class_id", classId)
+    : await sb.from("v_question_stats").select("*").eq("test_id", testId);
+  if (error) throw error;
   return (data ?? [])
     .map((r: any) => ({
-      unit: r.unit, earned: r.earned, points: r.points, rate: Number(r.rate),
+      id: r.question_id, qno: r.qno, label: r.label, unit: r.unit, n: Number(r.n),
+      correctRate: Number(r.correct_rate), rate: Number(r.score_rate),
     }))
     .sort((a, b) => a.rate - b.rate);
 }
 
-/** 設問別の正答率 */
-export async function questionStats(testId: string) {
+/** ミスの傾向（誤答理由ごとの件数） */
+export async function mistakeReasons(testId: string, classId?: string) {
   const sb = createClient();
-  const { data, error } = await sb
-    .from("v_question_stats").select("*").eq("test_id", testId);
+  let q = sb.from("v_mistake_reasons").select("*").eq("test_id", testId);
+  if (classId) q = q.eq("class_id", classId);
+  const { data, error } = await q;
   if (error) throw error;
-  return (data ?? [])
-    .map((r: any) => ({
-      questionId: r.question_id, label: r.label, unit: r.unit, n: r.n,
-      correctRate: Number(r.correct_rate), scoreRate: Number(r.score_rate),
-    }))
-    .sort((a, b) => a.correctRate - b.correctRate);
+  const m = new Map<string, number>();
+  (data ?? []).forEach((r: any) => m.set(r.reason, (m.get(r.reason) ?? 0) + Number(r.n)));
+  return [...m.entries()]
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((a, b) => b.count - a.count);
 }
 
-/** 要確認一覧 */
-export async function needsReview(limit = 100) {
+/** 要確認一覧（信頼度の低い順） */
+export async function needsReview(limit = 100): Promise<ReviewEntry[]> {
   const sb = createClient();
   const { data, error } = await sb
     .from("submission_items")
     .select(`
-      id, qno, detected, confidence, mark, earned, reason,
+      id, submission_id, qno, detected, confidence, mark, earned, is_blank,
+      need_review, reason, comment,
       questions ( label, unit, qtype, points ),
-      submissions ( id, test_id, class_id, student_id )
+      submissions!inner ( status, deleted_at )
     `)
     .eq("need_review", true)
+    .is("submissions.deleted_at", null)
+    .neq("submissions.status", "processing")
     .order("confidence", { ascending: true })
     .limit(limit);
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []).map((r: any) => ({ submissionId: r.submission_id, item: mapItem(r) }));
 }
 
 /* --------------------------------------------------------- 画像 */
 
-/** 答案画像を保存する。パスは {school_id}/{test_id}/{submission_id}/{page}.jpg */
+/** 答案画像を保存する。パスは {school_id}/{test_id}/{submission_id}/{page}.{ext} */
 export async function uploadAnswerImage(params: {
   schoolId: string; testId: string; submissionId: string; page: number; file: File;
 }) {
@@ -338,7 +536,7 @@ export async function uploadAnswerImage(params: {
   const path = `${params.schoolId}/${params.testId}/${params.submissionId}/${params.page}.${ext}`;
   const { error } = await sb.storage
     .from("answer-sheets")
-    .upload(path, params.file, { upsert: true, contentType: params.file.type });
+    .upload(path, params.file, { upsert: true, contentType: params.file.type || undefined });
   if (error) throw error;
   return path;
 }
@@ -369,7 +567,22 @@ export async function writeAudit(params: {
     detail: params.detail,
   });
   // 監査ログの失敗で業務処理を止めないが、握りつぶさずに記録する
-  if (error) console.error("audit log failed", error);
+  if (error) console.warn("監査ログを書き込めませんでした", error.message);
+}
+
+/** 監査ログを新しい順に読む（書き出し用） */
+export async function loadAudit(limit = 1000): Promise<AuditRow[]> {
+  const sb = createClient();
+  const { data, error } = await sb
+    .from("audit_logs")
+    .select("id, created_at, action, target_table, target_id, detail, actor:profiles ( display_name )")
+    .order("id", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({
+    id: r.id, createdAt: r.created_at, action: r.action, targetTable: r.target_table,
+    targetId: r.target_id, actor: r.actor?.display_name ?? "", detail: r.detail,
+  }));
 }
 
 /** ハッシュ連鎖が途切れていないか確認する */
@@ -378,5 +591,5 @@ export async function verifyAuditChain(schoolId: string) {
   const { data, error } = await sb.rpc("verify_audit_chain", { p_school_id: schoolId });
   if (error) throw error;
   const broken = (data ?? []).filter((r: any) => r.ok === false);
-  return { total: data?.length ?? 0, broken };
+  return { total: data?.length ?? 0, broken: broken.length };
 }

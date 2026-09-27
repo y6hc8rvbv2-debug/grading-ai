@@ -9,69 +9,69 @@
 
 ## 現在地
 
-**プロトタイプは完成済み。永続化層は未接続。**
+**Next.js 14 への移植と Supabase 接続は完了。採点AIは未接続。**（2026-09-27）
 
-- `docs/prototype-v3.jsx` — 単一ファイルReactデモ（3,538行）。全15画面が動作し、デモデータで全機能を試せる。**ただし全データが `useState` 上にあり、リロードで消える。**
-- `supabase/migrations/` — Supabaseスキーマ（12テーブル、RLS、監査ログ、分析ビュー）。**作成済みだが未実行・未検証。**
-- `lib/db/grading.ts` — データアクセス層。**作成済みだが未接続。**
-
-つまり「動くが保存されない」状態です。ここを繋ぐのが最優先。
+- 全15画面 + ログイン画面が `app/` 配下で動く。データは Supabase に保存され、再読み込みしても残る。
+- Supabase の接続情報（`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`）が無いと **デモモード** で起動する。
+  デモモードはプロトタイプと同じデモデータで全機能を試せるが、何も保存しない（画面上部に「デモモード（保存されません）」と出る）。
+- 採点AIが未接続なので、Supabase 接続時の「新規採点」は **答案画像を保存して「AI採点待ち」（status = uploaded）にするだけ**。
+  動作確認用にルールベースの仮採点も選べるが、点数は答案の内容と無関係（画面にその旨を明記している）。
+- マイグレーション 0001〜0003 は、Supabase CLI のローカル環境（本番と同じ Docker イメージ）で適用・検証済み。
+  **Supabase 本番プロジェクトへの適用はまだ**（ユーザーが `docs/SUPABASE-SETUP.md` の手順で行う）。
+- `docs/prototype-v3.jsx` は移植元として残している。今後の変更は `app/` / `components/` / `lib/` に対して行う。
 
 ---
-
 ## 次にやること（優先順）
 
-### 1. Supabaseプロジェクトの作成とスキーマ投入 ← いまここ
+### 1. Supabase 本番プロジェクトの作成とスキーマ投入 ← ユーザー作業待ち
 
-`docs/SUPABASE-SETUP.md` のステップ1〜4を実行する。
+`docs/SUPABASE-SETUP.md` のステップ1〜5を実行する（SQL は 0001 → 0002 → 0003 の順）。
+エラーが出たらエラー文を元に直す。ただし **本番に一度でも流したマイグレーションは書き換えず、新しい連番ファイルで直す**。
 
-**2026-09-27 ローカル検証済み**: `bash supabase/tests/run.sh` で PostgreSQL 16 + Supabase 模擬環境に流し、
-RLS・トリガー・監査ログのテスト（`supabase/tests/rls_test.sql`）が全て通る。検証中に見つけて直したもの:
+ローカルでは次の2段階で検証済み（スキーマを変えたら両方通すこと）:
+- `npm run test:db` … 素の PostgreSQL + Supabase 模擬環境で RLS・トリガー・ビューを検証（`supabase/tests/rls_test.sql`）。
+  root 環境では `su postgres -c "bash supabase/tests/run.sh"`
+- `npm run test:e2e` … Supabase CLI のローカル環境（Docker）にアプリを繋ぎ、ブラウザで教員の作業を通しで検証（`tests/e2e/`）。
+  ECR に届かない環境では `SUPABASE_INTERNAL_IMAGE_REGISTRY=docker.io` を付ける
+
+検証中に見つけて直したもの（0001/0002 は未適用だったので直接修正、0003 で追加修正）:
 - サインアップ時の `user_metadata` で任意校の管理者になれた → `app_metadata` から読むよう変更
 - 教員が `profiles.role` を自分で `admin` に書き換えられた → 更新可能列を `display_name` / `ui_lang` に限定
 - 監査ログの `digest()` が Supabase（pgcrypto は `extensions` スキーマ）で見つからず INSERT が全て失敗 → search_path に追加
 - `verify_audit_chain` が security definer で他校のログを覗けた → security invoker に変更
 - `purge_expired_submissions` を未ログインでも実行できた → service_role のみに限定
 - 監査ログの `actor_id` を他人に偽れた / 学校既定ルーブリックが重複できた / `submission_links` に UPDATE ポリシーがなかった
+- （0003）採点完了後も status が `processing` のまま残った → progress = 100 なら done / review / quality を判定
+- （0003）分析ビューが白紙答案を 0 点として集計していた → 除外。設問形式別・ミス傾向・クラス別設問正答率のビューを追加
 
-スキーマを変えたら必ず `bash supabase/tests/run.sh` を通すこと（root 環境では `su postgres -c "bash supabase/tests/run.sh"`）。
+### 2. 採点AIの実接続（PROD-APIマーカー）
 
-Supabase 本番でしか確かめられない箇所（エラーが出たらここを疑う）:
-- `auth.users` へのトリガー作成権限
-- `storage.objects` へのポリシー作成（`0002` は `0001` の `current_school_id()` に依存するので順序厳守）
-- ビューの `security_invoker` オプション（PostgreSQL 15以降で有効）
-
-### 2. プロトタイプをNext.js 14へ移植し、状態管理をSupabaseに繋ぐ
-
-`docs/prototype-v3.jsx` を分割して `app/` 配下へ移す。置き換え対応は次のとおり。
-
-| プロトタイプ側 | 置き換え先 |
-|---|---|
-| `useState(INITIAL_SUBMISSIONS)` | `loadSubmissions()` |
-| `updateSub(id, patch)` | `updateItem({ schoolId, submissionId, itemId, patch })` |
-| `addSubs(made)` | `saveGrading(input)` |
-| `STUDENTS` / `CLASSES` / `TESTS` 定数 | `loadWorkspace()` |
-| `analyze()` のクライアント集計 | `unitMastery()` / `questionStats()`（Postgres側で集計） |
-| 要確認一覧のクライアント絞り込み | `needsReview()` |
-
-合計点と `status` はDBトリガーが自動計算するので、**アプリ側で合計を再計算しないこと。**
-
-### 3. 採点AIの実接続（PROD-APIマーカー12箇所）
-
-`docs/prototype-v3.jsx` 内の `// PROD-API:` コメント12箇所が接続ポイント。
-Route Handler（`app/api/grade/route.ts`）を作り、サーバー側から Claude API を呼ぶ。
-
+Route Handler（`app/api/grade/route.ts`）を作り、サーバー側から Claude API（Vision）を呼ぶ。
 **APIキーは絶対にブラウザへ出さない。** `ANTHROPIC_API_KEY` はサーバー環境変数のみ。
 
-送信するもの: 答案画像（Storage署名付きURL or base64）＋ `rubrics` テーブルの採点基準＋ `questions` の配点と模範解答。
-受け取るもの: 設問ごとの `detected` / `mark` / `earned` / `confidence` / `reason` / `bbox`。
+- 対象: status = `uploaded`（AI採点待ち）の答案。原本は Storage の `image_paths`（署名付きURL or base64 で渡す）
+- 送るもの: 答案画像 ＋ `rubrics` の採点基準 ＋ `questions` の配点・正答・模範解答（`model_answer`）
+- 受け取るもの: 設問ごとの `detected` / `mark` / `earned` / `confidence` / `reason` / `comment` / `bbox`
+- 保存: `submission_items` に upsert し、`submissions.progress = 100` にする（status はトリガーが決める）
+- `confidence` が `rubrics.review_threshold` を下回ったら `need_review = true`。記述問題は `require_teacher` が真なら常に `need_review = true`
+- 置き換える箇所: `lib/grading/engine.ts` の `gradeSubmission` / `checkQuality`（仮採点）、
+  `components/screens/NewGrading.tsx` の `buildInput`、`Processing.tsx`（進み具合の表示）
+- 生成AIに置き換える文面: `buildFeedback`（フィードバック）/ `buildModelAnswers`（模範解答）。`model_answer_sets` に保存する
+- 赤ペン画像: `components/RedPenSheet.tsx` を、原本画像の上に `bbox` 座標でマークを重ねる形にする
 
-`confidence` が `rubrics.review_threshold` を下回ったら `need_review = true` にして「要確認一覧」へ回す。
+`// PROD-API:` コメントはプロトタイプ由来の接続ポイント。移植後のファイルにもそのまま残している（`grep -rn "PROD-API" components lib`）。
 
-### 4. 生徒モバイル提出（Edge Function）
+### 3. 生徒モバイル提出（Edge Function）
 
 `submission_links` テーブルにトークンを発行し、Edge Function（service_role）が検証してアップロードを代行する。
 **生徒はログインしない設計。** 提出時に氏名を入力させず、出席番号だけで受け付ける。
+画面側は「新規採点」の「生徒モバイル提出」が「準備中」になっている。
+
+### 4. 保存期間による画像の削除
+
+`purge_expired_submissions()` は DB 上で論理削除して `image_paths` を空にするだけで、**Storage の画像ファイルは消えない**。
+現在の Supabase Storage は SQL での `storage.objects` 削除を禁止している（Storage API を使えというエラーになる）。
+service_role のサーバー処理（Edge Function など）で、期限切れ答案の画像を Storage API で削除する処理が必要。
 
 ---
 
@@ -100,26 +100,48 @@ Route Handler（`app/api/grade/route.ts`）を作り、サーバー側から Cla
 最終的な成績評価は教員が行う。記述問題は `rubrics.require_teacher` が真なら確認必須。
 返却前に「要確認一覧」を消化する運用を前提とする。
 
+**答案を読んでいない点数を、本物の採点結果として保存しない。** 採点AIが未接続のあいだ、
+Supabase 接続時の既定は「画像だけ保存（AI採点待ち）」。仮採点は明示的なチェックが必要で、画面に「点数は答案と無関係」と出す。
+
 ---
 
 ## アーキテクチャ
 
 ```
-Next.js 14 (App Router)
-  ├── middleware.ts          セッション維持 + 未ログインを /login へ
+Next.js 14 (App Router, TypeScript)
+  ├── middleware.ts              セッション維持 + 未ログインを /login へ（Supabase 未設定なら素通し＝デモモード）
   ├── app/
-  │   ├── (dashboard)/       サイドバー付きの主要15画面
-  │   └── api/grade/         採点AIのRoute Handler（未実装）
-  ├── lib/supabase/
-  │   ├── client.ts          ブラウザ用（Client Component）
-  │   └── server.ts          サーバー用 + createAdminClient（service_role）
-  └── lib/db/grading.ts      データアクセス層（camelCase変換込み）
+  │   ├── login/                 教職員ログイン（生徒はログインしない）
+  │   └── (dashboard)/           15画面。各 page.tsx は components/screens/* を表示するだけ
+  │       └── history/[id]/      採点結果の詳細（赤ペン画像・修正・分析）
+  ├── components/
+  │   ├── AppShell.tsx           外枠（サイドバー・ヘッダー）と共有状態。初回にマスタ・答案・採点基準を読む
+  │   ├── ui-context.ts          useUI()。画面はここから ws / subs / 操作（editItem・reviewSub など）を取る
+  │   ├── ui.tsx                 Card / Btn / Table / Modal などの共通部品（プロトタイプから移植）
+  │   ├── RedPenSheet.tsx        赤ペン採点画像（SVG）
+  │   └── screens/               各画面
+  └── lib/
+      ├── types.ts               画面が使う型（camelCase）
+      ├── data/source.ts         DataSource インターフェース（画面はこれだけを通して読み書きする）
+      ├── data/supabase.ts       本番。lib/db/grading.ts を呼ぶ
+      ├── data/demo.ts           デモモード。メモリ上で動く（本番のトリガー・ビューと同じ規則を JS で再現）
+      ├── db/grading.ts          Supabase のデータアクセス層（snake_case → camelCase 変換）
+      ├── grading/engine.ts      仮採点（ルールベース）・1枚単位の分析・文面生成・定数
+      ├── demo/data.ts           デモデータ（デモモード専用）
+      ├── i18n.ts / ui/theme.ts  多言語・テーマ
+      ├── errors.ts              エラーを「何が起きたか＋どう直すか」の日本語にする
+      └── supabase/{client,server}.ts
 
 Supabase
-  ├── PostgreSQL             12テーブル + RLS + トリガー + 分析ビュー
-  ├── Storage                answer-sheets（非公開・署名付きURLのみ）
-  └── Auth                   教職員のみ。生徒はログインしない
+  ├── PostgreSQL             12テーブル + RLS + トリガー + 分析ビュー（supabase/migrations/0001〜0003）
+  ├── Storage                answer-sheets（非公開・署名付きURLのみ）。パスは {school_id}/{test_id}/{submission_id}/{page}.{ext}
+  └── Auth                   教職員のみ。所属校と役割は app_metadata で付与（一般サインアップでは所属が付かない）
 ```
+
+画面の状態の置き場所:
+- 採点データ・テスト・名簿・採点基準・保存期間 → Supabase（学校で共有）
+- 表示言語 → `profiles.ui_lang` と端末の localStorage
+- テーマ・お気に入り・匿名モード・生徒の表示形式 → 端末の localStorage（学校で共有しない好み）
 
 ### 主要テーブル
 
@@ -132,18 +154,27 @@ Supabase
 - `submission_items` — 1問1行。ここが採点結果の本体
 - `audit_logs` — 追記専用＋ハッシュ連鎖。UPDATE/DELETEポリシーを意図的に作っていない
 
-### 分析ビュー
+### 分析ビュー（白紙・採点待ちの答案は含めない）
 
-- `v_unit_mastery` — 単元別の定着度
-- `v_question_stats` — 設問別の正答率
+- `v_unit_mastery` — 単元別の定着度（クラス別）
+- `v_question_stats` / `v_question_stats_by_class` — 設問別の正答率（テスト全体 / クラス別）
+- `v_qtype_mastery` — 設問形式別の得点率（0003）
+- `v_mistake_reasons` — ミスの傾向（誤答理由ごとの件数）（0003）
 
-弱点分析はこのビューで集計する。**クライアント側でループを回さない。**
+弱点分析はこのビューで集計する。**クライアント側で全答案のループを回さない。**
+（デモモードの `lib/data/demo.ts` だけは、同じ集計を JS で再現している）
+
+### 状態（submissions.status）の決まり方
+
+`recalc_submission_total` トリガー（0003 で更新）が、設問の変更のたびに合計点と状態を決める。
+白紙 > 採点中（progress < 100）> 画質注意（未確認のあいだ）> 要確認 > 採点済。
+「確認済みにする」は `mark_submission_reviewed(id)` を呼ぶ（要確認の印を外し、画質注意も解除される）。
 
 ---
 
 ## 赤ペン採点画像について
 
-`docs/prototype-v3.jsx` の `RedPenSheet` / `MarkGlyph` / `wobblePath` が実装。
+`components/RedPenSheet.tsx` の `RedPenSheet` / `MarkGlyph` / `wobblePath` が実装（プロトタイプから移植）。
 SVGで手描き風のゆらぎを持たせた丸・バツ・三角・得点・朱コメントを描画する。
 
 本番では、原本画像を `<image>` として敷き、Vision が返した `bbox` 座標にこのマークを重ねる。
@@ -167,9 +198,11 @@ SVGで手描き風のゆらぎを持たせた丸・バツ・三角・得点・�
 ## 開発コマンド
 
 ```bash
-npm run dev          # 開発サーバー
+npm run dev          # 開発サーバー（.env.local が無ければデモモード）
 npm run build        # 本番ビルド（型エラーはここで出る）
 npm run lint
+npm run test:db      # スキーマのテスト（素の PostgreSQL が必要）
+npm run test:e2e     # ローカル Supabase（Docker）+ ブラウザでの通しテスト
 ```
 
 Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを追加する。
@@ -179,13 +212,14 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
 
 ## 未検証・未解決の事項
 
-引き継ぎ時点で確定していないこと。作業の前に確認が必要。
-
-1. **SQLは Supabase 本番で未実行** — ローカル（PostgreSQL 16 + 模擬環境）では実行・テスト済み。Supabase 固有の権限まわりは本番で初めて確かめられる
-2. **プロトタイプは単一ファイルのまま** — Next.jsのディレクトリ構成へ未分割
-3. **採点AIが未接続** — 現在はローカルのルールベース採点（`gradeSubmission()`）がデモとして動作
-4. **複合機スキャン連携が画面のみ** — 実際のメール受信→採点キュー投入は未実装
-5. **多言語は主要12言語のみ実翻訳** — 残りは英語フォールバック
-6. **既存の `api/grade.js` / `index.html` は旧・仮実装** — `api/grade.js` は OpenAI を呼ぶが結果を使わず固定値を返す。Next.js 移植時に `app/api/grade/route.ts`（Claude API）へ置き換えて削除する
-7. **他校のIDを外部キーに指定できる** — 例: 学校Aの教員が学校Bの `test_id` を参照する `submissions` を作れる。読み取りはRLSで防がれるが整合性は崩れる。複合外部キー `(school_id, id)` で塞ぐのが本筋（未対応）
-8. **役割（role）の変更画面がない** — RLS上、教員は自分の role を変えられない。管理者による変更は service_role のサーバー処理として実装する必要がある
+1. **SQLは Supabase 本番で未実行** — ローカルの Supabase CLI 環境（本番と同じイメージ）では適用・テスト済み
+2. **採点AIが未接続** — 本番では答案画像を保存して「AI採点待ち」にするだけ。仮採点は動作確認用（「次にやること」2）
+3. **生徒モバイル提出・複合機スキャン連携は「準備中」** — 画面に準備中と表示し、代わりの取り込み方法を案内している
+4. **保存期間による自動削除で Storage の画像が消えない**（「次にやること」4）
+5. **他校のIDを外部キーに指定できる** — 例: 学校Aの教員が学校Bの `test_id` を参照する `submissions` を作れる。読み取りはRLSで防がれるが整合性は崩れる。複合外部キー `(school_id, id)` で塞ぐのが本筋（未対応）
+6. **役割（role）の変更・教職員の招待画面がない** — 招待は SUPABASE-SETUP.md のサーバー側コード、役割変更は SQL で行う
+7. **クラス・生徒の登録画面がない** — 名簿は SQL で登録する（SUPABASE-SETUP.md ステップ4）。テストは画面から登録できる
+8. **「AI採点待ち」で取り込み直した答案に、前回の採点結果の設問が残る** — 教員は `submission_items` を削除できない（RLS で admin のみ）ため。AI接続時に上書きで解消する想定
+9. **多言語は主要12言語のみ実翻訳** — ナビゲーション等のみ。画面本文は日本語のまま（残りは英語フォールバック）
+10. **ダッシュボードの為替レート・ユーザーの声の評価数はデモ値** — プロトタイプから引き継いだ表示。問い合わせはメールソフトを開く方式
+11. **要件の「GPT5.6以上」との差** — Anthropic 以外のモデルは呼べないため Claude の Vision を使う（依頼元に確認が必要なら確認する）

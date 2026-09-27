@@ -13,7 +13,11 @@
 
 ## 現在の状態
 
-プロトタイプは完成済み、永続化層は未接続。
-`docs/prototype-v3.jsx` は全15画面が動作するが、データが `useState` 上にありリロードで消える。
+Next.js 14 への移植と Supabase への保存は完了。採点AI（Claude API）は未接続。
 
-詳細は `CLAUDE.md` を参照。
+```bash
+npm install
+npm run dev        # .env.local が無ければデモモード（保存されない）で起動
+```
+
+Supabase の設定は `docs/SUPABASE-SETUP.md`、全体の状況と次の作業は `CLAUDE.md` を参照。

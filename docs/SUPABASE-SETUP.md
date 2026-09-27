@@ -21,16 +21,16 @@
 
 ## ステップ2　スキーマを流し込む
 
-> このSQLはローカルの PostgreSQL 16 で実行・テスト済みです（`bash supabase/tests/run.sh`）。
-> ただし Supabase 固有の権限（`auth.users` へのトリガー、`storage.objects` へのポリシー）はローカルでは模擬環境なので、エラーが出たらエラー文をそのまま貼ってください。
+> このSQLは、Supabase CLI のローカル環境（本番と同じ Docker イメージ）で適用・テスト済みです（`npm run test:e2e`）。
+> 本番プロジェクトの設定差でエラーが出ることはあり得るので、そのときはエラー文をそのまま貼ってください。
 
 1. 左メニューの **SQL Editor** を開きます。
 2. 「New query」を押します。
 3. `supabase/migrations/0001_init.sql` の中身を**全部**貼り付けます。
 4. 右下の **Run** を押します。
-5. 同じ手順で `supabase/migrations/0002_storage.sql` も実行します。
+5. 同じ手順で `supabase/migrations/0002_storage.sql`、`supabase/migrations/0003_app_support.sql` の順に実行します。
 
-> `0002` は `0001` の関数（`current_school_id`）を使うので、**順番を守ってください**。
+> `0002` と `0003` は `0001` の関数やテーブルを使うので、**0001 → 0002 → 0003 の順番を守ってください**。
 
 **ここまでで確認できること**：左メニュー **Table Editor** に `schools` `students` `submissions` など 12 個のテーブルが並ぶ。
 
@@ -145,24 +145,18 @@ SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOi...
 
 ---
 
-## ステップ6　パッケージを入れる
+## ステップ6　アプリを起動する
 
 プロジェクトのターミナルで実行します。
 
 ```bash
-npm install @supabase/supabase-js @supabase/ssr
+npm install
+npm run dev
 ```
 
-そのあと、この配布物のファイルを次の場所に置きます。
+**ここまでで確認できること**：ブラウザで http://localhost:3000 を開くと `/login` に移動し、ステップ3で作ったメールアドレスとパスワードでログインできる。サイドバーの下に学校名が出る。
 
-```
-middleware.ts              ← プロジェクト直下（app/ と同じ階層）
-lib/supabase/client.ts
-lib/supabase/server.ts
-lib/db/grading.ts
-```
-
-**ここまでで確認できること**：`npm run dev` が起動し、`/login` にリダイレクトされる。
+> `.env.local` が無い（または値が空の）ときは、ログイン画面の代わりに **デモモード** で起動します。画面上部に「デモモード（保存されません）」と出ていたら、`.env.local` の設定を見直して `npm run dev` を起動し直してください。
 
 ---
 
@@ -181,23 +175,20 @@ select cron.schedule(
 
 これで、学校ごとの保存期間設定（30日／180日／学年度末＋1年）に従って、答案が自動で論理削除され画像パスが消えます。
 
+> **注意**：この関数は DB 上の記録を消すだけで、Storage の画像ファイルそのものは残ります（Supabase Storage は SQL からのファイル削除を禁止しているため）。画像ファイルの削除は、今後サーバー側の処理として追加する予定です。
+
 ---
 
 ## ステップ8　動作を確かめる
 
-`app/page.tsx` などから呼び出して確認します。
+1. 「テスト管理」→「テストを追加」で、テストと設問（形式・単元・配点・正答）を登録します。
+2. 「新規採点」で、登録したテストとクラスを選び、答案画像を取り込んで「答案を保存する」を押します。
+3. 「採点中」に **AI採点待ち** として並べば成功です。答案を開くと原本画像が表示されます。
+4. ページを再読み込みしても、テストと答案が残っていることを確かめます。
 
-```ts
-import { loadWorkspace, loadSubmissions } from "@/lib/db/grading";
+> 採点AIはまだ接続していないため、点数は付きません。画面の動きを試したいときだけ、「新規採点」の「動作確認用の仮採点を使う」にチェックします（**点数は答案の内容と無関係です。生徒に返却しないでください**）。
 
-const ws = await loadWorkspace();
-console.log(ws.classes.length, ws.students.length, ws.tests.length);
-
-const subs = await loadSubmissions();
-console.log(subs.length);
-```
-
-**ここまでで確認できること**：クラス1件・生徒9件が返る。別の学校のアカウントで同じコードを実行しても、そちらのデータは1件も返らない（RLS が効いている証拠）。
+**ここまでで確認できること**：別の学校のアカウントでログインすると、上で登録したテストや答案が1件も見えない（RLS が効いている証拠）。
 
 ---
 
@@ -223,6 +214,6 @@ console.log(subs.length);
 
 この手順で「保存されない」問題は解消します。そのうえで残っている作業は次の3つです。
 
-1. **アプリ本体の差し替え** — 単一ファイル JSX の `useState(INITIAL_SUBMISSIONS)` を `loadSubmissions()` に、`updateSub()` を `updateItem()` に置き換える。
-2. **採点AIの実接続** — `// PROD-API:` の12箇所を Route Handler 経由で Claude API に繋ぐ。API キーはサーバー側に置く。
-3. **生徒モバイル提出** — `submission_links` を発行し、Edge Function（service_role）でトークンを検証してアップロードを代行する。生徒はログインしない設計。
+1. **採点AIの実接続** — 「AI採点待ち」の答案を、Route Handler 経由で Claude API（Vision）に送って採点する。API キーはサーバー側に置く。
+2. **生徒モバイル提出** — `submission_links` を発行し、Edge Function（service_role）でトークンを検証してアップロードを代行する。生徒はログインしない設計。
+3. **保存期間を過ぎた画像ファイルの削除** — service_role のサーバー処理で、Storage API を使って削除する。

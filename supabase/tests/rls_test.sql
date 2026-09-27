@@ -139,6 +139,87 @@ begin
   assert (select count(*) from public.v_question_stats) = 2, '設問別正答率 = 2行';
 end $$;
 
+-- ---------------------------------------------------------------- 0003: 状態の自動判定
+-- アプリの保存手順（saveGrading）どおりに流す：processing・progress=100 で保存 → 設問を追加
+insert into public.students (id, school_id, class_id, number, exam_no, anon_id) values
+  ('aaaaaaaa-0000-0000-0000-0000000000d2', 'aaaaaaaa-0000-0000-0000-000000000000',
+   'aaaaaaaa-0000-0000-0000-0000000000c1', 2, '2A02', '生徒002'),
+  ('aaaaaaaa-0000-0000-0000-0000000000d3', 'aaaaaaaa-0000-0000-0000-000000000000',
+   'aaaaaaaa-0000-0000-0000-0000000000c1', 3, '2A03', '生徒003'),
+  ('aaaaaaaa-0000-0000-0000-0000000000d4', 'aaaaaaaa-0000-0000-0000-000000000000',
+   'aaaaaaaa-0000-0000-0000-0000000000c1', 4, '2A04', '生徒004');
+
+-- (1) 要確認なし → done
+insert into public.submissions (id, school_id, test_id, student_id, class_id, status, progress) values
+  ('aaaaaaaa-0000-0000-0000-0000000000a2', 'aaaaaaaa-0000-0000-0000-000000000000',
+   'aaaaaaaa-0000-0000-0000-0000000000e1', 'aaaaaaaa-0000-0000-0000-0000000000d2',
+   'aaaaaaaa-0000-0000-0000-0000000000c1', 'processing', 100);
+insert into public.submission_items (school_id, submission_id, question_id, qno, mark, earned, reason) values
+  ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-0000000000a2',
+   'aaaaaaaa-0000-0000-0000-0000000000f1', 1, '×', 0, '符号ミス'),
+  ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-0000000000a2',
+   'aaaaaaaa-0000-0000-0000-0000000000f2', 2, '○', 5, '');
+do $$
+begin
+  assert (select status from public.submissions where id = 'aaaaaaaa-0000-0000-0000-0000000000a2') = 'done',
+    '採点完了（progress=100）なら採点中のまま残らず done になること';
+end $$;
+
+-- (2) 画質注意 → 確認するまで quality のまま。確認済みにすると done
+insert into public.submissions (id, school_id, test_id, student_id, class_id, status, progress) values
+  ('aaaaaaaa-0000-0000-0000-0000000000a3', 'aaaaaaaa-0000-0000-0000-000000000000',
+   'aaaaaaaa-0000-0000-0000-0000000000e1', 'aaaaaaaa-0000-0000-0000-0000000000d3',
+   'aaaaaaaa-0000-0000-0000-0000000000c1', 'quality', 100);
+insert into public.submission_items (school_id, submission_id, question_id, qno, mark, earned, need_review) values
+  ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-0000000000a3',
+   'aaaaaaaa-0000-0000-0000-0000000000f1', 1, '○', 5, true),
+  ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-0000000000a3',
+   'aaaaaaaa-0000-0000-0000-0000000000f2', 2, '○', 5, false);
+do $$
+begin
+  assert (select status from public.submissions where id = 'aaaaaaaa-0000-0000-0000-0000000000a3') = 'quality',
+    '画質注意は確認前は quality のままであること';
+end $$;
+select public.mark_submission_reviewed('aaaaaaaa-0000-0000-0000-0000000000a3');
+do $$
+declare
+  s record;
+begin
+  select status, reviewed_by, total_score into s from public.submissions
+   where id = 'aaaaaaaa-0000-0000-0000-0000000000a3';
+  assert s.status = 'done', format('確認済みにすると done になること（実際: %s）', s.status);
+  assert s.reviewed_by = auth.uid(), '確認した教員が記録されること';
+  assert s.total_score = 10, '合計点は変わらないこと';
+  assert not exists (select 1 from public.submission_items
+                      where submission_id = 'aaaaaaaa-0000-0000-0000-0000000000a3' and need_review),
+    '確認済みにすると要確認の印が外れること';
+end $$;
+
+-- (3) 白紙答案は分析ビューに入らない
+insert into public.submissions (id, school_id, test_id, student_id, class_id, status, progress, is_blank) values
+  ('aaaaaaaa-0000-0000-0000-0000000000a4', 'aaaaaaaa-0000-0000-0000-000000000000',
+   'aaaaaaaa-0000-0000-0000-0000000000e1', 'aaaaaaaa-0000-0000-0000-0000000000d4',
+   'aaaaaaaa-0000-0000-0000-0000000000c1', 'blank', 100, true);
+insert into public.submission_items (school_id, submission_id, question_id, qno, mark, earned, is_blank) values
+  ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-0000000000a4',
+   'aaaaaaaa-0000-0000-0000-0000000000f1', 1, '-', 0, true);
+do $$
+begin
+  assert (select status from public.submissions where id = 'aaaaaaaa-0000-0000-0000-0000000000a4') = 'blank',
+    '白紙は blank のままであること';
+  -- a1: 5+4 / a2: 0+5 / a3: 5+5 → 24 / 30 = 80.0%（白紙の 0 点は含めない）
+  assert (select rate from public.v_unit_mastery where unit = '一次関数') = 80.0,
+    format('単元別定着度に白紙答案を含めないこと（実際: %s）',
+           (select rate from public.v_unit_mastery where unit = '一次関数'));
+  assert (select n from public.v_question_stats where qno = 1) = 3, '設問別正答率に白紙答案を含めないこと';
+  assert (select correct_rate from public.v_question_stats_by_class
+           where qno = 1 and class_id = 'aaaaaaaa-0000-0000-0000-0000000000c1') = 66.7,
+    'クラス別の設問正答率 = 2/3';
+  assert (select rate from public.v_qtype_mastery where qtype = 'long') = 93.3,
+    format('設問形式別の得点率（実際: %s）', (select rate from public.v_qtype_mastery where qtype = 'long'));
+  assert (select n from public.v_mistake_reasons where reason = '符号ミス') = 1, 'ミス傾向が集計されること';
+end $$;
+
 -- 【監査ログ】教員が追記でき、ハッシュ連鎖が張られること
 insert into public.audit_logs (school_id, actor_id, action, target_table, target_id, detail) values
   ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-00000000000b',
@@ -206,7 +287,7 @@ end $$;
 delete from public.students;
 do $$
 begin
-  assert (select count(*) from public.students) = 1, '教員は生徒を削除できないこと';
+  assert (select count(*) from public.students) = 4, '教員は生徒を削除できないこと';
 end $$;
 
 -- 【Storage】自校フォルダにだけ置ける

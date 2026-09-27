@@ -1,5 +1,9 @@
 # Claude Code への移行手順
 
+> **2026-09-27 追記**：この手順は claude.ai から Claude Code へ移すときのものです。
+> いまは GitHub リポジトリ（y6hc8rvbv2-debug/grading-ai）で Next.js プロジェクトとして動いているので、
+> ステップ1・5は不要です。現在の状況は `CLAUDE.md`、Supabase の設定は `docs/SUPABASE-SETUP.md` を見てください。
+
 この一式をパソコンに置いて、Claude Code で作業を続けるための手順です。
 上から順に進めてください。所要20〜30分です。
 

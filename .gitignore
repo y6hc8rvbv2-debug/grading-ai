@@ -1,5 +1,6 @@
 node_modules/
 .next/
+.next-e2e/
 out/
 build/
 .env*.local
@@ -8,3 +9,10 @@ build/
 *.log
 .vercel
 next-env.d.ts
+
+# Supabase CLI（ローカル）
+supabase/.temp
+supabase/.branches
+# E2E テストの一時ファイル
+tests/e2e/.out
+tsconfig.tsbuildinfo
