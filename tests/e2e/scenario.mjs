@@ -5,6 +5,7 @@ import { mkdir } from "fs/promises";
 import { promises as fs } from "fs";
 
 const BASE = process.env.BASE_URL || "http://localhost:3200";
+const MOCK = process.env.MOCK_URL || "http://127.0.0.1:4010";
 const OUT = new URL("./.out/", import.meta.url).pathname;
 const browser = await chromium.launch(
   process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}
@@ -37,7 +38,11 @@ async function login(email, pass) {
   await page.getByLabel("パスワード").fill(pass);
   await page.getByRole("button", { name: "ログイン" }).click();
   await page.waitForURL(BASE + "/");
-  await page.locator("header h1").waitFor();
+  await page.locator("header h1").waitFor().catch(async (e) => {
+    // 失敗したときは画面の文字を出して原因を分かるようにする
+    console.log("✗ ログイン後の画面:", (await page.locator("body").innerText()).slice(0, 500));
+    throw e;
+  });
   await settle();
 }
 
@@ -73,27 +78,31 @@ await toastSeen(/「E2E 小テスト」を登録しました/);
 ok((await text()).includes("E2E 小テスト"), "登録したテストが一覧に出る");
 
 // 3. 画像だけ保存（AI採点待ち）
-await page.goto(BASE + "/new"); await settle();
-ok((await text()).includes("採点AIは接続の準備中です"), "本番では仮採点をしない旨を表示");
+await page.goto(BASE + "/new"); await settle(1200);
+ok((await text()).includes("AI（Claude）が答案を読み取って採点します"), "採点AIが使えることを表示");
+ok(!(await text()).includes("動作確認用の仮採点"), "採点AIがあるときは乱数の仮採点を選べない");
 await page.locator('input[type=file]:not([capture])').setInputFiles([img(1), img(2)]);
-await settle(400);
+await settle(600);
 ok((await text()).includes("2 / 40 枚"), "2枚取り込み");
+await page.getByLabel(/画像の保存だけ行い/).check();
 await page.getByRole("button", { name: "答案を保存する" }).click();
 await toastSeen(/2 枚の答案を保存しました/);
-ok((await text()).includes("AI採点待ち"), "保存結果に AI採点待ち が出る");
+ok((await text()).includes("AI採点待ち"), "保存だけを選ぶと AI採点待ち になる");
 
-// 4. 仮採点で3〜9番を採点（動作確認用）
+// 4. 保存してAI採点（3〜9番）
 await page.getByRole("button", { name: "続けて取り込む" }).click(); await settle();
 await page.locator('input[type=file]:not([capture])').setInputFiles([3, 4, 5, 6, 7, 8, 9].map(img));
-await settle(400);
+await settle(600);
 // 1,2番は保存済みなので、3〜9番へ割り当て直す
 const selects = page.locator("section select, div select").filter({ has: page.locator('option:text("生徒を選ぶ")') });
 const n = await selects.count();
 for (let i = 0; i < n; i++) await selects.nth(i).selectOption({ label: `2年A組 ${i + 3}番` });
-await page.getByLabel(/動作確認用の仮採点を使う/).check();
-await page.getByRole("button", { name: "AI採点をはじめる" }).click();
-await toastSeen(/7 枚の採点が完了しました/);
-ok(!(await text()).includes("[エラー]"), "保存エラーなし");
+// 「保存だけ」の選択は続けて取り込むときも残る。今回は外して AI 採点する
+await page.getByLabel(/画像の保存だけ行い/).uncheck();
+await page.getByRole("button", { name: "保存してAI採点する" }).click();
+await toastSeen(/7 枚のAI採点が終わりました/);
+ok(!(await text()).includes("[エラー]"), "保存・AI採点のエラーなし");
+ok((await text()).match(/2年A組 3番：\d+点/) !== null, "処理ログに生徒ごとの得点が出る");
 
 // 5. 再読み込みしても残っている（永続化）
 await page.goto(BASE + "/history"); await settle(1200);
@@ -112,6 +121,36 @@ const loaded = await page.locator('img[alt*="答案（原本）"]').evaluate((im
 ok(loaded, "原本画像が実際に読み込める");
 const direct = await page.request.get(src.replace("/object/sign/", "/object/public/").split("?")[0]);
 ok(direct.status() >= 400, `署名なしの直リンクは開けない（HTTP ${direct.status()}）`);
+
+// 6b. 保存済みの答案を AI で採点する（失敗 → 元に戻る → もう一度で成功）
+await fetch(MOCK + "/__mode", { method: "POST", body: JSON.stringify({ mode: "ratelimit" }) });
+await page.getByRole("button", { name: "AIで採点する" }).click();
+await toastSeen(/採点AIが混み合っています/);
+await settle(800);
+ok((await text()).includes("この答案はまだ採点されていません"), "AI採点に失敗したら、答案は採点待ちのまま（元の状態に戻る）");
+await page.getByRole("button", { name: "AIで採点する" }).click();
+await toastSeen(/AI採点が終わりました（\d+点）/);
+await page.locator('svg[aria-label="原本に赤ペンを重ねた採点画像"]').waitFor({ timeout: 15000 });
+ok(true, "採点後は原本の上に赤ペンが重なる");
+ok(await page.locator('svg[aria-label="原本に赤ペンを重ねた採点画像"] image').count() === 1, "赤ペン画像の下地は原本画像");
+await page.getByRole("button", { name: "清書版" }).click();
+await page.locator('svg[aria-label="赤ペン採点画像"]').waitFor();
+ok(true, "清書版に切り替えられる");
+
+// 6c. 残りの1枚を「まとめてAI採点」
+await page.goto(BASE + "/processing"); await settle();
+await page.getByRole("button", { name: /まとめてAI採点（1枚）/ }).click();
+await toastSeen(/1 枚のAI採点が終わりました/);
+await settle(600);
+ok((await text()).includes("処理中の答案はありません"), "まとめてAI採点で、採点待ちがなくなる");
+
+// 6d. 採点AIに送った内容（代役のサーバーで検査）
+const sent = await (await fetch(MOCK + "/__requests")).json();
+ok(sent.length === 10, `採点AIへのリクエストは10回（7 + 失敗1 + 再試行1 + まとめて1） 実際:${sent.length}`);
+ok(sent.every((r) => r.problems.length === 0), `リクエストの形が正しい ${JSON.stringify(sent.flatMap((r) => r.problems))}`);
+ok(sent.every((r) => r.questions.length === 3 && r.questions.every((q) => typeof q.points === "number")), "3問の設問と配点を送っている");
+ok(sent.every((r) => r.rubric.includes("要点を 70% 以上")), "採点基準を送っている");
+ok(sent.every((r) => r.imageType === "image/png"), "答案画像を PNG として送っている");
 
 // 7. 採点結果を修正 → 合計点は DB のトリガーの値
 await page.goto(BASE + "/history"); await settle(1000);
@@ -145,7 +184,7 @@ if (reviewCount > 0) {
   await toastSeen(/確認しました/);
   await settle(800);
   ok((await page.getByRole("button", { name: "○ で確定" }).count()) === reviewCount - 1, `要確認を1件確定（${reviewCount} → ${reviewCount - 1}）`);
-} else console.log("- 要確認は0件（仮採点の結果による）");
+} else console.log("- 要確認は0件（採点結果による）");
 
 // 9. 弱点分析（Postgres のビュー）
 await page.goto(BASE + "/weakness"); await settle(1500);
@@ -169,7 +208,7 @@ await page.getByRole("button", { name: "改ざんがないか確認する" }).cl
 await toastSeen(/連鎖を確認しました。改ざんはありません/);
 const [dl] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "監査ログを書き出す" }).click()]);
 const csv = await fs.readFile(await dl.path(), "utf8");
-ok(csv.includes("grading.edit") && csv.includes("submission.review") && csv.includes("test.create"), "監査ログCSVに採点修正・確認・テスト登録が記録");
+ok(csv.includes("grading.edit") && csv.includes("submission.review") && csv.includes("test.create") && csv.includes("grading.ai"), "監査ログCSVにAI採点・採点修正・確認・テスト登録が記録");
 
 // 12. レポート3種
 await page.goto(BASE + "/reports"); await settle();
@@ -187,7 +226,7 @@ await page.locator("select").filter({ has: page.locator('option:text("30日で�
 await toastSeen(/管理者だけです/);
 ok(true, "教員は保存期間を変更できず、日本語で案内");
 await page.goto(BASE + "/history"); await settle(1000);
-ok((await page.locator("tbody tr").count()) === 7, "同じ学校の教員は7件見える");
+ok((await page.locator("tbody tr").count()) === 9, "同じ学校の教員は9件見える");
 
 // 14. 他校の教員には1件も見えない
 await page.getByRole("button", { name: "ログアウト" }).click();
@@ -201,8 +240,11 @@ ok((await text()).includes("答案が見つかりません"), "他校の答案UR
 await page.goto(BASE + "/tests"); await settle();
 ok(!(await text()).includes("E2E 小テスト"), "他校のテストは見えない");
 
-// 誤ったパスワードでのログイン（手順0）が返す 400 は想定どおりなので除く
-const unexpected = errors.filter((e) => !/\/login Failed to load resource: .* 400/.test(e));
+// 想定どおりのエラーは除く：誤ったパスワードのログイン（手順0）の 400、
+// 採点AIが混み合っている場合の確認（手順6b）の 429
+const unexpected = errors.filter((e) =>
+  !/\/login Failed to load resource: .* 400/.test(e)
+  && !/\/history\/[0-9a-f-]+ Failed to load resource: .* 429/.test(e));
 await browser.close();
 if (unexpected.length) {
   console.log("\n✗ コンソールにエラー・警告があります:");

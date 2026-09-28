@@ -13,11 +13,12 @@
 
 ## 現在の状態
 
-Next.js 14 への移植と Supabase への保存は完了。採点AI（Claude API）は未接続。
+Next.js 14 への移植、Supabase への保存、採点AI（Claude の Vision）による採点まで実装済み。
 
 ```bash
 npm install
 npm run dev        # .env.local が無ければデモモード（保存されない）で起動
+                   # ANTHROPIC_API_KEY があれば AI 採点が使える（無ければ画像の保存まで）
 ```
 
 Supabase の設定は `docs/SUPABASE-SETUP.md`、全体の状況と次の作業は `CLAUDE.md` を参照。

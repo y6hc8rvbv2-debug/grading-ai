@@ -220,6 +220,81 @@ begin
   assert (select n from public.v_mistake_reasons where reason = '符号ミス') = 1, 'ミス傾向が集計されること';
 end $$;
 
+-- ---------------------------------------------------------------- 0004: AI採点の保存
+insert into public.students (id, school_id, class_id, number, exam_no, anon_id) values
+  ('aaaaaaaa-0000-0000-0000-0000000000d5', 'aaaaaaaa-0000-0000-0000-000000000000',
+   'aaaaaaaa-0000-0000-0000-0000000000c1', 5, '2A05', '生徒005');
+-- 画像だけ保存された答案（AI採点待ち）
+insert into public.submissions (id, school_id, test_id, student_id, class_id, status, progress) values
+  ('aaaaaaaa-0000-0000-0000-0000000000a5', 'aaaaaaaa-0000-0000-0000-000000000000',
+   'aaaaaaaa-0000-0000-0000-0000000000e1', 'aaaaaaaa-0000-0000-0000-0000000000d5',
+   'aaaaaaaa-0000-0000-0000-0000000000c1', 'uploaded', 0);
+
+select public.save_ai_grading(
+  'aaaaaaaa-0000-0000-0000-0000000000a5',
+  '{"ok": true, "scores": {"blur": 90}, "issues": [], "fixes": [], "avg": 90}',
+  '[{"qno":1,"detected":"5","confidence":0.97,"mark":"○","earned":99,"is_blank":false,"need_review":false,"reason":"","comment":"よくできました","bbox":{"page":1,"x":0.1,"y":0.2,"w":0.3,"h":0.1}},
+    {"qno":2,"detected":"","confidence":0.5,"mark":"×","earned":0,"is_blank":false,"need_review":false,"reason":"符号ミス","comment":""},
+    {"qno":99,"detected":"x","confidence":1,"mark":"○","earned":3,"is_blank":false,"need_review":false,"reason":"","comment":""}]'
+);
+do $$
+declare
+  s record;
+begin
+  select status, progress, total_score, is_blank into s from public.submissions
+   where id = 'aaaaaaaa-0000-0000-0000-0000000000a5';
+  assert s.total_score = 5, format('得点は配点（5点）で頭打ちになること（実際: %s）', s.total_score);
+  assert s.status = 'done' and s.progress = 100, format('AI採点後は done・progress 100（実際: %s/%s）', s.status, s.progress);
+  assert (select count(*) from public.submission_items where submission_id = 'aaaaaaaa-0000-0000-0000-0000000000a5') = 2,
+    'テストに無い設問番号（99）は保存しないこと';
+  assert (select question_id from public.submission_items
+           where submission_id = 'aaaaaaaa-0000-0000-0000-0000000000a5' and qno = 1) = 'aaaaaaaa-0000-0000-0000-0000000000f1',
+    '設問ID は DB 側で設問番号から決まること';
+  assert (select bbox->>'page' from public.submission_items
+           where submission_id = 'aaaaaaaa-0000-0000-0000-0000000000a5' and qno = 1) = '1',
+    '赤ペンの座標（bbox）が保存されること';
+end $$;
+
+-- 画質不良なら quality のまま（確認するまで）
+select public.save_ai_grading(
+  'aaaaaaaa-0000-0000-0000-0000000000a5',
+  '{"ok": false, "scores": {"blur": 30}, "issues": [{"k":"ぼやけ","msg":"撮り直してください"}], "fixes": [], "avg": 30}',
+  '[{"qno":1,"detected":"5","confidence":0.9,"mark":"○","earned":5,"is_blank":false,"need_review":false,"reason":"","comment":""}]'
+);
+do $$
+begin
+  assert (select status from public.submissions where id = 'aaaaaaaa-0000-0000-0000-0000000000a5') = 'quality',
+    '画質不良なら status = quality';
+end $$;
+
+-- 全設問が無記入なら白紙
+select public.save_ai_grading(
+  'aaaaaaaa-0000-0000-0000-0000000000a5',
+  '{"ok": true}',
+  '[{"qno":1,"detected":"","confidence":0.99,"mark":"-","earned":0,"is_blank":true,"need_review":false,"reason":"無記入","comment":""},
+    {"qno":2,"detected":"","confidence":0.99,"mark":"-","earned":0,"is_blank":true,"need_review":false,"reason":"無記入","comment":""}]'
+);
+do $$
+declare
+  s record;
+begin
+  select status, is_blank, total_score into s from public.submissions where id = 'aaaaaaaa-0000-0000-0000-0000000000a5';
+  assert s.status = 'blank' and s.is_blank and s.total_score = 0, format('全問無記入なら白紙（実際: %s）', s.status);
+end $$;
+
+-- 一致する設問が1つも無い結果は保存しない（答案は元のまま）
+do $$
+begin
+  begin
+    perform public.save_ai_grading('aaaaaaaa-0000-0000-0000-0000000000a5', '{"ok": true}',
+      '[{"qno":77,"detected":"","confidence":1,"mark":"○","earned":1,"is_blank":false,"need_review":false,"reason":"","comment":""}]');
+    raise exception 'FAIL: 設問番号が合わない結果を保存できてしまう';
+  exception when invalid_parameter_value then null;
+  end;
+  assert (select status from public.submissions where id = 'aaaaaaaa-0000-0000-0000-0000000000a5') = 'blank',
+    '失敗したときは答案が元のまま（ロールバック）であること';
+end $$;
+
 -- 【監査ログ】教員が追記でき、ハッシュ連鎖が張られること
 insert into public.audit_logs (school_id, actor_id, action, target_table, target_id, detail) values
   ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-00000000000b',
@@ -287,7 +362,7 @@ end $$;
 delete from public.students;
 do $$
 begin
-  assert (select count(*) from public.students) = 4, '教員は生徒を削除できないこと';
+  assert (select count(*) from public.students) = 5, '教員は生徒を削除できないこと';
 end $$;
 
 -- 【Storage】自校フォルダにだけ置ける
@@ -324,6 +399,17 @@ begin
   assert not exists (select 1 from public.audit_logs where school_id <> 'bbbbbbbb-0000-0000-0000-000000000000'), '他校の監査ログが見えないこと';
   assert (select count(*) from storage.objects)         = 0, '他校の答案画像が見えないこと';
   assert (select count(*) from public.submission_links) = 0, '他校の提出リンクが見えないこと';
+end $$;
+
+-- 他校の答案に AI採点の結果を書き込めない
+do $$
+begin
+  begin
+    perform public.save_ai_grading('aaaaaaaa-0000-0000-0000-0000000000a5', '{"ok": true}',
+      '[{"qno":1,"detected":"x","confidence":1,"mark":"○","earned":5,"is_blank":false,"need_review":false,"reason":"","comment":""}]');
+    raise exception 'FAIL: 他校の答案に AI採点の結果を書き込めてしまう';
+  exception when no_data_found then null;
+  end;
 end $$;
 
 -- ---------------------------------------------------------------- 未ログイン（anon）

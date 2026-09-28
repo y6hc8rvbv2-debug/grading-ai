@@ -5,7 +5,7 @@ import { createContext, useContext } from "react";
 import type { Theme } from "@/lib/ui/theme";
 import type { DataSource, SessionInfo } from "@/lib/data/source";
 import type {
-  ClassRoom, Item, ItemPatch, Rubric, Student, Submission, Test, Workspace,
+  AiGradeSummary, AiStatus, ClassRoom, Item, ItemPatch, Rubric, Student, Submission, Test, Workspace,
 } from "@/lib/types";
 
 export type View =
@@ -40,6 +40,13 @@ export type UIContext = {
 
   rubric: Rubric;
   setRubric: (r: Rubric) => void;
+
+  /** 採点AIの利用可否（サーバーに ANTHROPIC_API_KEY があるか） */
+  ai: AiStatus;
+  /** 保存済みの答案を AI で採点する。成功したら答案を読み直す。
+   *  silent でなければ結果をトーストで知らせる。失敗しても例外にせず、理由を返す。 */
+  aiGradeSub: (submissionId: string, opts?: { silent?: boolean }) =>
+    Promise<{ ok: true; summary: AiGradeSummary } | { ok: false; error: string }>;
 
   anonMode: boolean;
   setAnonMode: (v: boolean) => void;

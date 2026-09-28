@@ -13,7 +13,7 @@ import { createDemoSource } from "@/lib/data/demo";
 import { createSupabaseSource } from "@/lib/data/supabase";
 import { Ctx, useUI, type DisplayMode, type UIContext, type View } from "@/components/ui-context";
 import { Btn, Toast, inputStyle } from "@/components/ui";
-import type { Item, ItemPatch, Rubric, Submission, Workspace } from "@/lib/types";
+import type { AiStatus, Item, ItemPatch, Rubric, Submission, Workspace } from "@/lib/types";
 
 /* ------------------------------------------------------------ 画面の対応表 */
 const NAV: { k: View; i: string; tk: string }[] = [
@@ -108,6 +108,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [ws, setWs] = useState<Workspace>({ classes: [], students: [], tests: [] });
   const [subs, setSubs] = useState<Submission[]>([]);
   const [rubric, setRubric] = useState<Rubric>(DEFAULT_RUBRIC);
+  const [ai, setAi] = useState<AiStatus>({ enabled: false, model: null });
   const [toasts, setToasts] = useState<{ id: string; msg: string; tone: string }[]>([]);
   const [drawer, setDrawer] = useState(false);
   const [mobile, setMobile] = useState(false);
@@ -149,6 +150,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
       if (!session.profile) { setState({ kind: "no-school", session }); return; }
       if (session.profile.uiLang && session.profile.uiLang !== "ja") setLangState(session.profile.uiLang);
       await loadAll();
+      // 採点AIが使えないときは、答案の保存までで止める（画面の案内が変わるだけで、起動は止めない）
+      ds.aiStatus().then(setAi).catch(() => setAi({ enabled: false, model: null }));
       setState({ kind: "ready", session });
     } catch (e) {
       setState({ kind: "error", message: friendlyError(e, "データの読み込み") });
@@ -234,6 +237,27 @@ export default function AppShell({ children }: { children: ReactNode }) {
     }
   }, [ds, refreshSub, toast]);
 
+  const aiGradeSub = useCallback(async (submissionId: string, opts: { silent?: boolean } = {}) => {
+    // 採点中の表示にする（サーバーも status = processing にしている）
+    setSubs((prev) => prev.map((s) => (s.id === submissionId ? { ...s, status: "processing", progress: 30 } : s)));
+    try {
+      const r = await ds.aiGrade(submissionId);
+      await refreshSub(submissionId);
+      if (!opts.silent) {
+        toast(r.blank ? "全問白紙の答案でした。模範解答タブを確認してください"
+          : r.needReview ? `AI採点が終わりました（${r.total}点）。要確認が ${r.needReview} 問あります`
+          : `AI採点が終わりました（${r.total}点）`);
+      }
+      return { ok: true as const, summary: r };
+    } catch (e) {
+      // サーバーが元の状態に戻しているので、読み直して画面を合わせる
+      await refreshSub(submissionId).catch(() => {});
+      const error = friendlyError(e, "AI採点");
+      if (!opts.silent) toast(error, "ng");
+      return { ok: false as const, error };
+    }
+  }, [ds, refreshSub, toast]);
+
   const toggleFav = useCallback((k: string) => {
     setFavs(favs.includes(k) ? favs.filter((x) => x !== k) : [...favs, k]);
   }, [favs, setFavs]);
@@ -285,7 +309,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     T, t, lang, setLang, mode, setMode, mobile, view, go, toast,
     ds, session, isAdmin: session.profile?.role === "admin",
     ws, subs, studentById, classById, testById, who,
-    rubric, setRubric,
+    rubric, setRubric, ai, aiGradeSub,
     anonMode, setAnonMode, display, setDisplay, answerLang, setAnswerLang, studentLang, setStudentLang,
     favs, toggleFav, refresh, refreshSub, editItem, reviewSub,
   };

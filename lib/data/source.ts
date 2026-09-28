@@ -3,7 +3,7 @@
 //   - supabase: 本番。RLS 付きで Supabase に保存する（lib/data/supabase.ts）
 //   - demo    : Supabase 未設定時。メモリ上のデモデータで動き、再読み込みで元に戻る（lib/data/demo.ts）
 import type {
-  AuditRow, GradingInput, ItemPatch, NewTestInput, Profile, QuestionStat, RateRow,
+  AiGradeSummary, AiStatus, AuditRow, GradingInput, ItemPatch, NewTestInput, Profile, QuestionStat, RateRow,
   Retention, ReviewEntry, Rubric, School, Submission, Workspace,
 } from "@/lib/types";
 
@@ -40,6 +40,11 @@ export interface DataSource {
   questionStats(testId: string, classId?: string): Promise<QuestionStat[]>;
   mistakeReasons(testId: string, classId?: string): Promise<{ reason: string; count: number }[]>;
   needsReview(): Promise<ReviewEntry[]>;
+
+  /** 採点AIが使えるか */
+  aiStatus(): Promise<AiStatus>;
+  /** 保存済みの答案を採点AIで採点して保存する（サーバーの /api/grade が行う） */
+  aiGrade(submissionId: string): Promise<AiGradeSummary>;
 
   signedImageUrl(path: string): Promise<string>;
   loadAudit(): Promise<AuditRow[]>;

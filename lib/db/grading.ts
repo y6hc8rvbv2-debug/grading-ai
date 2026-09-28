@@ -8,7 +8,8 @@
 // 合計点と status は DB のトリガーが計算する。ここで合計を計算し直さないこと。
 // ============================================================================
 import { createClient } from "@/lib/supabase/client";
-import { DEFAULT_RUBRIC, typeLabelOf } from "@/lib/grading/engine";
+import { typeLabelOf } from "@/lib/grading/engine";
+import { rubricFromRow } from "@/lib/db/rubric";
 import type {
   AuditRow, ClassRoom, GradingInput, Item, ItemPatch, Mark, NewTestInput, Profile,
   QType, Quality, QuestionStat, RateRow, Retention, ReviewEntry, Rubric, School,
@@ -128,7 +129,7 @@ const SUBMISSION_SELECT = `
   reviewed_at, reviewer:profiles!submissions_reviewed_by_fkey ( display_name ),
   submission_items (
     id, qno, detected, confidence, mark, earned, is_blank,
-    need_review, reason, comment,
+    need_review, reason, comment, bbox,
     questions ( label, unit, qtype, points )
   )
 `;
@@ -151,6 +152,7 @@ function mapItem(i: any): Item {
     needReview: i.need_review,
     reason: i.reason,
     comment: i.comment,
+    bbox: i.bbox ?? null,
   };
 }
 
@@ -387,16 +389,7 @@ export async function loadRubric(): Promise<Rubric> {
   const { data, error } = await sb
     .from("rubrics").select("*").is("test_id", null).maybeSingle();
   if (error) throw error;
-  if (!data) return DEFAULT_RUBRIC;
-  return {
-    matchRate: data.match_rate, partialStep: data.partial_step,
-    reviewThreshold: data.review_threshold,
-    allowKana: data.allow_kana, allowSpell: data.allow_spell,
-    unitPartial: data.unit_partial, workPartial: data.work_partial,
-    caseSensitive: data.case_sensitive, outsideBox: data.outside_box,
-    requireTeacher: data.require_teacher, autoModel: data.auto_model,
-    strictQuality: data.strict_quality, praiseFull: data.praise_full,
-  };
+  return rubricFromRow(data);
 }
 
 export async function saveRubric(schoolId: string, r: Rubric) {

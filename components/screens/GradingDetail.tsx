@@ -8,6 +8,7 @@ import { SOURCES, analyze, buildFeedback, buildModelAnswers } from "@/lib/gradin
 import { useUI } from "@/components/ui-context";
 import { Badge, Bar, Btn, Card, Empty, Tabs, grid, inputStyle } from "@/components/ui";
 import { RedPenSheet } from "@/components/RedPenSheet";
+import { RedPenOverlay, type ItemBox } from "@/components/RedPenOverlay";
 import type { Item, Submission } from "@/lib/types";
 
 /** 得点の入力欄。入力中は保存せず、確定（フォーカスが外れる・Enter）したときに保存する。 */
@@ -30,12 +31,14 @@ function EarnedInput({ item, onCommit }: { item: Item; onCommit: (v: number) => 
 }
 
 export default function GradingDetail({ subId }: { subId: string }) {
-  const { T, go, subs, toast, who, ds, testById, studentById, classById, editItem, reviewSub, refreshSub } = useUI();
+  const { T, go, subs, toast, who, ds, testById, studentById, classById, editItem, reviewSub, refreshSub, ai, aiGradeSub } = useUI();
   const sub = subs.find((s) => s.id === subId);
   const [tab, setTab] = useState("sheet");
   const [lookup, setLookup] = useState<"idle" | "loading" | "missing">("idle");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [sheetMode, setSheetMode] = useState<"overlay" | "clean">("overlay");
   const [page, setPage] = useState(0);
   const [showMarks, setShowMarks] = useState(true);
   const [showComments, setShowComments] = useState(true);
@@ -79,6 +82,19 @@ export default function GradingDetail({ subId }: { subId: string }) {
   const pages = Math.ceil(sub.result.items.length / 7);
   const whoName = who(sub.studentId);
   const pending = sub.status === "uploaded" || sub.status === "processing";
+  // 採点AIが返した解答の位置（1ページ目の原本に赤ペンを重ねるのに使う）
+  const boxes: ItemBox[] = sub.result.items
+    .filter((i) => i.bbox)
+    .map((i) => ({ qno: i.qno, ...i.bbox! }));
+  const canOverlay = !!imageUrl && boxes.length > 0;
+  const canAi = ai.enabled && sub.imagePaths.length > 0;
+
+  const runAi = async (regrade: boolean) => {
+    if (regrade && !window.confirm("AIで採点し直すと、先生が修正した判定・得点・コメントと「確認済み」の記録は上書きされます。採点し直しますか？")) return;
+    setAiBusy(true);
+    await aiGradeSub(sub.id);
+    setAiBusy(false);
+  };
 
   const applyEdit = (it: Item, patch: Parameters<typeof editItem>[2]) => editItem(sub.id, it, patch);
 
@@ -128,12 +144,21 @@ export default function GradingDetail({ subId }: { subId: string }) {
         {pending && <Badge tone="info">AI採点待ち</Badge>}
         {sub.status === "blank" && <Badge tone="warn">全問白紙 → 模範解答を生成</Badge>}
         <span style={{ flex: 1 }} />
+        {canAi && !pending && (
+          <Btn size="sm" disabled={aiBusy} onClick={() => runAi(true)}>{aiBusy ? "AIが採点しています…" : "AIで採点し直す"}</Btn>
+        )}
         <Btn size="sm" onClick={exportRow}>CSV</Btn>
         <Btn size="sm" variant="soft" onClick={exportSVG}>赤ペン画像を保存</Btn>
       </div>
 
       {pending ? (
-        <Card title="この答案はまだ採点されていません" sub="採点AIの接続後に、自動で採点されます">
+        <Card title={aiBusy || sub.status === "processing" ? "AIが採点しています" : "この答案はまだ採点されていません"}
+          sub={ai.enabled ? "答案画像・正答・配点・採点基準をもとに AI が採点します（数十秒かかります）" : "採点AIが設定されると、ここから採点できます"}
+          right={canAi ? (
+            <Btn variant="primary" disabled={aiBusy} onClick={() => runAi(false)}>
+              {aiBusy ? "採点しています…" : sub.status === "processing" ? "AIで採点し直す" : "AIで採点する"}
+            </Btn>
+          ) : null}>
           {imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={imageUrl} alt={`${whoName} の答案（原本）`} style={{ width: "100%", maxHeight: "72vh", objectFit: "contain", borderRadius: 8, background: T.bgAlt }} />
@@ -155,10 +180,18 @@ export default function GradingDetail({ subId }: { subId: string }) {
       {tab === "sheet" && (
         <Card pad={0}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "10px 14px", borderBottom: `1px solid ${T.line}`, flexWrap: "wrap", background: T.panelAlt }}>
-            <Btn size="sm" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>◀</Btn>
-            <span style={{ fontSize: 12, color: T.textSub, fontWeight: 700 }}>ページ {page + 1} / {pages}</span>
-            <Btn size="sm" disabled={page >= pages - 1} onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}>▶</Btn>
+            {!(canOverlay && sheetMode === "overlay" && showMarks) && <>
+              <Btn size="sm" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>◀</Btn>
+              <span style={{ fontSize: 12, color: T.textSub, fontWeight: 700 }}>ページ {page + 1} / {pages}</span>
+              <Btn size="sm" disabled={page >= pages - 1} onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}>▶</Btn>
+            </>}
             <span style={{ flex: 1 }} />
+            {canOverlay && showMarks && (
+              <div role="group" aria-label="表示の種類" style={{ display: "flex", gap: 4 }}>
+                <Btn size="sm" variant={sheetMode === "overlay" ? "primary" : "default"} onClick={() => setSheetMode("overlay")}>原本に赤ペン</Btn>
+                <Btn size="sm" variant={sheetMode === "clean" ? "primary" : "default"} onClick={() => setSheetMode("clean")}>清書版</Btn>
+              </div>
+            )}
             <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: T.textSub, cursor: "pointer" }}>
               <input type="checkbox" checked={showMarks} onChange={(e) => setShowMarks(e.target.checked)} />赤ペンを重ねる
             </label>
@@ -170,12 +203,17 @@ export default function GradingDetail({ subId }: { subId: string }) {
             {!showMarks && imageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={imageUrl} alt={`${whoName} の答案（原本）`} style={{ width: "100%", maxHeight: "72vh", objectFit: "contain", borderRadius: 8 }} />
+            ) : canOverlay && sheetMode === "overlay" ? (
+              <RedPenOverlay imageUrl={imageUrl!} sub={sub} test={test} boxes={boxes} showComments={showComments} svgRef={svgRef} />
             ) : (
               <RedPenSheet test={test} sub={sub} page={page} showMarks={showMarks} showComments={showComments} svgRef={svgRef} />
             )}
           </div>
           <div style={{ padding: "10px 14px", borderTop: `1px solid ${T.line}`, fontSize: 11.5, color: T.textFaint, lineHeight: 1.7 }}>
-            チェックを外すと元の答案（原本）だけを表示します。原本画像は保存期間のあいだ削除されません。
+            {canOverlay && sheetMode === "overlay"
+              ? "赤ペンの位置は AI が読み取った解答欄の位置です。ずれている場合は「清書版」で確認してください。"
+              : "チェックを外すと元の答案（原本）だけを表示します。"}
+            原本画像は保存期間のあいだ削除されません。
           </div>
         </Card>
       )}
@@ -279,7 +317,7 @@ export default function GradingDetail({ subId }: { subId: string }) {
           </Card>
           <Card title={sub.quality.ok ? "採点可能な品質です" : "再撮影・再スキャンの案内"} sub={sub.quality.ok ? "補正のみで処理しました" : "以下の点を直して取り込み直してください"}>
             {sub.quality.ok ? (
-              <Empty icon="✅" title="問題は見つかりませんでした" hint="自動補正のみを適用して採点に進みました。" />
+              <Empty icon="✅" title="問題は見つかりませんでした" hint="そのまま採点に進みました。" />
             ) : (
               <div style={{ display: "grid", gap: 9, marginBottom: 12 }}>
                 {sub.quality.issues.map((is) => (
@@ -290,10 +328,12 @@ export default function GradingDetail({ subId }: { subId: string }) {
                 ))}
               </div>
             )}
-            <div style={{ fontSize: 11.5, color: T.textSub, marginBottom: 8, fontWeight: 700 }}>適用した自動補正</div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {sub.quality.fixes.map((f) => <Badge key={f} tone="info">{f}</Badge>)}
-            </div>
+            {sub.quality.fixes.length > 0 && <>
+              <div style={{ fontSize: 11.5, color: T.textSub, marginBottom: 8, fontWeight: 700 }}>適用した自動補正</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {sub.quality.fixes.map((f) => <Badge key={f} tone="info">{f}</Badge>)}
+              </div>
+            </>}
             {!sub.quality.ok && (
               <div style={{ marginTop: 13 }}>
                 <div style={{ fontSize: 11.5, color: T.textSub, lineHeight: 1.7, marginBottom: 8 }}>

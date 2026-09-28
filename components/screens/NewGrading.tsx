@@ -1,17 +1,19 @@
 "use client";
 // 新規採点（取り込み → 5ステップ処理）。docs/prototype-v3.jsx の NewGrading を移植。
 //
-// 採点AI（Claude API）は次の段階で接続する。それまでの動き：
-//   - Supabase 接続時の既定：答案画像だけを保存し「AI採点待ち」にする（点数は付けない）
-//   - 「動作確認用の仮採点」にチェックしたとき、またはデモモード：
-//       ルールベースの仮採点で下書きを作る（点数は実際の答案の内容と無関係）
+// 採点の方法（mode）:
+//   - ai     : Supabase 接続時・採点AIあり。答案画像を保存し、続けて /api/grade で1枚ずつ AI 採点する
+//   - upload : 採点AIが無い、または「保存だけ」を選んだとき。画像を保存して「AI採点待ち」にする
+//   - local  : デモモード、または採点AIが無い環境で「動作確認用の仮採点」を選んだとき。
+//              ルールベースの仮採点（点数は答案の内容と無関係）
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FONT_MONO } from "@/lib/ui/theme";
 import { pct, uid } from "@/lib/util";
 import { PIPELINE, SOURCES, checkQuality, gradeSubmission } from "@/lib/grading/engine";
+import { prepareImage } from "@/lib/image";
 import { friendlyError } from "@/lib/errors";
 import { useUI } from "@/components/ui-context";
-import { Badge, Btn, Card, Empty, Field, Modal, PseudoQR, Section, Select, Table, grid } from "@/components/ui";
+import { Badge, Bar, Btn, Card, Empty, Field, Modal, PseudoQR, Section, Select, Table, grid } from "@/components/ui";
 import type { GradingInput, Quality, Source, Submission } from "@/lib/types";
 
 type Picked = { id: string; name: string; kb: number; src: Source; file?: File; studentId: string };
@@ -21,7 +23,7 @@ const ACCEPT = "image/jpeg,image/png,image/heic,image/heif,.heic,.heif,applicati
 const EMPTY_QUALITY: Quality = { scores: {}, issues: [], fixes: [], ok: true, avg: 0 };
 
 export default function NewGrading() {
-  const { T, go, toast, ws, testById, classById, who, rubric, ds, subs, refresh } = useUI();
+  const { T, go, toast, ws, testById, classById, who, rubric, ds, subs, refresh, ai, aiGradeSub } = useUI();
   const demo = ds.mode === "demo";
 
   const [stage, setStage] = useState<"select" | "run" | "done">("select");
@@ -33,6 +35,9 @@ export default function NewGrading() {
   const [demoBlank, setDemoBlank] = useState(false);
   const [demoIssue, setDemoIssue] = useState(false);
   const [trialGrade, setTrialGrade] = useState(false);
+  const [uploadOnly, setUploadOnly] = useState(false);
+  const [aiProgress, setAiProgress] = useState<{ done: number; total: number } | null>(null);
+  const [preparing, setPreparing] = useState(false);
   const [step, setStep] = useState(-1);
   const [log, setLog] = useState<{ t: string; m: string }[]>([]);
   const [createdIds, setCreatedIds] = useState<string[]>([]);
@@ -50,8 +55,12 @@ export default function NewGrading() {
     () => ws.students.filter((s) => s.classId === classId).sort((a, b) => a.number - b.number),
     [ws.students, classId]
   );
-  // 採点で点数を付けるか（デモは常に仮採点。本番はチェックしたときだけ）
-  const grading = demo || trialGrade;
+  const mode: "ai" | "upload" | "local" =
+    demo ? "local"
+    : ai.enabled ? (uploadOnly ? "upload" : "ai")
+    : trialGrade ? "local" : "upload";
+  // ルールベースの仮採点を使うか（デモ、または採点AIが無い環境で明示的に選んだとき）
+  const grading = mode === "local";
 
   // クラスを変えたら、取り込んだ答案を出席番号順に割り当て直す
   useEffect(() => {
@@ -77,9 +86,13 @@ export default function NewGrading() {
     })));
   };
 
-  const onPickFiles = (fileList: FileList | null, src: Source = "file") => {
-    const arr = Array.from(fileList || []);
-    if (!arr.length) return;
+  const onPickFiles = async (fileList: FileList | null, src: Source = "file") => {
+    const picked = Array.from(fileList || []);
+    if (!picked.length) return;
+    // 大きな写真は、採点AIが受け付ける大きさ（1枚5MBまで）に縮小してから保存する
+    setPreparing(true);
+    const arr = await Promise.all(picked.map((f) => prepareImage(f)));
+    setPreparing(false);
     const tooBig = arr.filter((f) => f.size > 20 * 1024 * 1024);
     const ok = arr.filter((f) => f.size <= 20 * 1024 * 1024);
     if (tooBig.length) toast(`${tooBig.length} 件は20MBを超えているため外しました。解像度を下げて撮り直してください`, "warn");
@@ -152,34 +165,59 @@ export default function NewGrading() {
 
     const saving = (async () => {
       const ids: string[] = [];
+      const names: string[] = [];
       let ng = 0;
       for (let i = 0; i < files.length; i++) {
         const f = files[i];
         try {
           const id = await ds.saveGrading(buildInput(f, i), f.file ? [f.file] : []);
           ids.push(id);
+          names.push(who(f.studentId));
           if (!grading) addLog("保存", `${who(f.studentId)}：${f.name} を保存しました（${i + 1}/${files.length}）`);
         } catch (e) {
           ng++;
           addLog("エラー", `${who(f.studentId)}：${friendlyError(e, "保存")}`);
         }
       }
-      return { ids, ng };
+      return { ids, names, ng };
     })();
 
-    const [, { ids, ng }] = await Promise.all([animation, saving]);
+    const [, { ids, names, ng }] = await Promise.all([animation, saving]);
     await refresh();
     setCreatedIds(ids);
+
+    // 保存できた答案を、1枚ずつ AI で採点する
+    let aiNg = 0;
+    if (mode === "ai" && ids.length) {
+      setAiProgress({ done: 0, total: ids.length });
+      for (let i = 0; i < ids.length; i++) {
+        const name = names[i];
+        addLog("AI採点", `${name}：採点しています…（${i + 1}/${ids.length}）`);
+        const r = await aiGradeSub(ids[i], { silent: true });
+        if (r.ok) {
+          addLog("AI採点", r.summary.blank
+            ? `${name}：全問白紙でした`
+            : `${name}：${r.summary.total}点${r.summary.needReview ? `（要確認 ${r.summary.needReview} 問）` : ""}`);
+        } else {
+          aiNg++;
+          addLog("エラー", `${name}：${r.error}（画像は保存済みです。「採点中」の画面から採点し直せます）`);
+        }
+        setAiProgress({ done: i + 1, total: ids.length });
+      }
+    }
+
     setFailed(ng);
     setStep(PIPELINE.length);
     setStage("done");
     if (ng) toast(`${ng} 枚を保存できませんでした。処理ログを確認して、もう一度取り込んでください`, "ng");
-    else toast(grading ? `${ids.length} 枚の採点が完了しました` : `${ids.length} 枚の答案を保存しました。AI採点の接続後に採点されます`);
+    else if (aiNg) toast(`${aiNg} 枚をAI採点できませんでした。処理ログを確認してください（画像は保存済みです）`, "ng");
+    else if (mode === "ai") toast(`${ids.length} 枚のAI採点が終わりました。返却前に結果を確認してください`);
+    else toast(grading ? `${ids.length} 枚の採点が完了しました` : `${ids.length} 枚の答案を保存しました。あとで「採点中」の画面からAI採点できます`);
   };
 
   const reset = () => {
     timers.current.forEach(clearTimeout);
-    setStage("select"); setFiles([]); setStep(-1); setLog([]); setCreatedIds([]); setFailed(0);
+    setStage("select"); setFiles([]); setStep(-1); setLog([]); setCreatedIds([]); setFailed(0); setAiProgress(null);
   };
 
   /* ------------------------------------------------ 前提（テスト・クラス） */
@@ -201,7 +239,10 @@ export default function NewGrading() {
     const created = createdIds.map((id) => subs.find((s) => s.id === id)).filter(Boolean) as Submission[];
     return (
       <div>
-        <Section title={stage === "done" ? (grading ? "採点が完了しました" : "答案を保存しました") : grading ? "AIエージェントが処理中です" : "答案を保存しています"}
+        <Section title={stage === "done"
+            ? (mode === "upload" ? "答案を保存しました" : "採点が完了しました")
+            : mode === "ai" ? (aiProgress ? "AIが採点しています" : "答案を保存しています")
+            : grading ? "AIエージェントが処理中です" : "答案を保存しています"}
           right={stage === "done" ? <Btn size="sm" onClick={reset}>続けて取り込む</Btn> : null}>
           {grading ? (
             <div style={{ display: "grid", gap: 9 }}>
@@ -234,10 +275,23 @@ export default function NewGrading() {
             </div>
           ) : (
             <Card>
-              <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.8 }}>
-                答案画像を学校専用の保管場所（非公開）に保存しています。
-                採点AIの接続が済むまでは「採点中」の一覧で <b>AI採点待ち</b> として表示されます。
-              </div>
+              {mode === "ai" ? (
+                <>
+                  <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.8, marginBottom: 10 }}>
+                    答案画像を学校専用の保管場所（非公開）に保存し、1枚ずつ AI が採点しています。1枚あたり数十秒かかります。
+                    この画面を閉じると、残りの答案は「AI採点待ち」のまま残ります（「採点中」の画面から採点し直せます）。
+                  </div>
+                  <Bar value={aiProgress?.done ?? 0} max={aiProgress?.total || files.length} tone="accent" />
+                  <div style={{ fontSize: 11.5, color: T.textFaint, marginTop: 5 }}>
+                    {aiProgress ? `AI採点 ${aiProgress.done} / ${aiProgress.total} 枚` : "答案を保存しています…"}
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.8 }}>
+                  答案画像を学校専用の保管場所（非公開）に保存しています。
+                  保存した答案は「採点中」の一覧で <b>AI採点待ち</b> として表示され、そこから採点できます。
+                </div>
+              )}
             </Card>
           )}
         </Section>
@@ -437,11 +491,24 @@ export default function NewGrading() {
                 画質不良を1枚混ぜる（再撮影案内を試す）
               </label>
             </div>
+          ) : ai.enabled ? (
+            <div style={{ background: T.infoSoft, border: `1px solid ${T.info}`, borderRadius: 10, padding: 12, marginTop: 4 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: T.info, marginBottom: 4 }}>AI（Claude）が答案を読み取って採点します</div>
+              <div style={{ fontSize: 12, color: T.text, lineHeight: 1.8 }}>
+                答案画像・正答・配点・採点基準をもとに、設問ごとに判定・得点・赤ペンコメントを付けます。
+                1枚あたり数十秒かかります。結果は下書きなので、返却前に「要確認一覧」を確認してください。
+              </div>
+              <label style={{ display: "flex", gap: 7, alignItems: "flex-start", fontSize: 12, color: T.textSub, cursor: "pointer", marginTop: 8 }}>
+                <input type="checkbox" checked={uploadOnly} onChange={(e) => setUploadOnly(e.target.checked)} style={{ marginTop: 3 }} />
+                <span>画像の保存だけ行い、あとで採点する（「採点中」の画面からまとめてAI採点できます）</span>
+              </label>
+            </div>
           ) : (
             <div style={{ background: T.infoSoft, border: `1px solid ${T.info}`, borderRadius: 10, padding: 12, marginTop: 4 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: T.info, marginBottom: 4 }}>採点AIは接続の準備中です</div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: T.info, marginBottom: 4 }}>採点AIが設定されていません</div>
               <div style={{ fontSize: 12, color: T.text, lineHeight: 1.8 }}>
                 いまは答案画像を保存し「AI採点待ち」にします。点数は付きません。
+                サーバーに ANTHROPIC_API_KEY を設定すると、保存した答案をAIで採点できるようになります（管理者向け：docs/SUPABASE-SETUP.md）。
               </div>
               <label style={{ display: "flex", gap: 7, alignItems: "flex-start", fontSize: 12, color: T.textSub, cursor: "pointer", marginTop: 8 }}>
                 <input type="checkbox" checked={trialGrade} onChange={(e) => setTrialGrade(e.target.checked)} style={{ marginTop: 3 }} />
@@ -451,8 +518,11 @@ export default function NewGrading() {
           )}
 
           <div style={{ marginTop: 16, display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
-            <Btn variant="shu" size="lg" onClick={run} disabled={!files.length}>
-              {grading ? "AI採点をはじめる" : "答案を保存する"}
+            <Btn variant="shu" size="lg" onClick={run} disabled={!files.length || preparing}>
+              {preparing ? "画像を準備しています…"
+                : mode === "ai" ? "保存してAI採点する"
+                : mode === "local" ? (demo ? "AI採点をはじめる" : "仮採点をはじめる")
+                : "答案を保存する"}
             </Btn>
             <span style={{ fontSize: 11.5, color: T.textFaint }}>
               {files.length && test ? `${files.length} 名分・${test.questions.length} 問 × 満点 ${test.maxScore} 点` : "答案を追加すると開始できます"}

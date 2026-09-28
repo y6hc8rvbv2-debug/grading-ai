@@ -175,6 +175,11 @@ export function createDemoSource(): DataSource {
       return out.sort((a, b) => a.item.confidence - b.item.confidence);
     },
 
+    aiStatus: async () => ({ enabled: false, model: null }),
+    aiGrade: async () => {
+      throw new Error("デモモードでは採点AIを使えません。Supabase と ANTHROPIC_API_KEY を設定すると使えます。");
+    },
+
     signedImageUrl: async () => "",
     loadAudit: async () => clone(audit),
     verifyAudit: async () => ({ total: audit.length, broken: 0 }),

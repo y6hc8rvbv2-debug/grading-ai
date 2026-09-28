@@ -13,7 +13,7 @@ import type { Retention } from "@/lib/types";
 export default function SettingsView() {
   const {
     T, t, lang, setLang, mode, setMode, anonMode, setAnonMode, display, setDisplay,
-    answerLang, setAnswerLang, studentLang, setStudentLang, toast, ds, session, isAdmin,
+    answerLang, setAnswerLang, studentLang, setStudentLang, toast, ds, session, isAdmin, ai,
   } = useUI();
   const demo = ds.mode === "demo";
   const [q, setQ] = useState("");
@@ -191,12 +191,16 @@ export default function SettingsView() {
         <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <span style={{ fontSize: 12.5, color: T.textSub, width: 90 }}>採点モデル</span>
-            <b style={{ fontSize: 12.5, color: T.text }}>Claude（Vision + 記述採点）</b>
-            <Badge tone="mute">接続準備中</Badge>
+            <b style={{ fontSize: 12.5, color: T.text }}>{ai.enabled ? `Claude（${ai.model}）` : "Claude（Vision + 記述採点）"}</b>
+            {ai.enabled ? <Badge tone="ok">接続済み</Badge> : <Badge tone="mute">{demo ? "デモでは使えません" : "未設定"}</Badge>}
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <span style={{ fontSize: 12.5, color: T.textSub, width: 90 }}>いま動く採点</span>
-            <span style={{ fontSize: 12.5, color: T.text }}>{demo ? "ローカルのルールベース採点（デモ）" : "なし（答案は「AI採点待ち」で保存）"}</span>
+            <span style={{ fontSize: 12.5, color: T.text }}>
+              {demo ? "ローカルのルールベース採点（デモ）"
+                : ai.enabled ? "AI採点（答案画像・正答・配点・採点基準をもとに採点）"
+                : "なし（答案は「AI採点待ち」で保存。サーバーに ANTHROPIC_API_KEY を設定すると使えます）"}
+            </span>
           </div>
         </div>
         <div style={{ fontSize: 11.5, color: T.textFaint, lineHeight: 1.8 }}>

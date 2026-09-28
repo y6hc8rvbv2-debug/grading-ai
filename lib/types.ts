@@ -75,6 +75,8 @@ export type Item = {
   needReview: boolean;
   reason: string;         // 誤答傾向
   comment: string;        // 赤ペンコメント
+  /** 解答の位置（ページに対する割合 0〜1）。採点AIが返したときだけある */
+  bbox?: { page: number; x: number; y: number; w: number; h: number } | null;
 };
 
 export type Quality = {
@@ -190,6 +192,12 @@ export type NewTestInput = {
     type: QType; unit: string; points: number; correct: string; model: string; difficulty: string;
   }>;
 };
+
+/** 採点AIが使えるか（サーバーに ANTHROPIC_API_KEY があるか） */
+export type AiStatus = { enabled: boolean; model: string | null };
+
+/** 採点AIの結果の要約（詳細は答案を読み直して得る） */
+export type AiGradeSummary = { model: string; total: number; needReview: number; blank: boolean };
 
 export type AuditRow = {
   id: number; createdAt: string; action: string; targetTable: string;

@@ -58,6 +58,36 @@ export function createSupabaseSource(): DataSource {
     mistakeReasons: db.mistakeReasons,
     needsReview: () => db.needsReview(),
 
+    async aiStatus() {
+      try {
+        const res = await fetch("/api/grade", { cache: "no-store" });
+        if (!res.ok) return { enabled: false, model: null };
+        return await res.json();
+      } catch {
+        return { enabled: false, model: null };
+      }
+    },
+    async aiGrade(submissionId) {
+      let res: Response;
+      try {
+        res = await fetch("/api/grade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ submissionId }),
+        });
+      } catch {
+        throw new Error("サーバーに接続できないためAI採点できませんでした。インターネット接続を確認して、もう一度お試しください。");
+      }
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error
+          ?? (res.status === 504
+            ? "AI採点に時間がかかりすぎて中断されました。もう一度お試しください。"
+            : "AI採点に失敗しました。時間をおいて、もう一度お試しください。"));
+      }
+      return { model: json.model, total: json.total, needReview: json.needReview, blank: json.blank };
+    },
+
     signedImageUrl: (path) => db.signedImageUrl(path),
     loadAudit: () => db.loadAudit(),
     verifyAudit: () => db.verifyAuditChain(schoolId()),
