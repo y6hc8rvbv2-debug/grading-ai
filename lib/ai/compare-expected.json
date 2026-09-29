@@ -1,5 +1,5 @@
 {
-  "_note": "照合専用。採点モデルへの入力には使わない（run.ts は全モデルの採点が終わってから読み込む）",
+  "_note": "照合専用。採点モデルへの入力には使わない（lib/ai/compare.ts の judgeCompare だけが読む。モデルの応答が返った後に照合する）",
   "questions": [
     { "qno": 1, "problem": "3+3", "studentAnswer": "9",   "correctAnswer": "6",   "correct": false, "earned": 0 },
     { "qno": 2, "problem": "9+9", "studentAnswer": "18",  "correctAnswer": "18",  "correct": true,  "earned": 20 },

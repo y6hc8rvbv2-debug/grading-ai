@@ -71,5 +71,5 @@ trap cleanup EXIT
 for _ in $(seq 1 30); do curl -sf -o /dev/null "http://localhost:$PORT/login" && break; sleep 1; done
 
 echo "== シナリオを実行"
-BASE_URL="http://localhost:$PORT" MOCK_URL="http://127.0.0.1:$MOCK_PORT" node tests/e2e/scenario.mjs
+DUMMY_KEY="$DUMMY_KEY" BASE_URL="http://localhost:$PORT" MOCK_URL="http://127.0.0.1:$MOCK_PORT" node tests/e2e/scenario.mjs
 if grep -rq "$DUMMY_KEY" .next-e2e/static 2>/dev/null; then echo "✗ APIキーがブラウザ向けのファイルに含まれています"; exit 1; fi

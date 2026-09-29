@@ -292,7 +292,7 @@ export function readGradingResponse(response: {
   return { parsed, model: response.model, usage: response.usage };
 }
 
-function toGradingError(e: unknown): GradingError {
+export function toGradingError(e: unknown): GradingError {
   if (e instanceof Anthropic.AuthenticationError) {
     return new GradingError("採点AIのAPIキーが正しくありません。サーバーの ANTHROPIC_API_KEY を確認してください。", 503);
   }

@@ -444,3 +444,105 @@ reset role;
 set role service_role;
 select public.purge_expired_submissions();
 reset role;
+
+-- ============================================================================
+-- 0005 モデル比較試験：実行した管理者本人だけ・二重実行の防止
+-- ============================================================================
+reset role;
+insert into auth.users (id, email, raw_app_meta_data) values
+  ('aaaaaaaa-0000-0000-0000-0000000000a2', 'admin_a2@example.com',
+     '{"school_id":"aaaaaaaa-0000-0000-0000-000000000000","role":"admin"}');
+
+set role authenticated;
+select pg_temp.login('aaaaaaaa-0000-0000-0000-00000000000a');
+insert into public.model_compare_runs (id, school_id, created_by, request_id, image_name, image_sha256, image_bytes)
+values ('cccccccc-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000000',
+        'aaaaaaaa-0000-0000-0000-00000000000a', 'cccccccc-1111-0000-0000-000000000001',
+        'answer.png', repeat('a', 64), 1234);
+insert into public.model_compare_results (school_id, created_by, run_id, position, display_name, model_id, status) values
+  ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-00000000000a', 'cccccccc-0000-0000-0000-000000000001', 1, 'Claude Haiku 4.5', 'claude-haiku-x', 'pending'),
+  ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-00000000000a', 'cccccccc-0000-0000-0000-000000000001', 2, 'Claude Sonnet 5.5', null, 'unavailable');
+
+do $$
+declare n int;
+begin
+  -- 同じ管理者が同時に2つ目の試験を始められない
+  begin
+    insert into public.model_compare_runs (school_id, created_by, request_id, image_sha256, image_bytes)
+    values ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-00000000000a',
+            gen_random_uuid(), repeat('b', 64), 1);
+    raise exception 'FAIL: 実行中の比較試験があるのに、2つ目を始められてしまう';
+  exception when unique_violation then null;
+  end;
+  -- 同じモデルの呼び出しは1回だけ（pending → calling は1度、戻せない）
+  update public.model_compare_results set status = 'calling', started_at = now()
+   where run_id = 'cccccccc-0000-0000-0000-000000000001' and display_name = 'Claude Haiku 4.5' and status = 'pending';
+  get diagnostics n = row_count;
+  assert n = 1, '最初の呼び出しは受け付けること';
+  update public.model_compare_results set status = 'calling'
+   where run_id = 'cccccccc-0000-0000-0000-000000000001' and display_name = 'Claude Haiku 4.5' and status = 'pending';
+  get diagnostics n = row_count;
+  assert n = 0, '2回目の呼び出しは受け付けないこと';
+  begin
+    update public.model_compare_results set status = 'pending'
+     where run_id = 'cccccccc-0000-0000-0000-000000000001' and display_name = 'Claude Haiku 4.5';
+    raise exception 'FAIL: 呼び出し済みのモデルを未実行に戻せてしまう';
+  exception when invalid_parameter_value then null;
+  end;
+  update public.model_compare_results set status = 'done', finished_at = now()
+   where run_id = 'cccccccc-0000-0000-0000-000000000001' and display_name = 'Claude Haiku 4.5';
+  begin
+    update public.model_compare_results set status = 'calling'
+     where run_id = 'cccccccc-0000-0000-0000-000000000001' and display_name = 'Claude Haiku 4.5';
+    raise exception 'FAIL: 結果が確定したモデルを呼び直せてしまう';
+  exception when invalid_parameter_value then null;
+  end;
+  begin
+    update public.model_compare_results set status = 'calling'
+     where run_id = 'cccccccc-0000-0000-0000-000000000001' and display_name = 'Claude Sonnet 5.5';
+    raise exception 'FAIL: 利用不可のモデルを呼び出せてしまう';
+  exception when invalid_parameter_value then null;
+  end;
+  -- 試験を終えたら、状態は戻せず、次の試験を始められる
+  update public.model_compare_runs set status = 'done', finished_at = now() where id = 'cccccccc-0000-0000-0000-000000000001';
+  begin
+    update public.model_compare_runs set status = 'running' where id = 'cccccccc-0000-0000-0000-000000000001';
+    raise exception 'FAIL: 終わった比較試験を実行中に戻せてしまう';
+  exception when invalid_parameter_value then null;
+  end;
+end $$;
+
+-- 同じ学校の別の管理者・教員・他校には見えず、書き込めない
+select pg_temp.login('aaaaaaaa-0000-0000-0000-0000000000a2');
+do $$
+begin
+  assert (select count(*) from public.model_compare_runs) = 0, '別の管理者には比較試験が見えないこと';
+  assert (select count(*) from public.model_compare_results) = 0, '別の管理者には比較結果が見えないこと';
+  delete from public.model_compare_runs where id = 'cccccccc-0000-0000-0000-000000000001';
+end $$;
+select pg_temp.login('aaaaaaaa-0000-0000-0000-00000000000b');
+do $$
+begin
+  assert (select count(*) from public.model_compare_runs) = 0, '教員には比較試験が見えないこと';
+  begin
+    insert into public.model_compare_runs (school_id, created_by, request_id, image_sha256, image_bytes)
+    values ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-00000000000b',
+            gen_random_uuid(), repeat('c', 64), 1);
+    raise exception 'FAIL: 教員が比較試験を作れてしまう';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+select pg_temp.login('bbbbbbbb-0000-0000-0000-00000000000b');
+do $$
+begin
+  assert (select count(*) from public.model_compare_runs) = 0, '他校には比較試験が見えないこと';
+end $$;
+select pg_temp.login('aaaaaaaa-0000-0000-0000-00000000000a');
+do $$
+begin
+  assert (select count(*) from public.model_compare_runs) = 1, '別の管理者の削除は効いていないこと';
+  -- 本人は記録を削除できる（モデルの結果も一緒に消える）
+  delete from public.model_compare_runs where id = 'cccccccc-0000-0000-0000-000000000001';
+  assert (select count(*) from public.model_compare_results) = 0, '試験を消すとモデルの結果も消えること';
+end $$;
+reset role;

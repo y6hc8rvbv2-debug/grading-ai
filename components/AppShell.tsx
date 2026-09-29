@@ -16,7 +16,7 @@ import { Btn, Toast, inputStyle } from "@/components/ui";
 import type { AiStatus, Item, ItemPatch, Rubric, Submission, Workspace } from "@/lib/types";
 
 /* ------------------------------------------------------------ 画面の対応表 */
-const NAV: { k: View; i: string; tk: string }[] = [
+const NAV: { k: View; i: string; tk: string; admin?: boolean }[] = [
   { k: "dashboard", i: "🏠", tk: "nav_dashboard" },
   { k: "new", i: "📤", tk: "nav_new" },
   { k: "history", i: "🗃", tk: "nav_history" },
@@ -31,6 +31,8 @@ const NAV: { k: View; i: string; tk: string }[] = [
   { k: "reports", i: "📄", tk: "nav_reports" },
   { k: "review", i: "🔍", tk: "nav_review" },
   { k: "settings", i: "⚙️", tk: "nav_settings" },
+  // 管理者だけに表示する（API 側でも管理者本人かを確かめる）
+  { k: "compare", i: "🧪", tk: "nav_compare", admin: true },
 ];
 
 const TITLES: Record<View, [string, string]> = {
@@ -48,6 +50,7 @@ const TITLES: Record<View, [string, string]> = {
   reports: ["nav_reports", "クラス成績レポートと個人成績票を作ります"],
   review: ["nav_review", "認識信頼度が低い設問を確定させます"],
   settings: ["nav_settings", "言語・表示・データの扱い・外部連携"],
+  compare: ["nav_compare", "同じ答案を3つの採点モデルで1回ずつ採点し、結果・時間・費用を比べます（管理者専用・成績には保存しません）"],
   detail: ["nav_history", "赤ペン採点画像・修正・分析・フィードバック"],
 };
 
@@ -399,14 +402,15 @@ const plainBtn = (color: string): React.CSSProperties => ({
 
 /* -------------------------------------------------------------- サイドバー */
 function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { T, t, view, go, favs, toggleFav, subs, mobile, ds, session, ws, lang } = useUI();
+  const { T, t, view, go, favs, toggleFav, subs, mobile, ds, session, ws, lang, isAdmin } = useUI();
+  const nav = NAV.filter((n) => !n.admin || isAdmin);
   const router = useRouter();
   const counts: Partial<Record<View, number>> = {
     processing: subs.filter((s) => s.status === "processing").length,
     review: subs.filter((s) => s.status !== "processing" && s.result.items.some((i) => i.needReview)).length,
     history: subs.filter((s) => s.status !== "processing").length,
   };
-  const favItems = NAV.filter((n) => favs.includes(n.k));
+  const favItems = nav.filter((n) => favs.includes(n.k));
 
   const Item = ({ n, pinned }: { n: (typeof NAV)[number]; pinned?: boolean }) => {
     const active = view === n.k || (view === "detail" && n.k === "history");
@@ -469,7 +473,7 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
 
       <div style={{ fontSize: 10.5, fontWeight: 700, color: T.textFaint, padding: "6px 12px", letterSpacing: ".08em" }}>MENU</div>
       <div style={{ display: "grid", gap: 2 }}>
-        {NAV.map((n) => <Item key={n.k} n={n} />)}
+        {nav.map((n) => <Item key={n.k} n={n} />)}
       </div>
 
       <div style={{ marginTop: 16, padding: "11px 12px", background: T.panelAlt, borderRadius: 10, border: `1px solid ${T.line}` }}>

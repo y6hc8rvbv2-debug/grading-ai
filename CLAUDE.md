@@ -16,7 +16,7 @@
   デモモードはプロトタイプと同じデモデータで全機能を試せるが、何も保存しない（画面上部に「デモモード（保存されません）」と出る）。
 - 採点AI: サーバーの `ANTHROPIC_API_KEY` があれば、「新規採点」は画像を保存して続けて AI 採点する。
   保存済み（AI採点待ち）の答案も「採点中」画面・答案詳細から採点できる。キーが無ければ画像の保存だけ。
-- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004 はまだ**。
+- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004・0005 はまだ**（0005 はモデル比較試験の記録）。
   Vercel の Preview で、ログイン・名簿表示・答案画像の保存まで動作確認済み（ユーザー報告）。
 - **本物の Claude API での採点はまだ一度も実行していない**（開発環境にキーが無い）。
   E2E はリクエストの形を検査する代役サーバー（`tests/e2e/mock-anthropic.mjs`）で検証している。
@@ -27,7 +27,8 @@
 
 ### 1. 本番で AI 採点を動かす ← ユーザー作業待ち
 
-- Supabase の SQL Editor で `0004_ai_grading.sql` を実行する
+- Supabase の SQL Editor で `0004_ai_grading.sql` と `0005_model_compare.sql` を実行する
+- Preview で管理者がモデル比較試験（`/compare`）を実行し、結果を確認する
 - Vercel に `ANTHROPIC_API_KEY` を設定して再デプロイする（`docs/SUPABASE-SETUP.md` ステップ6.5）
 - 保存済みの確認用答案（「2＋3＝5」）を「採点中」画面から AI 採点し、○・4点になるか確かめる
 - 実際の答案で、読み取り精度・bbox（赤ペンの位置）の精度・1枚あたりの時間と費用を確かめる。
@@ -148,7 +149,7 @@ Next.js 14 (App Router, TypeScript)
       └── supabase/{client,server}.ts
 
 Supabase
-  ├── PostgreSQL             12テーブル + RLS + トリガー + 分析ビュー + AI採点の保存関数（supabase/migrations/0001〜0004）
+  ├── PostgreSQL             14テーブル + RLS + トリガー + 分析ビュー + AI採点の保存関数（supabase/migrations/0001〜0005）
   ├── Storage                answer-sheets（非公開・署名付きURLのみ）。パスは {school_id}/{test_id}/{submission_id}/{page}.{ext}
   └── Auth                   教職員のみ。所属校と役割は app_metadata で付与（一般サインアップでは所属が付かない）
 ```
@@ -219,11 +220,20 @@ npm run lint
 npm run test:db      # スキーマのテスト（素の PostgreSQL が必要）
 npm run test:e2e     # ローカル Supabase（Docker）+ 採点AIの代役 + ブラウザでの通しテスト
 npm run test:unit    # 採点AIの出力の後処理の単体テスト
-npm run compare:models -- --image <答案画像>   # Haiku / Sonnet / Opus の採点比較試験（本物の API を呼ぶ。要 ANTHROPIC_API_KEY）
+npm run compare:models -- --image <答案画像> --with-answer-key   # 比較試験の手元版（本物の API を呼ぶ。要 ANTHROPIC_API_KEY）
 ```
 
-モデル比較試験（`scripts/model-compare/`）: アプリと同じ採点指示で各モデルを1回ずつ独立に採点し、期待結果（`expected.json`、採点後にだけ読む）と照合する。
-モデルID は Models API で確認し、見つからないモデルは代替しない。再試行・fallbacks なし。結果は `scripts/model-compare/results/`（Git 管理外）に保存し、DB には書かない。
+### モデル比較試験（管理者専用、`/compare`）
+
+Haiku 4.5 / Sonnet 5.5 / Opus 5 に同じ答案を1回ずつ採点させて比べる。**Vercel の Preview で、管理者本人が画面から実行する**（ユーザーの決定。開発環境にキーが無いため）。
+- 画面 `components/screens/ModelCompareView.tsx`、API `app/api/compare/route.ts`（開始・中止・削除）と `app/api/compare/call/route.ts`（1要求で1モデル）、共通処理 `lib/ai/compare.ts`
+- 条件: アプリと同じ採点指示（`buildGradingPrompt`）。模範解答 ①6 ②18 ③36 ④72 ⑤144 を全モデルに渡す。各問20点・部分点なし。thinking・effort は指定しない（Haiku 4.5 が非対応のため全モデルそろえる）。再試行・fallbacks なし
+- モデルID は Models API の display_name で確かめ、見つからないモデルは代替せず「利用不可」
+- 期待結果（`lib/ai/compare-expected.json`、合計60点）は `judgeCompare()` だけが読む。モデルへの入力に入れない（単体テストと E2E の代役サーバーで検査）
+- 記録は `model_compare_runs` / `model_compare_results`（0005）。見られるのは実行した管理者本人だけ。答案・成績には書かない。答案画像は保存しない（sha256 のみ）
+- 二重実行の防止: 同時に実行できるのは1人1試験（一意索引）/ request_id の再送は同じ試験 / 各モデルは pending → calling を1回だけ（トリガーで戻せない）/ 同じ画像の再実行は明示のチェックが必要
+- 本番（`VERCEL_ENV=production`）では無効（`MODEL_COMPARE_IN_PRODUCTION=1` でのみ有効）
+- 手元版 `scripts/model-compare/run.ts` は同じ `lib/ai/compare.ts` を使い、結果を `scripts/model-compare/results/`（Git 管理外）に保存する
 
 Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを追加する。
 既存のマイグレーションファイルは書き換えない。
@@ -233,7 +243,8 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
 ## 未検証・未解決の事項
 
 1. **本物の Claude API での採点が未実行** — 代役サーバーでリクエストの形と保存までを検証済み。読み取り精度・bbox の精度・所要時間・費用は本番で確かめる
-2. **0004 が本番 Supabase に未適用**（「次にやること」1）
+2. **0004・0005 が本番 Supabase に未適用**（「次にやること」1）
+14. **モデル比較試験は未実行** — Preview で管理者が実行する準備まで完了（代役サーバーでの E2E のみ検証済み）
 3. **生徒モバイル提出・複合機スキャン連携は「準備中」** — 画面に準備中と表示し、代わりの取り込み方法を案内している
 4. **保存期間による自動削除で Storage の画像が消えない**（「次にやること」4）
 5. **他校のIDを外部キーに指定できる** — 例: 学校Aの教員が学校Bの `test_id` を参照する `submissions` を作れる。読み取りはRLSで防がれるが整合性は崩れる。複合外部キー `(school_id, id)` で塞ぐのが本筋（未対応）。AI採点の保存（0004）は設問ID を DB 側で決めるので影響しない

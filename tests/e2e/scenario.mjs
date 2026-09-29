@@ -3,6 +3,7 @@
 import { chromium } from "playwright";
 import { mkdir } from "fs/promises";
 import { promises as fs } from "fs";
+import { createHash, randomUUID } from "crypto";
 
 const BASE = process.env.BASE_URL || "http://localhost:3200";
 const MOCK = process.env.MOCK_URL || "http://127.0.0.1:4010";
@@ -210,6 +211,72 @@ const [dl] = await Promise.all([page.waitForEvent("download"), page.getByRole("b
 const csv = await fs.readFile(await dl.path(), "utf8");
 ok(csv.includes("grading.edit") && csv.includes("submission.review") && csv.includes("test.create") && csv.includes("grading.ai"), "監査ログCSVにAI採点・採点修正・確認・テスト登録が記録");
 
+// 11b. モデル比較試験（管理者専用。採点AIは代役なので API キーも本物の API も使わない）
+{
+  const p = await browser.newPage({ viewport: { width: 600, height: 840 } });
+  await p.setContent(`<body style="margin:0;background:#fff;font:30px serif;padding:40px">算数テスト<br>1年1組 2番<br>各20点／100点満点<br><br>
+    ① 3＋3＝9<br>② 9＋9＝18<br>③ 18＋18＝36<br>④ 36＋36＝72<br>⑤ 72＋72＝145</body>`);
+  await p.screenshot({ path: `${OUT}compare.png` });
+  await p.close();
+}
+const compareBodies = [];
+const onCompareResponse = async (r) => {
+  if (r.url().includes("/api/compare")) { try { compareBodies.push(await r.text()); } catch { /* 画面遷移で読めないものは無視 */ } }
+};
+page.on("response", onCompareResponse);
+const compareReqs = async () => (await (await fetch(MOCK + "/__requests")).json()).filter((r) => r.kind === "compare");
+await page.goto(BASE + "/history"); await settle(1000);
+const histBeforeCompare = await page.locator("tbody tr").count();
+
+await page.goto(BASE + "/compare"); await settle(1200);
+ok((await text()).includes("①6、②18、③36、④72、⑤144"), "比較試験：模範解答（全モデル共通）を表示");
+ok((await text()).includes("照合専用・モデルには送りません"), "比較試験：期待結果は照合専用と表示");
+await page.locator("#compare-file").setInputFiles(`${OUT}compare.png`); await settle(800);
+await page.getByRole("button", { name: /3モデルで比較する/ }).click();
+await toastSeen(/比較が終わりました/);
+await settle(1200);
+const ctext = await text();
+ok(ctext.includes("claude-haiku-4-5-20251001") && ctext.includes("claude-sonnet-5-5") && ctext.includes("claude-opus-5"), "Models API で確かめた正式なモデルIDを表示");
+ok((ctext.match(/全問一致/g) || []).length === 2 && ctext.includes("4/5問一致"), "期待結果との照合（Sonnet・Opus は一致、Haiku の読み違いは不一致）");
+ok(ctext.includes("3モデルとも同じ入力"), "3モデルに同じ入力（画像・指示・採点基準）を送った");
+ok(ctext.includes("$0.0040") && ctext.includes("$0.0200"), "概算費用（公式単価 × トークン数）を表示");
+let creqs = await compareReqs();
+ok(creqs.length === 3 && new Set(creqs.map((r) => r.model)).size === 3, `各モデル1回ずつ呼んだ（${creqs.map((r) => r.model).join(", ")}）`);
+ok(creqs.every((r) => r.problems.length === 0), `比較試験のリクエストの形（模範解答あり・期待結果なし・再試行や切り替えなし） ${JSON.stringify(creqs.flatMap((r) => r.problems))}`);
+
+// 二重実行の防止
+await page.getByRole("button", { name: /3モデルで比較する/ }).click();
+await page.getByText(/この画像はすでに比較しました/).waitFor({ timeout: 15000 });
+ok((await compareReqs()).length === 3, "同じ画像をもう一度実行しようとしても、チェックを入れない限り API を呼ばない");
+const png = await fs.readFile(`${OUT}compare.png`);
+const { runs } = await (await page.request.get(BASE + "/api/compare")).json();
+const again = await page.request.post(BASE + "/api/compare/call", {
+  multipart: { runId: runs[0].id, displayName: "Claude Opus 5", image: { name: "compare.png", mimeType: "image/png", buffer: png } },
+});
+ok(again.status() === 409, `同じ試験で同じモデルをもう一度呼ぶと断る（HTTP ${again.status()}）`);
+const start = (rid) => page.request.post(BASE + "/api/compare", { data: {
+  action: "start", requestId: rid, imageSha256: createHash("sha256").update(png).digest("hex"),
+  imageName: "compare.png", imageBytes: png.length, rerun: true,
+} });
+const rid = randomUUID();
+const s1 = await (await start(rid)).json();
+const s2 = await (await start(rid)).json();
+ok(s1.run?.id && s1.run.id === s2.run?.id && s2.reused === true, "同じ操作の再送は同じ試験として扱う");
+const s3 = await start(randomUUID());
+ok(s3.status() === 409, `実行中の試験があるあいだは、2つ目を始められない（HTTP ${s3.status()}）`);
+await page.request.post(BASE + "/api/compare", { data: { action: "abort", runId: s1.run.id } });
+const afterAbort = await page.request.post(BASE + "/api/compare/call", {
+  multipart: { runId: s1.run.id, displayName: "Claude Haiku 4.5", image: { name: "compare.png", mimeType: "image/png", buffer: png } },
+});
+ok(afterAbort.status() === 409, "中止した試験のモデルは呼び出さない");
+ok((await compareReqs()).length === 3, "二重実行の確認では採点モデルを1回も呼んでいない");
+
+// 成績には保存しない・APIキーを返さない
+await page.goto(BASE + "/history"); await settle(1000);
+ok((await page.locator("tbody tr").count()) === histBeforeCompare, "比較試験は採点履歴（成績）に何も追加しない");
+page.off("response", onCompareResponse);
+ok(compareBodies.length > 0 && compareBodies.every((b) => !b.includes(process.env.DUMMY_KEY || "sk-ant-e2e-dummy-key-not-real")), "比較試験の API の応答に APIキーが含まれない");
+
 // 12. レポート3種
 await page.goto(BASE + "/reports"); await settle();
 for (const [v, label] of [["student", "個人成績票"], ["unit", "単元別到達度レポート"], ["class", "成績レポート"]]) {
@@ -227,6 +294,10 @@ await toastSeen(/管理者だけです/);
 ok(true, "教員は保存期間を変更できず、日本語で案内");
 await page.goto(BASE + "/history"); await settle(1000);
 ok((await page.locator("tbody tr").count()) === 9, "同じ学校の教員は9件見える");
+ok(!(await page.locator("nav").innerText()).includes("モデル比較試験"), "教員のメニューにはモデル比較試験が出ない");
+await page.goto(BASE + "/compare"); await settle(800);
+ok((await text()).includes("管理者だけが使える画面です"), "教員がモデル比較試験を開いても使えない");
+ok((await page.request.get(BASE + "/api/compare")).status() === 403, "教員は比較試験の API を呼べない（HTTP 403）");
 
 // 14. 他校の教員には1件も見えない
 await page.getByRole("button", { name: "ログアウト" }).click();
@@ -241,10 +312,11 @@ await page.goto(BASE + "/tests"); await settle();
 ok(!(await text()).includes("E2E 小テスト"), "他校のテストは見えない");
 
 // 想定どおりのエラーは除く：誤ったパスワードのログイン（手順0）の 400、
-// 採点AIが混み合っている場合の確認（手順6b）の 429
+// 採点AIが混み合っている場合の確認（手順6b）の 429、比較試験の二重実行を断った 409（手順11b）
 const unexpected = errors.filter((e) =>
   !/\/login Failed to load resource: .* 400/.test(e)
-  && !/\/history\/[0-9a-f-]+ Failed to load resource: .* 429/.test(e));
+  && !/\/history\/[0-9a-f-]+ Failed to load resource: .* 429/.test(e)
+  && !/\/compare Failed to load resource: .* 409/.test(e));
 await browser.close();
 if (unexpected.length) {
   console.log("\n✗ コンソールにエラー・警告があります:");

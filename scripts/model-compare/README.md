@@ -1,5 +1,9 @@
 # 採点モデル比較試験（Haiku / Sonnet / Opus）
 
+> **ふだんはアプリの画面（管理者メニューの「🧪 モデル比較試験」、Vercel の Preview）で実行します。**
+> APIキーは Vercel のサーバーの環境変数にだけあり、画面・ログには出ません（`docs/SUPABASE-SETUP.md` ステップ6.5-b）。
+> このスクリプトは、手元の環境にキーがある場合の代わりの手段です。条件・料金・照合は画面版と共通（`lib/ai/compare.ts`）。
+
 同じ答案画像・同じ採点指示・同じ採点基準を、Claude Haiku 4.5 / Claude Sonnet 5.5 / Claude Opus 5 に
 1回ずつ独立して送り、読み取り・正誤・得点・処理時間・トークン数・概算費用を比べる。
 
@@ -8,7 +12,7 @@
 - 自動再試行なし（`maxRetries: 0`）。拒否時に別モデルへ切り替える `fallbacks` も付けない
 - thinking・effort は指定しない（各モデルの既定のまま）。Haiku 4.5 は adaptive thinking / effort に対応していないため、全モデル同じ本文にそろえている
 - 採点基準: 各問20点・正答のみ加点・部分点なし。正答（答案キー）は既定では渡さない（`--with-answer-key` で渡す）
-- 期待結果（`expected.json`）は **全モデルの採点が終わってから** 読み込み、照合にだけ使う
+- 期待結果（`lib/ai/compare-expected.json`）は **モデルの応答が返った後に** 照合にだけ使う
 - 結果は `scripts/model-compare/results/<日時>/`（`result.json`・`report.md`）に保存する。DB の答案・成績には書き込まない。このフォルダは Git に入れない
 - 1回の実行で API を最大3回呼ぶ（費用は数円程度。結果の表に概算を出す）
 

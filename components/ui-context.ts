@@ -10,7 +10,7 @@ import type {
 
 export type View =
   | "dashboard" | "new" | "history" | "processing" | "tests" | "model" | "rubric"
-  | "students" | "classes" | "scores" | "weakness" | "reports" | "review" | "settings" | "detail";
+  | "students" | "classes" | "scores" | "weakness" | "reports" | "review" | "settings" | "detail" | "compare";
 
 export type DisplayMode = "class" | "exam" | "initials" | "anon";
 
