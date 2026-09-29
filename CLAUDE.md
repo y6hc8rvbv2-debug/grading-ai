@@ -219,7 +219,11 @@ npm run lint
 npm run test:db      # スキーマのテスト（素の PostgreSQL が必要）
 npm run test:e2e     # ローカル Supabase（Docker）+ 採点AIの代役 + ブラウザでの通しテスト
 npm run test:unit    # 採点AIの出力の後処理の単体テスト
+npm run compare:models -- --image <答案画像>   # Haiku / Sonnet / Opus の採点比較試験（本物の API を呼ぶ。要 ANTHROPIC_API_KEY）
 ```
+
+モデル比較試験（`scripts/model-compare/`）: アプリと同じ採点指示で各モデルを1回ずつ独立に採点し、期待結果（`expected.json`、採点後にだけ読む）と照合する。
+モデルID は Models API で確認し、見つからないモデルは代替しない。再試行・fallbacks なし。結果は `scripts/model-compare/results/`（Git 管理外）に保存し、DB には書かない。
 
 Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを追加する。
 既存のマイグレーションファイルは書き換えない。

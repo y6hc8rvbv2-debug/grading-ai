@@ -1,0 +1,12 @@
+{
+  "_note": "照合専用。採点モデルへの入力には使わない（run.ts は全モデルの採点が終わってから読み込む）",
+  "questions": [
+    { "qno": 1, "problem": "3+3", "studentAnswer": "9",   "correctAnswer": "6",   "correct": false, "earned": 0 },
+    { "qno": 2, "problem": "9+9", "studentAnswer": "18",  "correctAnswer": "18",  "correct": true,  "earned": 20 },
+    { "qno": 3, "problem": "18+18", "studentAnswer": "36", "correctAnswer": "36", "correct": true,  "earned": 20 },
+    { "qno": 4, "problem": "36+36", "studentAnswer": "72", "correctAnswer": "72", "correct": true,  "earned": 20 },
+    { "qno": 5, "problem": "72+72", "studentAnswer": "145", "correctAnswer": "144", "correct": false, "earned": 0 }
+  ],
+  "total": 60,
+  "maxScore": 100
+}

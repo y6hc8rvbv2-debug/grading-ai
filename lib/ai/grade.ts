@@ -91,7 +91,7 @@ export class GradingError extends Error {
 
 const QUALITY_KEYS = ["tilt", "brightness", "blur", "shadow", "coverage", "contrast"] as const;
 
-const OUTPUT_SCHEMA = {
+export const OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["quality", "items"],
@@ -220,7 +220,33 @@ export async function callClaude(params: {
     throw new GradingError("採点AIが設定されていません。サーバーの環境変数 ANTHROPIC_API_KEY を設定してください。", 503);
   }
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2 });
+  const { system, content } = buildGradingPrompt(params);
 
+  let response: Anthropic.Beta.BetaMessage;
+  try {
+    response = await client.beta.messages.create({
+      model: cfg.model,
+      max_tokens: 16000,
+      thinking: { type: "adaptive" },
+      output_config: {
+        effort: "high",
+        format: { type: "json_schema", schema: OUTPUT_SCHEMA as unknown as Record<string, unknown> },
+      },
+      system,
+      messages: [{ role: "user", content }],
+      ...(cfg.fallbacks
+        ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
+        : {}),
+    });
+  } catch (e) {
+    throw toGradingError(e);
+  }
+  return readGradingResponse(response);
+}
+
+/** 採点の指示（system）と、答案ページ＋設問＋採点基準（user）を組み立てる。
+ *  アプリの採点とモデル比較試験（scripts/model-compare）で同じものを使う。 */
+export function buildGradingPrompt(params: { pages: AnswerPage[]; test: GradeTest; rubric: Rubric }) {
   const content: Anthropic.Beta.BetaContentBlockParam[] = [];
   params.pages.forEach((p) => {
     if (p.kind === "pdf") {
@@ -240,27 +266,14 @@ export async function callClaude(params: {
       rubricText(params.rubric),
     ].join("\n"),
   });
+  return { system: SYSTEM_PROMPT, content };
+}
 
-  let response: Anthropic.Beta.BetaMessage;
-  try {
-    response = await client.beta.messages.create({
-      model: cfg.model,
-      max_tokens: 16000,
-      thinking: { type: "adaptive" },
-      output_config: {
-        effort: "high",
-        format: { type: "json_schema", schema: OUTPUT_SCHEMA as unknown as Record<string, unknown> },
-      },
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content }],
-      ...(cfg.fallbacks
-        ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
-        : {}),
-    });
-  } catch (e) {
-    throw toGradingError(e);
-  }
-
+/** 採点AIの応答から JSON を取り出す（拒否・途中終了・壊れた JSON はエラーにする） */
+export function readGradingResponse(response: {
+  stop_reason: string | null; content: Array<{ type: string; text?: string }>;
+  model: string; usage: Anthropic.Beta.BetaUsage | Anthropic.Usage;
+}) {
   if (response.stop_reason === "refusal") {
     throw new GradingError("AIがこの答案の採点を断りました。画像の内容を確認し、先生が手で採点してください。", 422);
   }
@@ -268,7 +281,7 @@ export async function callClaude(params: {
     throw new GradingError("採点結果が長くなりすぎて途中で止まりました。設問数を分けて登録するか、もう一度お試しください。", 502);
   }
   const text = response.content
-    .map((b) => (b.type === "text" ? b.text : ""))
+    .map((b) => (b.type === "text" ? b.text ?? "" : ""))
     .join("");
   let parsed: unknown;
   try {
