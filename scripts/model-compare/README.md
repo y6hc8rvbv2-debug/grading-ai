@@ -38,6 +38,14 @@ npm run compare:models -- --image /path/to/answer.jpg --dry-run   # 送る内容
 npm run compare:models -- --image /path/to/answer.jpg             # 比較試験を実行
 ```
 
+**依頼元と合意した実行条件（2026-09-29）**: 実際のアプリと同じ条件にするため `--with-answer-key` を付ける。
+全モデル共通の正答は ①6 ②18 ③36 ④72 ⑤144、各問20点・部分点なし。期待判定・期待得点・合計60点は渡さず、照合にだけ使う。
+APIキーと答案画像ファイルがそろってから、各モデル1回ずつ実行する。
+
+```bash
+npm run compare:models -- --image /path/to/answer.jpg --with-answer-key
+```
+
 終了コード: 0 = 実行した / 2 = 画像の指定が不正 / 3 = APIキー未設定（未実行）/ 4 = Models API を呼べない（未実行）
 
 ## 料金
