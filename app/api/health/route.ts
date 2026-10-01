@@ -32,11 +32,13 @@ export async function GET() {
   const { error: e5 } = await supabase.from("model_compare_runs").select("id", { head: true, count: "exact" }).limit(1);
   // 0006：採点方式（3モデル併用）と AI採点の記録
   const { error: e6 } = await supabase.from("grading_jobs").select("id", { head: true, count: "exact" }).limit(1);
+  // 0007：模範解答からの自動入力
+  const { error: e7 } = await supabase.from("test_imports").select("id", { head: true, count: "exact" }).limit(1);
 
   return NextResponse.json({
     supabase: true,
     ai: aiConfig().enabled,
-    migrations: { "0004": !missing(e4), "0005": !missing(e5), "0006": !missing(e6) },
+    migrations: { "0004": !missing(e4), "0005": !missing(e5), "0006": !missing(e6), "0007": !missing(e7) },
     env: process.env.VERCEL_ENV ?? "local",
   });
 }

@@ -3,7 +3,7 @@
 //   - supabase: 本番。RLS 付きで Supabase に保存する（lib/data/supabase.ts）
 //   - demo    : Supabase 未設定時。メモリ上のデモデータで動き、再読み込みで元に戻る（lib/data/demo.ts）
 import type {
-  AiGradeSummary, AiStatus, AuditRow, GradingInput, GradingLog, ItemPatch, NewTestInput, Profile, QuestionStat, RateRow,
+  AiGradeSummary, AiStatus, AuditRow, GradingInput, GradingLog, ImportResult, ItemPatch, NewTestInput, Profile, QuestionStat, RateRow,
   Retention, ReviewEntry, Rubric, School, Submission, Workspace,
 } from "@/lib/types";
 import type { GradingMode, GradingStage } from "@/lib/grading/cost";
@@ -52,6 +52,14 @@ export interface DataSource {
   aiGrade(submissionId: string, opts: { mode: GradingMode; onProgress?: (p: AiGradeProgress) => void }): Promise<AiGradeSummary>;
   /** AI採点の記録（使ったモデル・確認に回した理由・トークン数・概算費用） */
   gradingLog(submissionId: string): Promise<GradingLog[]>;
+
+  /** 模範解答からの自動入力：資料を保存する／AI で読み取る／不要な資料を消す／登録したテストと紐づける */
+  uploadImportFile(requestId: string, index: number, file: File): Promise<string>;
+  importTestKey(params: {
+    requestId: string; files: { path: string; kind: "key" | "paper" | "student"; name: string }[]; force?: boolean;
+  }): Promise<{ importId: string; result: ImportResult; cached: boolean }>;
+  removeImportFiles(paths: string[]): Promise<void>;
+  linkImport(importId: string, testId: string): Promise<void>;
 
   signedImageUrl(path: string): Promise<string>;
   loadAudit(): Promise<AuditRow[]>;

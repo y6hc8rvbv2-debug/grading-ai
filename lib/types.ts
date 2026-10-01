@@ -44,7 +44,12 @@ export type Question = {
   difficulty: string;
   correct: string;
   model: string;          // 模範解答・解説の要点
+  /** 作図の模範図の位置（模範解答の画像に対する割合。0007。無ければ null） */
+  figure?: FigureRef | null;
 };
+
+/** 模範図の位置。path は Storage の模範解答の画像、page は PDF のページ（画像は1） */
+export type FigureRef = { path: string; page: number; x: number; y: number; w: number; h: number };
 
 export type Test = {
   id: string;
@@ -58,6 +63,8 @@ export type Test = {
   maxScore: number;
   bigCount: number;
   questions: Question[];
+  /** 登録時に保存した模範解答・問題用紙・配点表（0007） */
+  answerKeyPaths?: string[];
 };
 
 export type Item = {
@@ -194,8 +201,22 @@ export type NewTestInput = {
   date: string; testNo: string; units: string[];
   questions: Array<{
     type: QType; unit: string; points: number; correct: string; model: string; difficulty: string;
+    /** 大問番号と、原本どおりの小問表記（例: "(1)"。小問が無ければ空） */
+    big: number; sub: string;
+    figure?: FigureRef | null;
   }>;
+  /** 模範解答・問題用紙・配点表の Storage のパス（自動入力を使ったときだけ） */
+  answerKeyPaths?: string[];
 };
+
+/** 模範解答からの自動入力の結果（lib/ai/test-import.ts の ImportResult と同じ形） */
+export type ImportBox = { file: number; page: number; x: number; y: number; w: number; h: number } | null;
+export type ImportedQuestion = {
+  big: number; bigLabel: string; sub: string; type: QType; correct: string;
+  points: number | null; pointsHint: number | null; model: string;
+  answerBox: ImportBox; figure: ImportBox; flags: string[];
+};
+export type ImportResult = { title: string; subject: string; maxScore: number | null; questions: ImportedQuestion[]; warnings: string[] };
 
 /** 採点AIが使えるか（サーバーに ANTHROPIC_API_KEY があるか）と、各段階のモデルID */
 export type AiStatus = {

@@ -1,25 +1,74 @@
 "use client";
-// テストの登録フォーム（テスト情報 + 設問ごとの形式・単元・配点・正答）。
-// プロトタイプには無かった画面。Supabase では tests / questions に保存される。
-import React, { useState } from "react";
+// テストの登録フォーム（テスト情報 + 設問ごとの大問・小問・形式・単元・配点・正答）。
+// Supabase では tests / questions に保存される。
+//
+// 「模範解答・配点表から自動入力」：模範解答（画像・PDF・HEIC、複数ページ可）と、必要なら問題用紙・配点表・
+// 生徒の答案（印刷された配点だけを読む）を選ぶと、AI が設問の一覧を読み取って入力欄を作る（/api/test-import）。
+// 読み取れなかった配点・正答は空欄のまま「要確認」にし、教師が確認・修正してから「登録する」で保存する。
+// 入力途中の内容（資料のファイルを含む）は、この端末に下書きとして自動保存する（lib/draft.ts）。
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FONT_MONO } from "@/lib/ui/theme";
 import { QTYPES } from "@/lib/grading/engine";
 import { friendlyError } from "@/lib/errors";
+import { prepareImage, isHeic } from "@/lib/image";
+import { deleteDraft, loadDraft, saveDraft } from "@/lib/draft";
 import { useUI } from "@/components/ui-context";
-import { Btn, Field, Input, Modal, Select, grid, inputStyle } from "@/components/ui";
-import type { NewTestInput, QType } from "@/lib/types";
+import { Badge, Btn, Field, Input, Modal, Select, grid, inputStyle } from "@/components/ui";
+import type { FigureRef, ImportBox, ImportResult, NewTestInput, QType } from "@/lib/types";
 
-type Row = NewTestInput["questions"][number] & { key: number };
+type Kind = "key" | "paper" | "student";
+const KIND_LABEL: Record<Kind, string> = {
+  key: "模範解答",
+  paper: "問題用紙・配点表",
+  student: "生徒の答案（配点の印刷だけ参照）",
+};
 
+type Row = {
+  key: number;
+  big: number;
+  sub: string;
+  type: QType;
+  unit: string;
+  points: number | "";          // "" = 未入力（要確認）
+  pointsHint?: number | null;
+  difficulty: string;
+  correct: string;
+  model: string;
+  flags: string[];              // 要確認の理由（自動入力）
+  confirmed: boolean;           // 教師が確認したか
+  answerBox?: ImportBox;
+  figure?: ImportBox;
+};
+type Source = { id: string; name: string; kind: Kind; type: string; blob: Blob; path?: string; requestId?: string };
+type Draft = {
+  v: 1; savedAt: string;
+  name: string; subject: string; grade: string; term: string; date: string; testNo: string; unitsText: string;
+  rows: Row[]; sources: Source[];
+  imported: { importId: string; maxScore: number | null; warnings: string[]; requestId: string } | null;
+};
+
+const DRAFT_KEY = "new-test";
 const DIFFICULTIES = ["基本", "標準", "難"];
+const MAX_SOURCES = 12;
 const defaultPoints = (t: QType) => (t === "long" ? 8 : t === "short" || t === "graph" ? 6 : 4);
 let rowKey = 0;
-const newRow = (unit = "", type: QType = "calc"): Row => ({
-  key: ++rowKey, type, unit, points: defaultPoints(type), correct: "", model: "", difficulty: "標準",
+const blankRow = (o: Partial<Row> = {}): Row => ({
+  key: ++rowKey, big: 1, sub: "(1)", type: "calc", unit: "", points: defaultPoints(o.type ?? "calc"),
+  difficulty: "標準", correct: "", model: "", flags: [], confirmed: true, ...o,
 });
+/** 次の小問表記：(1) → (2)、① → ②。分からなければ空 */
+function nextSub(sub: string) {
+  const m = sub.match(/^(\D*)(\d+)(\D*)$/);
+  if (m) return `${m[1]}${Number(m[2]) + 1}${m[3]}`;
+  const circled = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳";
+  const i = circled.indexOf(sub);
+  return i >= 0 && i < circled.length - 1 ? circled[i + 1] : "";
+}
+export const labelOf = (big: number, sub: string) => (sub ? `大問${big}-${sub}` : `大問${big}`);
+const uid = () => Math.random().toString(36).slice(2, 10);
 
 export default function NewTestForm({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { T, ds, toast, refresh } = useUI();
+  const { T, ds, toast, refresh, ai } = useUI();
   const [name, setName] = useState("");
   const [subject, setSubject] = useState("数学");
   const [grade, setGrade] = useState("2");
@@ -27,32 +76,191 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
   const [date, setDate] = useState("");
   const [testNo, setTestNo] = useState("");
   const [unitsText, setUnitsText] = useState("");
-  const [rows, setRows] = useState<Row[]>([newRow()]);
+  const [rows, setRows] = useState<Row[]>([blankRow()]);
   const [bulk, setBulk] = useState("5");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // 自動入力
+  const [importOpen, setImportOpen] = useState(false);
+  const [sources, setSources] = useState<Source[]>([]);
+  const [imported, setImported] = useState<Draft["imported"]>(null);
+  const [importing, setImporting] = useState<"" | "upload" | "read">("");
+  const [force, setForce] = useState(false);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [view, setView] = useState<{ source: string; box: ImportBox | null } | null>(null);
+  const lock = useRef(false);
+
+  // 下書き
+  const [draftNote, setDraftNote] = useState("");
+  const restored = useRef(false);
+
   const units = unitsText.split(/[,、，\n]/).map((u) => u.trim()).filter(Boolean);
   const total = rows.reduce((a, r) => a + (Number(r.points) || 0), 0);
+  const flagged = rows.filter((r) => r.flags.length);
+  const unconfirmed = flagged.filter((r) => !r.confirmed);
+  const maxScore = imported?.maxScore ?? null;
+  const mismatch = maxScore != null && total !== maxScore;
+  const bigs = useMemo(() => {
+    const m = new Map<number, number>();
+    rows.forEach((r) => m.set(r.big, (m.get(r.big) ?? 0) + 1));
+    return [...m.entries()].sort((a, b) => a[0] - b[0]);
+  }, [rows]);
 
+  // 資料の表示用 URL（Blob から作る。下書きから復元したときも作り直す）
+  const urls = useMemo(() => new Map(sources.map((s) => [s.id, URL.createObjectURL(s.blob)])), [sources]);
+  useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u)), [urls]);
+
+  /* ---------------------------------------------------- 下書きの復元・保存 */
+  useEffect(() => {
+    if (!open || restored.current) return;
+    restored.current = true;
+    loadDraft<Draft>(DRAFT_KEY).then((d) => {
+      if (!d || d.v !== 1) return;
+      setName(d.name); setSubject(d.subject); setGrade(d.grade); setTerm(d.term); setDate(d.date);
+      setTestNo(d.testNo); setUnitsText(d.unitsText);
+      if (d.rows?.length) { setRows(d.rows.map((r) => ({ ...r, key: ++rowKey }))); }
+      setSources(d.sources ?? []);
+      setImported(d.imported ?? null);
+      if ((d.sources ?? []).length) setImportOpen(true);
+      setDraftNote(`下書きを復元しました（${new Date(d.savedAt).toLocaleString("ja-JP")} に自動保存）`);
+    });
+  }, [open]);
+
+  const snapshot = useCallback((): Draft => ({
+    v: 1, savedAt: new Date().toISOString(), name, subject, grade, term, date, testNo, unitsText, rows, sources, imported,
+  }), [name, subject, grade, term, date, testNo, unitsText, rows, sources, imported]);
+  const dirty = !!(name || testNo || unitsText || sources.length || rows.length > 1 || rows[0]?.correct || rows[0]?.model);
+  useEffect(() => {
+    if (!open || !restored.current || !dirty) return;
+    const t = setTimeout(() => { saveDraft(DRAFT_KEY, snapshot()); }, 500);
+    return () => clearTimeout(t);
+  }, [open, dirty, snapshot]);
+
+  const discardDraft = async () => {
+    if (!window.confirm("下書きを破棄して、入力欄を空にしますか？")) return;
+    await deleteDraft(DRAFT_KEY);
+    reset();
+    toast("下書きを破棄しました");
+  };
+
+  /* ---------------------------------------------------- 設問の操作 */
   const update = (key: number, patch: Partial<Row>) =>
     setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
   const reset = () => {
-    setName(""); setTestNo(""); setDate(""); setUnitsText(""); setRows([newRow()]); setError("");
+    setName(""); setTestNo(""); setDate(""); setUnitsText(""); setRows([blankRow()]); setError("");
+    setSources([]); setImported(null); setImportOpen(false); setSelected(null); setView(null); setDraftNote("");
   };
 
+  const addRows = (n: number, newBig = false) => {
+    setRows((prev) => {
+      const out = [...prev];
+      for (let i = 0; i < n; i++) {
+        const last = out[out.length - 1];
+        out.push(blankRow(last
+          ? newBig && i === 0
+            ? { big: last.big + 1, sub: "(1)", unit: last.unit, type: last.type, points: defaultPoints(last.type) }
+            : { big: last.big, sub: nextSub(last.sub), unit: last.unit, type: last.type, points: defaultPoints(last.type) }
+          : {}));
+      }
+      return out;
+    });
+  };
+
+  /* ---------------------------------------------------- 資料の追加 */
+  const addSources = async (list: FileList | null, kind: Kind) => {
+    const files = Array.from(list ?? []);
+    if (!files.length) return;
+    if (sources.length + files.length > MAX_SOURCES) { toast(`資料は${MAX_SOURCES}ファイルまでです`, "warn"); return; }
+    const out: Source[] = [];
+    for (const f of files) {
+      // HEIC は JPEG に変換し、大きな写真は縮小する（PDF はそのまま）
+      const p = /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name) ? f : await prepareImage(f);
+      if (isHeic(p)) { toast(`「${f.name}」を変換できませんでした。JPEG で保存し直して選んでください`, "warn"); continue; }
+      out.push({ id: uid(), name: f.name, kind, type: p.type || (/\.pdf$/i.test(f.name) ? "application/pdf" : "image/jpeg"), blob: p });
+    }
+    setSources((prev) => [...prev, ...out]);
+    if (out.length && !view) setView({ source: out[0].id, box: null });
+  };
+
+  /* ---------------------------------------------------- AI で読み取る */
+  const runImport = async () => {
+    if (lock.current) return;
+    if (!sources.some((s) => s.kind === "key")) { toast("模範解答の画像またはPDFを選んでください", "warn"); return; }
+    const hasContent = rows.some((r) => r.correct || r.model) || rows.length > 1;
+    if (hasContent && !window.confirm("入力済みの設問を、AIの読み取り結果で置き換えます。よろしいですか？（いまの内容は下書きから消えます）")) return;
+    lock.current = true;
+    setError("");
+    try {
+      // 資料を学校専用の保管場所に置く（同じ資料・同じ読み取りなら置き直さない）
+      setImporting("upload");
+      const reuse = !force && sources.every((s) => s.path && s.requestId === sources[0].requestId) ? sources[0].requestId : null;
+      const requestId = reuse ?? crypto.randomUUID();
+      const placed: Source[] = [];
+      for (let i = 0; i < sources.length; i++) {
+        const s = sources[i];
+        if (s.path && s.requestId === requestId) { placed.push(s); continue; }
+        const ext = s.type === "application/pdf" ? "pdf" : s.type === "image/png" ? "png" : "jpg";
+        const file = new File([s.blob], `${i + 1}.${ext}`, { type: s.type });
+        placed.push({ ...s, path: await ds.uploadImportFile(requestId, i, file), requestId });
+      }
+      setSources(placed);
+      setImporting("read");
+      const r = await ds.importTestKey({
+        requestId, force, files: placed.map((s) => ({ path: s.path!, kind: s.kind, name: s.name })),
+      });
+      applyImport(r.result, { importId: r.importId, requestId });
+      setForce(false);
+      toast(r.cached
+        ? "同じ資料の読み取り結果を使いました（AI は呼んでいません）。要確認の設問を確認してください"
+        : `${r.result.questions.length} 問を読み取りました。要確認の設問を確認してから登録してください`);
+    } catch (e) {
+      // 失敗しても、選んだ資料と入力欄は下書きに残る
+      setError(friendlyError(e, "模範解答の読み取り"));
+    } finally {
+      setImporting("");
+      lock.current = false;
+    }
+  };
+
+  const applyImport = (res: ImportResult, meta: { importId: string; requestId: string }) => {
+    setRows(res.questions.map((q) => blankRow({
+      big: q.big, sub: q.sub, type: q.type, unit: "", points: q.points ?? "", pointsHint: q.pointsHint,
+      correct: q.correct, model: q.model, flags: q.flags, confirmed: q.flags.length === 0,
+      answerBox: q.answerBox, figure: q.figure,
+    })));
+    if (!name && res.title) setName(res.title);
+    if (res.subject) setSubject((s) => s || res.subject);
+    setImported({ importId: meta.importId, maxScore: res.maxScore, warnings: res.warnings, requestId: meta.requestId });
+    setSelected(null);
+  };
+
+  const showBox = (box: ImportBox | undefined | null) => {
+    if (!box) return;
+    const s = sources[box.file - 1];
+    if (s) setView({ source: s.id, box });
+  };
+
+  /* ---------------------------------------------------- 登録 */
   const validate = (): string => {
     if (!name.trim()) return "テスト名を入力してください。";
     if (!subject.trim()) return "教科を入力してください。";
     const g = Number(grade);
     if (!Number.isInteger(g) || g < 1 || g > 12) return "学年は1〜12の数字で入力してください。";
     if (!rows.length) return "設問を1問以上追加してください。";
-    const badPoints = rows.findIndex((r) => !Number.isInteger(Number(r.points)) || Number(r.points) < 1 || Number(r.points) > 100);
-    if (badPoints >= 0) return `${badPoints + 1}問目の配点は1〜100の整数にしてください。`;
+    const badBig = rows.find((r) => !Number.isInteger(Number(r.big)) || Number(r.big) < 1 || Number(r.big) > 99);
+    if (badBig) return "大問の番号は1〜99の整数にしてください。";
+    const dup = rows.find((r, i) => rows.findIndex((x) => x.big === r.big && x.sub.trim() === r.sub.trim()) !== i);
+    if (dup) return `${labelOf(dup.big, dup.sub)} が2つあります。大問・小問の番号を直してください。`;
+    const noPoints = rows.find((r) => r.points === "" || !Number.isInteger(Number(r.points)) || Number(r.points) < 1 || Number(r.points) > 100);
+    if (noPoints) return `${labelOf(noPoints.big, noPoints.sub)} の配点を入力してください（1〜100の整数）。`;
+    const graphNoCriteria = rows.find((r) => r.type === "graph" && !r.model.trim());
+    if (graphNoCriteria) return `${labelOf(graphNoCriteria.big, graphNoCriteria.sub)}（作図）の採点条件を入力してください。`;
+    if (unconfirmed.length) return `要確認の設問が ${unconfirmed.length} 問あります。内容を確認して「確認した」にチェックしてください。`;
     if (units.length) {
-      const badUnit = rows.findIndex((r) => r.unit && !units.includes(r.unit));
-      if (badUnit >= 0) return `${badUnit + 1}問目の単元「${rows[badUnit].unit}」が単元の一覧にありません。`;
+      const badUnit = rows.find((r) => r.unit && !units.includes(r.unit));
+      if (badUnit) return `${labelOf(badUnit.big, badUnit.sub)} の単元「${badUnit.unit}」が単元の一覧にありません。`;
     }
     return "";
   };
@@ -60,18 +268,32 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
   const save = async () => {
     const msg = validate();
     if (msg) { setError(msg); return; }
+    if (mismatch && !window.confirm(`設問の合計点（${total}点）が、原本の満点（${maxScore}点）と一致しません。このまま登録しますか？`)) return;
     setError(""); setSaving(true);
     try {
-      await ds.createTest({
+      const keep = sources.filter((s) => s.path && s.kind !== "student");
+      const figureOf = (b?: ImportBox | null): FigureRef | null => {
+        const s = b ? sources[b.file - 1] : null;
+        return b && s?.path && s.kind !== "student" ? { path: s.path, page: b.page, x: b.x, y: b.y, w: b.w, h: b.h } : null;
+      };
+      const input: NewTestInput = {
         name: name.trim(), subject: subject.trim(), grade: Number(grade), term: term.trim(),
         date, testNo: testNo.trim(), units,
         questions: rows.map((r) => ({
+          big: Number(r.big), sub: r.sub.trim(),
           type: r.type, unit: r.unit || units[0] || "", points: Number(r.points),
           correct: r.correct.trim(), model: r.model.trim(), difficulty: r.difficulty,
+          figure: r.type === "graph" ? figureOf(r.figure) : null,
         })),
-      });
+        answerKeyPaths: keep.map((s) => s.path!),
+      };
+      const testId = await ds.createTest(input);
+      // 生徒の答案は、配点を読むためだけに使った。テストには残さない
+      await ds.removeImportFiles(sources.filter((s) => s.path && s.kind === "student").map((s) => s.path!)).catch(() => {});
+      if (imported?.importId) await ds.linkImport(imported.importId, testId).catch(() => {});
+      await deleteDraft(DRAFT_KEY);
       await refresh();
-      toast(`「${name.trim()}」を登録しました。新規採点で選べます`);
+      toast(`「${name.trim()}」を登録しました（${rows.length} 問・${total} 点）。新規採点で選べます`);
       reset();
       onClose();
     } catch (e) {
@@ -82,16 +304,24 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
   };
 
   const cell: React.CSSProperties = { ...inputStyle(T), padding: "6px 8px", fontSize: 12.5 };
+  const current = view ? sources.find((s) => s.id === view.source) : null;
+  const showViewer = sources.length > 0;
 
   return (
-    <Modal open={open} onClose={() => { if (!saving) onClose(); }} title="テストを追加" width={980}
+    <Modal open={open} onClose={() => { if (!saving) onClose(); }} title="テストを追加" width={showViewer ? 1240 : 1000}
       footer={<>
-        <span style={{ flex: 1, fontSize: 12.5, color: error ? T.ng : T.textSub, alignSelf: "center" }}>
-          {error || `${rows.length} 問・満点 ${total} 点`}
+        <span style={{ flex: 1, fontSize: 12.5, color: error ? T.ng : T.textSub, alignSelf: "center" }} role={error ? "alert" : undefined}>
+          {error || `${rows.length} 問・合計 ${total} 点${maxScore != null ? `（原本の満点 ${maxScore} 点）` : ""}`}
         </span>
-        <Btn onClick={onClose} disabled={saving}>キャンセル</Btn>
-        <Btn variant="primary" onClick={save} disabled={saving}>{saving ? "登録しています…" : "登録する"}</Btn>
+        <Btn onClick={onClose} disabled={saving}>閉じる（下書きは残ります）</Btn>
+        <Btn variant="primary" onClick={save} disabled={saving || !!importing}>{saving ? "登録しています…" : "登録する"}</Btn>
       </>}>
+      {draftNote && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 11px", borderRadius: 9, background: T.infoSoft, color: T.info, fontSize: 12.5, marginBottom: 10 }}>
+          <span style={{ flex: 1 }}>{draftNote}</span>
+          <Btn size="sm" variant="ghost" onClick={discardDraft}>下書きを破棄</Btn>
+        </div>
+      )}
       <div style={grid(200, 12)}>
         <Field label="テスト名（必須）"><Input value={name} onChange={setName} placeholder="例：1学期期末テスト" /></Field>
         <Field label="教科（必須）"><Input value={subject} onChange={setSubject} placeholder="例：数学" /></Field>
@@ -104,71 +334,242 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
         <Input value={unitsText} onChange={setUnitsText} placeholder="式の計算、連立方程式、一次関数" />
       </Field>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "6px 0 10px" }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: T.text, flex: 1 }}>設問</div>
-        <input type="number" min={1} max={40} value={bulk} onChange={(e) => setBulk(e.target.value)} aria-label="まとめて追加する問題数"
-          style={{ ...cell, width: 64 }} />
-        <Btn size="sm" onClick={() => {
-          const n = Math.min(40, Math.max(1, Number(bulk) || 1));
-          const last = rows[rows.length - 1];
-          setRows((prev) => [...prev, ...Array.from({ length: n }, () => newRow(last?.unit ?? units[0] ?? "", last?.type ?? "calc"))]);
-        }}>問まとめて追加</Btn>
-        <Btn size="sm" variant="soft" onClick={() => setRows((prev) => [...prev, newRow(prev[prev.length - 1]?.unit ?? units[0] ?? "")])}>＋ 1問追加</Btn>
+      {/* ------------------------------------------------ 自動入力 */}
+      <div style={{ border: `1px solid ${importOpen ? T.accent : T.line}`, borderRadius: 11, padding: 12, margin: "4px 0 12px", background: importOpen ? T.accentSoft : T.panelAlt }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 240, fontSize: 12.5, color: T.textSub, lineHeight: 1.7 }}>
+            <b style={{ color: T.text }}>模範解答・配点表から自動入力</b>　模範解答の写真やPDFから、大問・小問・形式・正答・配点・解説の要点をAIが読み取ります。
+          </div>
+          {!importOpen && (
+            <Btn variant="primary" size="sm" onClick={() => setImportOpen(true)} disabled={!ai.enabled}
+              title={ai.enabled ? "" : "採点AIが設定されていないため使えません"}>模範解答・配点表から自動入力</Btn>
+          )}
+        </div>
+        {!ai.enabled && (
+          <div style={{ fontSize: 11.5, color: T.textFaint, marginTop: 6 }}>
+            {ds.mode === "demo" ? "デモモードでは使えません。" : "採点AI（ANTHROPIC_API_KEY）が設定されていないため使えません。"}手入力で登録できます。
+          </div>
+        )}
+        {importOpen && (
+          <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+            <div style={grid(260, 10)}>
+              <label style={{ fontSize: 12, color: T.text }}>
+                <b>1. 模範解答（必須）</b>
+                <div style={{ fontSize: 11, color: T.textSub, margin: "2px 0 6px" }}>画像・PDF・iPhone の写真（HEIC）。複数ページは複数選べます</div>
+                <input id="import-key" type="file" multiple accept="image/*,.heic,.heif,application/pdf" disabled={!!importing}
+                  onChange={(e) => { addSources(e.target.files, "key"); e.target.value = ""; }} />
+              </label>
+              <label style={{ fontSize: 12, color: T.text }}>
+                <b>2. 配点が模範解答に無い場合（任意）</b>
+                <div style={{ fontSize: 11, color: T.textSub, margin: "2px 0 6px" }}>問題用紙・配点表の画像を追加できます。生徒の答案を使う場合は、下で種類を「生徒の答案」にしてください</div>
+                <input id="import-extra" type="file" multiple accept="image/*,.heic,.heif,application/pdf" disabled={!!importing}
+                  onChange={(e) => { addSources(e.target.files, "paper"); e.target.value = ""; }} />
+              </label>
+            </div>
+            {sources.length > 0 && (
+              <div style={{ display: "grid", gap: 6 }}>
+                {sources.map((s, i) => (
+                  <div key={s.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12 }}>
+                    <span style={{ font: `700 11px ${FONT_MONO}`, color: T.textSub, width: 46 }}>資料{i + 1}</span>
+                    <button type="button" onClick={() => setView({ source: s.id, box: null })}
+                      style={{ border: "none", background: "transparent", color: T.accent, cursor: "pointer", font: "inherit", textDecoration: "underline", padding: 0 }}>{s.name}</button>
+                    <select aria-label={`資料${i + 1}の種類`} value={s.kind} disabled={!!importing}
+                      onChange={(e) => setSources((prev) => prev.map((x) => (x.id === s.id ? { ...x, kind: e.target.value as Kind, path: undefined } : x)))}
+                      style={{ ...cell, width: "auto", padding: "3px 6px" }}>
+                      {(Object.keys(KIND_LABEL) as Kind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
+                    </select>
+                    <Btn size="sm" variant="ghost" disabled={!!importing}
+                      onClick={() => setSources((prev) => prev.filter((x) => x.id !== s.id).map((x) => ({ ...x, path: undefined })))}>外す</Btn>
+                  </div>
+                ))}
+                <div style={{ fontSize: 11, color: T.textFaint, lineHeight: 1.7 }}>
+                  正答は「模範解答」からだけ取り込みます。「生徒の答案」は印刷された配点・設問番号だけを読み、手書きの答えは使いません（登録後に保管場所から削除します）。
+                </div>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <Btn variant="primary" onClick={runImport} disabled={!!importing || !sources.some((s) => s.kind === "key")}>
+                {importing === "upload" ? "資料を保存しています…" : importing === "read" ? "AIが読み取っています…（1〜3分）" : "AIで読み取って入力する"}
+              </Btn>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11.5, color: T.textSub }}>
+                <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} disabled={!!importing} />
+                同じ資料でも、もう一度AIに読み取らせる（料金がかかります）
+              </label>
+            </div>
+            {imported?.warnings.length ? (
+              <div style={{ fontSize: 12, color: T.warn, lineHeight: 1.7 }}>
+                {imported.warnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
 
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820, fontSize: 12.5 }}>
-          <thead>
-            <tr style={{ color: T.textSub, fontSize: 11 }}>
-              {["No.", "形式", "単元", "配点", "難易度", "正答", "模範解答・解説の要点", ""].map((h) => (
-                <th key={h} style={{ textAlign: "start", padding: "6px 5px", borderBottom: `1px solid ${T.lineStrong}` }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={r.key}>
-                <td style={{ padding: 4, font: `700 12px ${FONT_MONO}`, color: T.textSub }}>{i + 1}</td>
-                <td style={{ padding: 4, width: 120 }}>
-                  <Select value={r.type} style={cell}
-                    onChange={(v: string) => update(r.key, { type: v as QType, points: defaultPoints(v as QType) })}
-                    options={QTYPES.map((q) => ({ value: q.k, label: q.label }))} />
-                </td>
-                <td style={{ padding: 4, width: 150 }}>
-                  {units.length ? (
-                    <Select value={r.unit} style={cell} onChange={(v: string) => update(r.key, { unit: v })}
-                      options={[{ value: "", label: "（選ぶ）" }, ...units.map((u) => ({ value: u, label: u }))]} />
-                  ) : (
-                    <input value={r.unit} onChange={(e) => update(r.key, { unit: e.target.value })} placeholder="単元" style={cell} />
-                  )}
-                </td>
-                <td style={{ padding: 4, width: 70 }}>
-                  <input type="number" min={1} max={100} value={r.points} aria-label={`${i + 1}問目の配点`}
-                    onChange={(e) => update(r.key, { points: Number(e.target.value) })} style={{ ...cell, textAlign: "center" }} />
-                </td>
-                <td style={{ padding: 4, width: 90 }}>
-                  <Select value={r.difficulty} style={cell} onChange={(v: string) => update(r.key, { difficulty: v })}
-                    options={DIFFICULTIES.map((d) => ({ value: d, label: d }))} />
-                </td>
-                <td style={{ padding: 4 }}>
-                  <input value={r.correct} onChange={(e) => update(r.key, { correct: e.target.value })} aria-label={`${i + 1}問目の正答`}
-                    placeholder={r.type === "choice" ? "ア" : r.type === "long" || r.type === "short" ? "（記述）" : "正答"} style={cell} />
-                </td>
-                <td style={{ padding: 4 }}>
-                  <input value={r.model} onChange={(e) => update(r.key, { model: e.target.value })} aria-label={`${i + 1}問目の解説`}
-                    placeholder="採点の要点・解き方" style={cell} />
-                </td>
-                <td style={{ padding: 4, width: 36 }}>
-                  <Btn size="sm" variant="ghost" onClick={() => setRows((prev) => prev.filter((x) => x.key !== r.key))}
-                    disabled={rows.length <= 1} title="この設問を削除">✕</Btn>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* ------------------------------------------------ 集計 */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }} aria-label="設問の集計">
+        <Badge tone="info">設問 {rows.length} 問</Badge>
+        <Badge tone={mismatch ? "ng" : "ok"}>合計 {total} 点</Badge>
+        {maxScore != null && <Badge tone={mismatch ? "ng" : "ok"}>原本の満点 {maxScore} 点</Badge>}
+        <span style={{ fontSize: 11.5, color: T.textSub }}>大問ごとの小問数：{bigs.map(([b, n]) => `大問${b}=${n}`).join("・")}</span>
+        {flagged.length > 0 && <Badge tone={unconfirmed.length ? "warn" : "ok"}>要確認 {flagged.length} 問（未確認 {unconfirmed.length}）</Badge>}
       </div>
-      <div style={{ fontSize: 11.5, color: T.textFaint, marginTop: 10, lineHeight: 1.7 }}>
-        設問番号は「大問1-(1)」のように4問ずつ自動で振ります。正答と解説の要点は、採点AIが部分点を判定するときの基準になります。
+      {mismatch && (
+        <div role="status" style={{ fontSize: 12, color: T.ng, marginBottom: 8 }}>
+          合計点 {total} 点が、原本の満点 {maxScore} 点と一致しません。配点を確認してください。
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+        {/* ------------------------------------------------ 元画像（見比べ用） */}
+        {showViewer && (
+          <div style={{ flex: "1 1 360px", minWidth: 280, maxWidth: 520, position: "sticky", top: 0 }}>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
+              {sources.map((s, i) => (
+                <Btn key={s.id} size="sm" variant={current?.id === s.id ? "primary" : "default"} onClick={() => setView({ source: s.id, box: null })}>
+                  資料{i + 1}
+                </Btn>
+              ))}
+            </div>
+            {current && (
+              <div style={{ border: `1px solid ${T.line}`, borderRadius: 9, overflow: "hidden", background: T.bgAlt }}>
+                <div style={{ fontSize: 11, color: T.textSub, padding: "4px 8px" }}>
+                  {KIND_LABEL[current.kind]}・{current.name}{view?.box ? `（${view.box.page} ページ目の該当箇所を枠で表示）` : ""}
+                </div>
+                {current.type === "application/pdf" ? (
+                  <object data={`${urls.get(current.id)}#page=${view?.box?.page ?? 1}`} type="application/pdf" aria-label="元の資料（PDF）"
+                    style={{ width: "100%", height: 560 }}>PDF を表示できません。</object>
+                ) : (
+                  <div style={{ position: "relative" }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={urls.get(current.id)} alt={`元の資料：${current.name}`} style={{ width: "100%", display: "block" }} />
+                    {view?.box && (
+                      <div aria-label="該当箇所" style={{
+                        position: "absolute", left: `${view.box.x * 100}%`, top: `${view.box.y * 100}%`,
+                        width: `${view.box.w * 100}%`, height: `${view.box.h * 100}%`,
+                        border: `3px solid ${T.shu}`, borderRadius: 4, boxShadow: "0 0 0 9999px rgba(0,0,0,.18)",
+                      }} />
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ------------------------------------------------ 設問 */}
+        <div style={{ flex: "3 1 560px", minWidth: 0 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "0 0 10px" }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.text, flex: 1 }}>設問</div>
+            <input type="number" min={1} max={40} value={bulk} onChange={(e) => setBulk(e.target.value)} aria-label="まとめて追加する問題数"
+              style={{ ...cell, width: 64 }} />
+            <Btn size="sm" onClick={() => addRows(Math.min(40, Math.max(1, Number(bulk) || 1)))}>問まとめて追加</Btn>
+            <Btn size="sm" variant="soft" onClick={() => addRows(1)}>＋ 小問を追加</Btn>
+            <Btn size="sm" variant="soft" onClick={() => addRows(1, true)}>＋ 大問を追加</Btn>
+          </div>
+
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900, fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ color: T.textSub, fontSize: 11 }}>
+                  {["大問", "小問", "形式", "単元", "配点", "難易度", "正答", "模範解答・解説の要点（作図は採点条件）", ""].map((h) => (
+                    <th key={h} style={{ textAlign: "start", padding: "6px 5px", borderBottom: `1px solid ${T.lineStrong}` }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const lbl = labelOf(r.big, r.sub);
+                  const warn = r.flags.length > 0 && !r.confirmed;
+                  return (
+                    <React.Fragment key={r.key}>
+                      <tr onClick={() => { setSelected(r.key); showBox(r.type === "graph" ? r.figure ?? r.answerBox : r.answerBox); }}
+                        style={{ background: warn ? T.warnSoft : selected === r.key ? T.accentSoft : "transparent" }}>
+                        <td style={{ padding: 4, width: 58 }}>
+                          <input type="number" min={1} max={99} value={r.big} aria-label={`${lbl} の大問番号`}
+                            onChange={(e) => update(r.key, { big: Number(e.target.value) })} style={{ ...cell, textAlign: "center" }} />
+                        </td>
+                        <td style={{ padding: 4, width: 64 }}>
+                          <input value={r.sub} aria-label={`${lbl} の小問`} placeholder="なし"
+                            onChange={(e) => update(r.key, { sub: e.target.value })} style={{ ...cell, textAlign: "center" }} />
+                        </td>
+                        <td style={{ padding: 4, width: 112 }}>
+                          <Select value={r.type} style={cell}
+                            onChange={(v: string) => update(r.key, { type: v as QType, ...(r.flags.length ? {} : { points: defaultPoints(v as QType) }) })}
+                            options={QTYPES.map((q) => ({ value: q.k, label: q.label }))} />
+                        </td>
+                        <td style={{ padding: 4, width: 120 }}>
+                          {units.length ? (
+                            <Select value={r.unit} style={cell} onChange={(v: string) => update(r.key, { unit: v })}
+                              options={[{ value: "", label: "（選ぶ）" }, ...units.map((u) => ({ value: u, label: u }))]} />
+                          ) : (
+                            <input value={r.unit} onChange={(e) => update(r.key, { unit: e.target.value })} placeholder="単元" style={cell} />
+                          )}
+                        </td>
+                        <td style={{ padding: 4, width: 72 }}>
+                          <input type="number" min={1} max={100} value={r.points} aria-label={`${lbl} の配点`}
+                            placeholder={r.pointsHint ? `候補${r.pointsHint}` : "要確認"}
+                            onChange={(e) => update(r.key, { points: e.target.value === "" ? "" : Number(e.target.value) })}
+                            style={{ ...cell, textAlign: "center", borderColor: r.points === "" ? T.warn : undefined }} />
+                        </td>
+                        <td style={{ padding: 4, width: 82 }}>
+                          <Select value={r.difficulty} style={cell} onChange={(v: string) => update(r.key, { difficulty: v })}
+                            options={DIFFICULTIES.map((d) => ({ value: d, label: d }))} />
+                        </td>
+                        <td style={{ padding: 4 }}>
+                          <input value={r.correct} onChange={(e) => update(r.key, { correct: e.target.value })} aria-label={`${lbl} の正答`}
+                            placeholder={r.type === "graph" ? "（作図：右の採点条件）" : r.type === "choice" ? "ア" : r.type === "long" || r.type === "short" ? "（記述）" : "正答"}
+                            disabled={r.type === "graph"} style={cell} />
+                        </td>
+                        <td style={{ padding: 4 }}>
+                          <textarea value={r.model} onChange={(e) => update(r.key, { model: e.target.value })} aria-label={`${lbl} の解説`} rows={r.type === "graph" ? 3 : 1}
+                            placeholder={r.type === "graph" ? "採点条件（例：角の二等分線の作図の跡が残っている）" : "採点の要点・解き方"}
+                            style={{ ...cell, resize: "vertical", minHeight: 30 }} />
+                        </td>
+                        <td style={{ padding: 4, width: 36 }}>
+                          <Btn size="sm" variant="ghost" onClick={() => setRows((prev) => prev.filter((x) => x.key !== r.key))}
+                            disabled={rows.length <= 1} title="この設問を削除">✕</Btn>
+                        </td>
+                      </tr>
+                      {(r.flags.length > 0 || r.type === "graph") && (
+                        <tr style={{ background: warn ? T.warnSoft : "transparent" }}>
+                          <td colSpan={9} style={{ padding: "0 8px 8px 8px", fontSize: 11.5, color: T.text }}>
+                            <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+                              {r.flags.length > 0 && <Badge tone={r.confirmed ? "ok" : "warn"}>{r.confirmed ? "確認済み" : "要確認"}</Badge>}
+                              <ul style={{ margin: 0, paddingInlineStart: 16, flex: 1, minWidth: 240, lineHeight: 1.7 }}>
+                                {r.flags.map((f, i) => <li key={i}>{f}</li>)}
+                                {r.type === "graph" && (
+                                  <li>
+                                    模範図：{r.figure && sources[r.figure.file - 1]
+                                      ? <button type="button" onClick={(e) => { e.stopPropagation(); showBox(r.figure); }}
+                                          style={{ border: "none", background: "transparent", color: T.accent, cursor: "pointer", font: "inherit", textDecoration: "underline", padding: 0 }}>
+                                          資料{r.figure.file} の {r.figure.page} ページ目を表示
+                                        </button>
+                                      : "未設定（元画像で模範図の場所を確認し、採点条件に書いてください）"}
+                                  </li>
+                                )}
+                              </ul>
+                              {r.flags.length > 0 && (
+                                <label style={{ display: "flex", gap: 6, alignItems: "center", whiteSpace: "nowrap" }}>
+                                  <input type="checkbox" checked={r.confirmed} aria-label={`${lbl} を確認した`}
+                                    onChange={(e) => update(r.key, { confirmed: e.target.checked })} />
+                                  確認した
+                                </label>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ fontSize: 11.5, color: T.textFaint, marginTop: 10, lineHeight: 1.7 }}>
+            大問・小問は原本どおりに入力してください（小問が無い大問は小問を空欄に）。設問名は「大問1-(1)」のように作ります。
+            正答と解説の要点は、採点AIが判定するときの基準になります。作図の問題は、模範図を確認したうえで採点条件を書いてください。
+          </div>
+        </div>
       </div>
     </Modal>
   );

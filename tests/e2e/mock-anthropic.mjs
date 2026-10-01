@@ -11,6 +11,34 @@
 //   GET  /__requests            受け取ったリクエスト（検査用）
 //   POST /__mode {"mode":"..."} 次の1回だけ "ratelimit"（429）/ "refusal" を返す
 import http from "node:http";
+import { readFileSync } from "node:fs";
+
+// 模範解答からの自動入力の代役：今回のテスト（20問・100点、5・5・1・3・1・3・2）を読み取った結果を返す
+const IMPORT_RAW = readFileSync(new URL("../fixtures/import-raw.json", import.meta.url), "utf8");
+const isImport = (body) => /テストを登録する教員の補助/.test(String(body.system));
+function importProblems(req, body) {
+  const p = [];
+  if (req.headers["x-api-key"] !== process.env.EXPECTED_API_KEY) p.push("x-api-key が違う");
+  if (body.model !== "claude-opus-5") p.push(`model が claude-opus-5 でない（${body.model}）`);
+  if (body.stream !== true) p.push("stream で受け取っていない");
+  if (body.thinking?.type !== "adaptive") p.push("thinking が adaptive でない");
+  if (body.output_config?.format?.type !== "json_schema") p.push("output_config.format が json_schema でない");
+  const content = body.messages?.[0]?.content ?? [];
+  if (!content.some((c) => c.type === "text" && /資料1：模範解答/.test(c.text))) p.push("資料の種類（模範解答）を示していない");
+  if (!content.some((c) => (c.type === "image" || c.type === "document") && c.source?.data)) p.push("資料の画像が無い");
+  return p;
+}
+function sse(res, model, text) {
+  res.writeHead(200, { "content-type": "text/event-stream", "request-id": "req_mock_import" });
+  const ev = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
+  ev("message_start", { message: { id: "msg_mock_import", type: "message", role: "assistant", model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 5200, output_tokens: 1 } } });
+  ev("content_block_start", { index: 0, content_block: { type: "text", text: "" } });
+  ev("content_block_delta", { index: 0, delta: { type: "text_delta", text } });
+  ev("content_block_stop", { index: 0 });
+  ev("message_delta", { delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 2600 } });
+  ev("message_stop", {});
+  res.end();
+}
 
 const PORT = Number(process.env.MOCK_ANTHROPIC_PORT || 4010);
 const requests = [];
@@ -121,6 +149,18 @@ const server = http.createServer((req, res) => {
     if (req.method !== "POST" || !req.url.startsWith("/v1/messages")) return send(404, { type: "error", error: { type: "not_found_error", message: "not found" } });
 
     const body = JSON.parse(raw);
+    if (isImport(body)) {
+      const bad = importProblems(req, body);
+      const content = body.messages[0].content;
+      const mode = scripts.import?.shift() ?? "clean";
+      requests.push({ url: req.url, kind: "import", model: body.model, mode, problems: bad,
+        sources: content.filter((c) => c.type === "text" && /^資料\d+：/.test(c.text)).map((c) => c.text),
+        images: content.filter((c) => c.type === "image" || c.type === "document").length });
+      if (bad.length) return send(400, { type: "error", error: { type: "invalid_request_error", message: bad.join(" / ") } });
+      const reply = () => sse(res, body.model, IMPORT_RAW);
+      if (mode === "slow") setTimeout(reply, 2500); else reply();
+      return;
+    }
     if (isCompare(body)) {
       const bad = compareProblems(req, body);
       requests.push({ url: req.url, kind: "compare", model: body.model, problems: bad });

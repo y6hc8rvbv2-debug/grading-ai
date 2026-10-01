@@ -1,14 +1,16 @@
 "use client";
 // テスト管理。docs/prototype-v3.jsx から移植し、テストの登録フォームを追加した。
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { download, fmtDate, toCSV } from "@/lib/util";
 import { useUI } from "@/components/ui-context";
 import { Badge, Btn, Card, Empty, Modal, Stat, Table, grid } from "@/components/ui";
 import NewTestForm from "@/components/screens/NewTestForm";
+import type { FigureRef, Question } from "@/lib/types";
 
 export default function TestsView() {
   const { T, subs, toast, ws, testById } = useUI();
   const [open, setOpen] = useState<string | null>(null);
+  const [figure, setFigure] = useState<{ ref: FigureRef; title: string } | null>(null);
   const [creating, setCreating] = useState(false);
   const test = open ? testById(open) : null;
 
@@ -83,14 +85,64 @@ export default function TestsView() {
                 { key: "typeLabel", label: "形式" },
                 { key: "difficulty", label: "難易度", render: (r: { difficulty: string }) => <Badge tone={r.difficulty === "難" ? "ng" : r.difficulty === "標準" ? "warn" : "ok"}>{r.difficulty}</Badge> },
                 { key: "points", label: "配点", align: "right" },
-                { key: "correct", label: "正答", wrap: true },
+                {
+                  key: "correct", label: "正答・採点条件", wrap: true,
+                  render: (q: Question) => q.type === "graph" ? (
+                    <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+                      <div style={{ whiteSpace: "pre-wrap" }}>{q.model || "（採点条件が未入力です）"}</div>
+                      {q.figure && <Btn size="sm" variant="soft" onClick={() => setFigure({ ref: q.figure!, title: `${q.label} の模範図` })}>模範図を見る</Btn>}
+                    </div>
+                  ) : q.correct,
+                },
               ]}
               rows={test.questions.map((q) => ({ ...q, id: `q${q.no}` }))}
               maxHeight={340}
             />
+            {!!test.answerKeyPaths?.length && (
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 10, fontSize: 12, color: T.textSub }}>
+                登録時の模範解答・配点表：
+                {test.answerKeyPaths.map((p, i) => (
+                  <Btn key={p} size="sm" onClick={() => setFigure({ ref: { path: p, page: 1, x: 0, y: 0, w: 0, h: 0 }, title: `資料${i + 1}` })}>資料{i + 1}</Btn>
+                ))}
+              </div>
+            )}
           </>
         )}
       </Modal>
+      <FigureModal figure={figure} onClose={() => setFigure(null)} />
     </div>
+  );
+}
+
+/** 模範図（登録時の模範解答の画像の該当箇所）を表示する */
+function FigureModal({ figure, onClose }: { figure: { ref: FigureRef; title: string } | null; onClose: () => void }) {
+  const { T, ds } = useUI();
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    setUrl(null);
+    if (!figure) return;
+    let alive = true;
+    ds.signedImageUrl(figure.ref.path).then((u) => { if (alive) setUrl(u || null); }).catch(() => { if (alive) setUrl(null); });
+    return () => { alive = false; };
+  }, [ds, figure]);
+  const r = figure?.ref;
+  const pdf = r?.path.toLowerCase().endsWith(".pdf");
+  return (
+    <Modal open={!!figure} onClose={onClose} title={figure?.title ?? ""} width={720}>
+      {!url ? <div style={{ fontSize: 12.5, color: T.textSub }}>読み込んでいます…</div>
+        : pdf ? <a href={`${url}#page=${r!.page}`} target="_blank" rel="noreferrer">PDF の {r!.page} ページ目を開く</a>
+        : (
+          <div style={{ position: "relative" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={url} alt={figure?.title ?? "模範図"} style={{ width: "100%", display: "block", borderRadius: 6 }} />
+            {r!.w > 0 && r!.h > 0 && (
+              <div aria-label="模範図の位置" style={{
+                position: "absolute", left: `${r!.x * 100}%`, top: `${r!.y * 100}%`, width: `${r!.w * 100}%`, height: `${r!.h * 100}%`,
+                border: `3px solid ${T.shu}`, borderRadius: 4,
+              }} />
+            )}
+          </div>
+        )}
+    </Modal>
   );
 }

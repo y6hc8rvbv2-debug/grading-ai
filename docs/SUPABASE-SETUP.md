@@ -28,12 +28,13 @@
 2. 「New query」を押します。
 3. `supabase/migrations/0001_init.sql` の中身を**全部**貼り付けます。
 4. 右下の **Run** を押します。
-5. 同じ手順で `supabase/migrations/0002_storage.sql`、`0003_app_support.sql`、`0004_ai_grading.sql`、`0005_model_compare.sql`、`0006_grading_modes.sql` の順に実行します。
+5. 同じ手順で `supabase/migrations/0002_storage.sql`、`0003_app_support.sql`、`0004_ai_grading.sql`、`0005_model_compare.sql`、`0006_grading_modes.sql`、`0007_test_import.sql` の順に実行します。
 
-> `0002` 以降は `0001` の関数やテーブルを使うので、**0001 → 0002 → 0003 → 0004 → 0005 → 0006 の順番を守ってください**。
+> `0002` 以降は `0001` の関数やテーブルを使うので、**0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 の順番を守ってください**。
 > すでに 0003 まで流してある場合は、`0004_ai_grading.sql`（採点AIの結果の保存）と `0005_model_compare.sql`（管理者用のモデル比較試験の記録）を追加で実行します。
 > 0005 は新しい表を2つ作るだけで、既存の生徒・テスト・答案・成績には触れません。
 > `0006_grading_modes.sql`（採点方式「Opus単独 / 3モデル併用」と AI採点の記録）は、AI採点を使うなら必須です。答案の表に列を2つ足し（既存の答案は空のまま）、記録用の表を2つ作ります。0004 の後に実行してください。
+> `0007_test_import.sql`（テスト管理の「模範解答・配点表から自動入力」）は、テスト・設問の表に列を1つずつ足し（既存の行は空のまま）、読み取りの記録の表を1つ作ります。
 
 **ここまでで確認できること**：左メニュー **Table Editor** に `schools` `students` `submissions` など 12 個のテーブルが並ぶ。
 

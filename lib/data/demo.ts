@@ -122,8 +122,8 @@ export function createDemoSource(): DataSource {
     async createTest(input) {
       const id = `t_new_${Date.now()}`;
       const questions = input.questions.map((q, i) => ({
-        id: `${id}_q${i + 1}`, no: i + 1, big: Math.floor(i / 4) + 1,
-        label: `大問${Math.floor(i / 4) + 1}-(${(i % 4) + 1})`,
+        id: `${id}_q${i + 1}`, no: i + 1, big: q.big,
+        label: q.sub ? `大問${q.big}-${q.sub}` : `大問${q.big}`,
         type: q.type, typeLabel: typeLabelOf(q.type), unit: q.unit, points: q.points,
         difficulty: q.difficulty, correct: q.correct, model: q.model,
       }));
@@ -180,6 +180,12 @@ export function createDemoSource(): DataSource {
       throw new Error("デモモードでは採点AIを使えません。Supabase と ANTHROPIC_API_KEY を設定すると使えます。");
     },
     gradingLog: async () => [],
+    importTestKey: async () => {
+      throw new Error("デモモードでは模範解答からの自動入力を使えません。Supabase と ANTHROPIC_API_KEY を設定すると使えます。");
+    },
+    uploadImportFile: async () => { throw new Error("デモモードでは資料を保存できません。"); },
+    removeImportFiles: async () => {},
+    linkImport: async () => {},
 
     signedImageUrl: async () => "",
     loadAudit: async () => clone(audit),

@@ -109,6 +109,32 @@ export function createSupabaseSource(): DataSource {
     },
     gradingLog: (submissionId) => db.loadGradingLog(submissionId),
 
+    uploadImportFile: (requestId, index, file) => db.uploadImportFile(schoolId(), requestId, index, file),
+    // 同じ requestId で送り直しても、サーバーは同じ読み取りとして扱う（AI を二重に呼ばない）
+    async importTestKey(params) {
+      const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      let networkErrors = 0;
+      for (let step = 0; step < 120; step++) {
+        let res: Response;
+        try {
+          res = await fetch("/api/test-import", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params),
+          });
+        } catch {
+          if (++networkErrors > 3) throw new Error("サーバーに接続できないため読み取れませんでした。インターネット接続を確認して、もう一度お試しください。");
+          await wait(2000 * networkErrors);
+          continue;
+        }
+        const json = await res.json().catch(() => null);
+        if (res.status === 202 || res.status === 504 || (res.status === 502 && !json)) { await wait(3000); continue; }
+        if (!res.ok || !json?.ok) throw new Error(json?.error ?? "読み取りに失敗しました。時間をおいて、もう一度お試しください。");
+        return { importId: json.importId, result: json.result, cached: !!json.cached };
+      }
+      throw new Error("読み取りが終わりませんでした。時間をおいて、もう一度お試しください。");
+    },
+    removeImportFiles: (paths) => db.removeImportFiles(paths),
+    linkImport: (importId, testId) => db.linkImport(importId, testId),
+
     signedImageUrl: (path) => db.signedImageUrl(path),
     loadAudit: () => db.loadAudit(),
     verifyAudit: () => db.verifyAuditChain(schoolId()),

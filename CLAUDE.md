@@ -27,7 +27,8 @@
 
 ### 1. 本番で AI 採点を動かす ← ユーザー作業待ち
 
-- Supabase の SQL Editor で `0004_ai_grading.sql`・`0005_model_compare.sql`・`0006_grading_modes.sql` を実行する
+- Supabase の SQL Editor で `0004_ai_grading.sql`・`0005_model_compare.sql`・`0006_grading_modes.sql`・`0007_test_import.sql` を実行する
+- Preview で模範解答（20問・100点・5・5・1・3・1・3・2）から自動入力し、読み取り精度を確かめる
 - Preview で「3モデル併用」を試し、Sonnet・Opus に回った割合（目安 20%・5%）と実際の費用を「AI採点の記録」で確かめる
 - Preview で管理者がモデル比較試験（`/compare`）を実行し、結果を確認する
 - Vercel に `ANTHROPIC_API_KEY` を設定して再デプロイする（`docs/SUPABASE-SETUP.md` ステップ6.5）
@@ -81,7 +82,17 @@
 - HEIC（iPhone の写真）: ブラウザが読めれば（Safari）そのまま、読めなければ `heic-to`（libheif の WASM、LGPL-3.0、HEIC のときだけ動的読み込み）で JPEG に変換してから保存する。
   以前に HEIC のまま保存された答案は、採点時にサーバーで変換する（`lib/ai/heic.ts`、`heic-decode` + `jpeg-js`。`next.config.mjs` で外部パッケージ扱い）
 - 1人分を複数枚で撮った答案: 「新規採点」の「1人分の答案の枚数」で N 枚ずつ同じ生徒にまとめる（同じ生徒を選んだ写真もまとめる）。1答案10ページまで。採点AIには全ページを送る
-- 設定画面の「AI採点の準備状況」（`/api/health`）で、Supabase・ANTHROPIC_API_KEY・0004・0005 がそろっているかを確認できる（値は返さない）
+- 設定画面の「AI採点の準備状況」（`/api/health`）で、Supabase・ANTHROPIC_API_KEY・0004〜0007 がそろっているかを確認できる（値は返さない）
+- **模範解答からテストを自動作成（0007）**: テスト管理 →「テストを追加」→「模範解答・配点表から自動入力」（`components/screens/NewTestForm.tsx`）
+  - 資料は 模範解答（必須）/ 問題用紙・配点表 / 生徒の答案（印刷された配点だけ）。画像・PDF・HEIC（ブラウザで JPEG 化）、複数ページ可。
+    Storage の `{school_id}/imports/{requestId}/` に置き、`app/api/test-import/route.ts` が Opus（adaptive・effort high・stream）で読み取る
+  - 後処理 `lib/ai/test-import.ts` の `normalizeImport`：配点は印刷されたものだけ確定（無ければ空欄＋要確認、候補は placeholder）。
+    正答は模範解答の資料から読めたものだけ（読めない・生徒の答案から → 空欄＋要確認）。作図は「右図」を使わず、模範図の位置（`questions.figure`）と採点条件（`model_answer`）を教員が確認
+  - 大問・小問は原本どおり（`questions.big` と label「大問1-(1)」／小問が無ければ「大問3」）。以前の「4問ずつ大問を振る」方式は廃止
+  - 要確認の設問は「確認した」にチェックしないと登録できない。配点が空欄でも登録できない。合計点と原本の満点が違えば表示し、登録時に確認する
+  - 元画像と入力欄を並べて表示（行を選ぶと該当箇所を枠で示す）。入力途中は IndexedDB（`lib/draft.ts`）に下書き（資料のファイルごと）。上書き前に確認
+  - 重複実行の防止：requestId の再送は同じ読み取り、同じ資料（内容の sha256＋種類）は実行中なら断り、終わっていれば結果を再利用（`test_imports`）
+  - 登録時：模範解答・問題用紙は `tests.answer_key_paths` に残し、生徒の答案は Storage から消す。テスト詳細から模範図を見られる
 - 赤ペン: AI が返す `bbox`（解答欄の位置・ページ番号）に `components/RedPenOverlay.tsx` でマークを重ねる。答案詳細で原本のページを切り替えられる。「清書版」（`RedPenSheet`）にも切り替えられる
 
 まだ生成AIに置き換えていないもの（`// PROD-API:` コメントが残っている）:
@@ -164,7 +175,7 @@ Next.js 14 (App Router, TypeScript)
       └── supabase/{client,server}.ts
 
 Supabase
-  ├── PostgreSQL             16テーブル + RLS + トリガー + 分析ビュー + AI採点の保存関数（supabase/migrations/0001〜0006）
+  ├── PostgreSQL             17テーブル + RLS + トリガー + 分析ビュー + AI採点の保存関数（supabase/migrations/0001〜0007）
   ├── Storage                answer-sheets（非公開・署名付きURLのみ）。パスは {school_id}/{test_id}/{submission_id}/{page}.{ext}
   └── Auth                   教職員のみ。所属校と役割は app_metadata で付与（一般サインアップでは所属が付かない）
 ```
@@ -258,7 +269,8 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
 ## 未検証・未解決の事項
 
 1. **本物の Claude API での採点が未実行** — 代役サーバーでリクエストの形と保存までを検証済み。読み取り精度・bbox の精度・所要時間・費用は本番で確かめる
-2. **0004・0005・0006 が本番 Supabase に未適用**（「次にやること」1）
+2. **0004〜0007 が本番 Supabase に未適用**（「次にやること」1）
+16. **模範解答からの自動入力は代役 API でのみ検証** — 本物の模範解答での読み取り精度（特に配点表・作図・PDF の bbox）は Preview で確かめる。PDF の資料は該当箇所の枠を表示できない（ページを開くだけ）。作図の模範図は採点AIには送っていない（採点条件の文章だけ）
 15. **3モデル併用は代役 API でのみ検証** — 本物の Haiku / Sonnet での読み取り精度・振り分けの割合・費用は未確認。正答との照合（`normAnswer`）は表記ゆれで誤検知しうる（誤検知は上のモデル・要確認に回るので、精度側に倒れる）
 14. **モデル比較試験は未実行** — Preview で管理者が実行する準備まで完了（代役サーバーでの E2E のみ検証済み）
 3. **生徒モバイル提出・複合機スキャン連携は「準備中」** — 画面に準備中と表示し、代わりの取り込み方法を案内している

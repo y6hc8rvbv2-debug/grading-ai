@@ -72,8 +72,12 @@ function mapQuestion(q: any) {
     typeLabel: typeLabelOf(q.qtype), unit: q.unit,
     points: q.points, difficulty: q.difficulty,
     correct: q.correct, model: q.model_answer,
+    figure: q.figure ?? null,
   };
 }
+
+/** 設問の表示名：原本どおりの大問・小問（例: 大問1-(2)、小問が無ければ 大問3） */
+export const questionLabel = (big: number, sub: string) => (sub ? `大問${big}-${sub}` : `大問${big}`);
 
 /** 画面初期化に必要なマスタ（クラス・生徒・テスト・設問）をまとめて読む */
 export async function loadWorkspace(): Promise<Workspace> {
@@ -117,6 +121,7 @@ export async function loadWorkspace(): Promise<Workspace> {
       maxScore: t.max_score || sum,
       bigCount: qs.reduce((a, q) => Math.max(a, q.big), 0),
       questions: qs,
+      answerKeyPaths: t.answer_key_paths ?? [],
     };
   });
 
@@ -390,6 +395,8 @@ export async function createTest(schoolId: string, userId: string, input: NewTes
       units: input.units,
       max_score: maxScore,
       created_by: userId,
+      // 自動入力を使ったときだけ（0007 の列。手入力のときは送らないので、0007 を実行する前でも登録できる）
+      ...(input.answerKeyPaths?.length ? { answer_key_paths: input.answerKeyPaths } : {}),
     })
     .select("id")
     .single();
@@ -400,8 +407,10 @@ export async function createTest(schoolId: string, userId: string, input: NewTes
       school_id: schoolId,
       test_id: t.id,
       no: i + 1,
-      big: Math.floor(i / 4) + 1,
-      label: `大問${Math.floor(i / 4) + 1}-(${(i % 4) + 1})`,
+      // 大問・小問は原本どおり（以前の「4問ずつ大問を振る」方式はやめた）
+      big: q.big,
+      label: questionLabel(q.big, q.sub),
+      ...(q.figure ? { figure: q.figure } : {}),
       qtype: q.type,
       unit: q.unit,
       points: q.points,
@@ -418,9 +427,33 @@ export async function createTest(schoolId: string, userId: string, input: NewTes
 
   await writeAudit({
     schoolId, action: "test.create", targetTable: "tests", targetId: t.id,
-    detail: { name: input.name, questions: input.questions.length },
+    detail: { name: input.name, questions: input.questions.length, imported: !!input.answerKeyPaths?.length },
   });
   return t.id as string;
+}
+
+/* --------------------------------------------------------- 模範解答からの自動入力 */
+
+/** 自動入力の資料を Storage に置く（{school_id}/imports/{requestId}/{n}.{ext}） */
+export async function uploadImportFile(schoolId: string, requestId: string, index: number, file: File) {
+  const sb = createClient();
+  const ext = (file.name.split(".").pop()?.toLowerCase() || "jpg").replace(/[^a-z0-9]/g, "");
+  const path = `${schoolId}/imports/${requestId}/${index + 1}.${ext}`;
+  const { error } = await sb.storage.from("answer-sheets")
+    .upload(path, file, { upsert: true, contentType: file.type || undefined });
+  if (error) throw error;
+  return path;
+}
+
+/** 生徒の答案など、テストに残さない資料を消す */
+export async function removeImportFiles(paths: string[]) {
+  if (!paths.length) return;
+  await createClient().storage.from("answer-sheets").remove(paths);
+}
+
+/** 読み取りの記録に、登録したテストを紐づける */
+export async function linkImport(importId: string, testId: string) {
+  await createClient().from("test_imports").update({ test_id: testId }).eq("id", importId);
 }
 
 /** 学校の既定の採点基準（test_id が null の行）。未登録なら初期値。 */

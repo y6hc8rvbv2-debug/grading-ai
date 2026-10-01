@@ -680,3 +680,47 @@ begin
   end;
 end $$;
 reset role;
+
+-- ============================================================================
+-- 0007 模範解答からの自動作成：同じ資料の重複実行を防ぐ・他校から見えない・既存データを変えない
+-- ============================================================================
+set role authenticated;
+select pg_temp.login('aaaaaaaa-0000-0000-0000-00000000000b');
+do $$
+begin
+  assert (select count(*) from public.tests where answer_key_paths is not null) = 0, '既存のテストの列は空のまま（変更しない）';
+  assert (select count(*) from public.questions where figure is not null) = 0, '既存の設問の列は空のまま（変更しない）';
+
+  insert into public.test_imports (id, school_id, created_by, request_id, input_sha)
+  values ('eeeeeeee-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000000',
+          'aaaaaaaa-0000-0000-0000-00000000000b', 'eeeeeeee-1111-0000-0000-000000000001', repeat('a', 64));
+  begin
+    insert into public.test_imports (school_id, created_by, request_id, input_sha)
+    values ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-00000000000b', gen_random_uuid(), repeat('a', 64));
+    raise exception 'FAIL: 同じ資料の読み取りを同時に2つ始められてしまう';
+  exception when unique_violation then null;
+  end;
+  update public.test_imports set status = 'done', result = '{"questions":[]}' where id = 'eeeeeeee-0000-0000-0000-000000000001';
+  begin
+    update public.test_imports set result = '{"questions":[1]}' where id = 'eeeeeeee-0000-0000-0000-000000000001';
+    raise exception 'FAIL: 終わった読み取りの結果を書き換えられてしまう';
+  exception when invalid_parameter_value then null;
+  end;
+  -- 登録したテストとの紐づけは後から付けられる
+  update public.test_imports set test_id = 'aaaaaaaa-0000-0000-0000-0000000000e1' where id = 'eeeeeeee-0000-0000-0000-000000000001';
+  -- 終わった後は、同じ資料で次の読み取りを始められる
+  insert into public.test_imports (school_id, created_by, request_id, input_sha)
+  values ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-00000000000b', gen_random_uuid(), repeat('a', 64));
+  begin
+    insert into public.test_imports (school_id, created_by, request_id, input_sha)
+    values ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-00000000000a', gen_random_uuid(), repeat('b', 64));
+    raise exception 'FAIL: 他人を実行者として記録できてしまう';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+select pg_temp.login('bbbbbbbb-0000-0000-0000-00000000000b');
+do $$
+begin
+  assert (select count(*) from public.test_imports) = 0, '他校の読み取りの記録は見えないこと';
+end $$;
+reset role;

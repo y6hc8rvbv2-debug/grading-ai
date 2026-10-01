@@ -420,6 +420,94 @@ await page.getByRole("button", { name: /^AI採点の記録/ }).click(); await se
 ok((await text()).includes("失敗（成績は変更なし）"), "失敗した採点も記録に残る");
 await page.getByLabel("採点方式").selectOption("opus");
 
+// 11d. 模範解答・配点表からテストを自動作成（AI は代役。今回のテスト 20問・100点・5・5・1・3・1・3・2 を返す）
+{
+  const p = await browser.newPage({ viewport: { width: 700, height: 990 } });
+  await p.setContent(`<body style="margin:0;background:#fff;font:22px serif;padding:30px">第1回 高校入試模擬テスト 解答（100点満点）<br>1.(1) -1 4点 (2) -4a+6b-12 4点 …<br>3. 右図</body>`);
+  await p.screenshot({ path: `${OUT}key1.png` });
+  await p.close();
+}
+const importReqs = async () => (await (await fetch(MOCK + "/__requests")).json()).filter((r) => r.kind === "import");
+await page.goto(BASE + "/tests"); await settle();
+const testsBefore = await page.locator("text=設問と配点を見る").count();
+await page.getByRole("button", { name: "＋ テストを追加" }).click();
+await page.getByRole("button", { name: "模範解答・配点表から自動入力" }).click();
+await page.locator("#import-key").setInputFiles([`${OUT}key1.png`, heic]);
+await page.getByText("資料2").first().waitFor({ timeout: 30000 });
+await page.locator("#import-extra").setInputFiles([img(1)]);
+await page.getByLabel("資料3の種類").selectOption("student");
+ok((await text()).includes("手書きの答えは使いません"), "自動入力：生徒の答案は印刷された配点だけを読むと案内");
+
+// 下書き：画面を移動しても、選んだ資料と入力が残る
+await settle(1200);
+await page.getByRole("button", { name: "閉じる（下書きは残ります）" }).click();
+await page.goto(BASE + "/"); await settle();
+await page.goto(BASE + "/tests"); await settle();
+await page.getByRole("button", { name: "＋ テストを追加" }).click();
+await page.getByText(/下書きを復元しました/).waitFor({ timeout: 10000 });
+ok((await page.getByLabel("資料3の種類").inputValue()) === "student", "下書きから資料（3件・種類つき）を復元");
+
+// 連打しても AI の読み取りは1回だけ
+let iMark = (await importReqs()).length;
+await script({ import: ["slow"] });
+const readBtn = page.getByRole("button", { name: "AIで読み取って入力する" });
+await readBtn.click();
+await page.getByRole("button", { name: /資料を保存しています|AIが読み取っています/ }).click({ force: true, timeout: 5000 }).catch(() => {});
+await toastSeen(/20 問を読み取りました/);
+let ireqs = (await importReqs()).slice(iMark);
+ok(ireqs.length === 1, `連打しても読み取りは1回（${ireqs.length}回）`);
+ok(ireqs[0].problems.length === 0 && ireqs[0].images === 3 && ireqs[0].sources.join("|").includes("資料3：生徒の答案"),
+  `読み取りの要求：資料3件と種類を送る ${JSON.stringify(ireqs[0].problems)}`);
+
+const itext = await text();
+ok(itext.includes("大問1=5・大問2=5・大問3=1・大問4=3・大問5=1・大問6=3・大問7=2"), "大問と小問を原本どおり（5・5・1・3・1・3・2）に入力");
+ok(itext.includes("設問 20 問") && itext.includes("合計 95 点") && itext.includes("原本の満点 100 点"), "設問数・合計点・原本の満点を表示");
+ok(itext.includes("原本の満点 100 点と一致しません"), "合計点と原本の満点の不一致を知らせる");
+ok(itext.includes("要確認 4 問（未確認 4）"), "読めない配点・正答、生徒の答案からの正答、作図を要確認にする");
+ok((await page.getByLabel("大問2-(5) の配点").inputValue()) === "", "読めない配点は空欄のまま（推測で確定しない）");
+ok((await page.getByLabel("大問4-(1) の正答").inputValue()) === "", "生徒の答案の手書きは正答に取り込まない");
+ok((await page.getByLabel("大問3 の解説").inputValue()).includes("採点条件"), "作図は採点条件として登録する（「右図」だけにしない）");
+await page.getByRole("button", { name: "資料1 の 1 ページ目を表示" }).click(); await settle(400);
+ok(await page.locator('[aria-label="該当箇所"]').count() === 1 && await page.locator('img[alt^="元の資料"]').count() === 1, "元画像と入力結果を見比べられる（模範図の位置を枠で表示）");
+
+// 同じ資料をもう一度読み取っても、AI は呼ばずに前の結果を使う（上書きは確認する）
+iMark = (await importReqs()).length;
+page.once("dialog", (d) => d.accept());
+await readBtn.click();
+await toastSeen(/同じ資料の読み取り結果を使いました/);
+ok((await importReqs()).length === iMark, "同じ資料の再読み取りは AI を呼ばない（上書き前に確認）");
+
+// 確認・修正して登録
+await page.getByRole("button", { name: "登録する" }).click();
+ok((await text()).includes("大問2-(5) の配点を入力してください"), "配点が空欄のままでは登録できない");
+await page.getByLabel("大問2-(5) の配点").fill("5");
+await page.getByLabel("大問4-(1) の正答").fill("240円");
+await page.getByLabel("大問6-(3) の正答").fill("3√5");
+await page.getByRole("button", { name: "登録する" }).click();
+ok((await text()).includes("要確認の設問が 4 問あります"), "要確認を確認しないと登録できない");
+for (const l of ["大問2-(5)", "大問3", "大問4-(1)", "大問6-(3)"]) await page.getByLabel(`${l} を確認した`).check();
+ok((await text()).includes("合計 100 点") && !(await text()).includes("一致しません"), "配点を入力すると合計 100 点で原本と一致");
+await page.getByRole("button", { name: "登録する" }).click();
+await toastSeen(/（20 問・100 点）/);
+await settle(800);
+ok((await page.locator("text=設問と配点を見る").count()) === testsBefore + 1, "テストを1件追加（既存のテストはそのまま）");
+// 登録したテストのカード（そのテスト名と「設問と配点を見る」を1つだけ含む枠）のボタン
+await page.locator(`xpath=//*[contains(., '数学／第1回 高校入試模擬テスト') and count(.//button[normalize-space()='設問と配点を見る'])=1]//button[normalize-space()='設問と配点を見る']`)
+  .first().click(); await settle(600);
+const dtext = await text();
+ok(["大問1-(5)", "大問2-(5)", "大問3", "大問4-(3)", "大問5", "大問6-(3)", "大問7-(2)"].every((l) => dtext.includes(l)) && dtext.includes("満点"),
+  "登録した設問名が原本どおり（大問1-(5)・大問3・大問7-(2) など）");
+ok(await page.getByRole("button", { name: "資料1" }).count() >= 1 && await page.getByRole("button", { name: "資料3" }).count() === 0,
+  "模範解答（2件）は保存し、生徒の答案は残さない");
+await page.getByRole("button", { name: "模範図を見る" }).click();
+await page.locator('img[alt$="模範図"]').waitFor({ timeout: 15000 });
+ok(await page.locator('[aria-label="模範図の位置"]').count() === 1, "作図の模範図を、登録後も参照できる");
+await page.goto(BASE + "/tests"); await settle();
+ok((await text()).includes("E2E 小テスト"), "既存のテストは変わらない");
+await page.getByRole("button", { name: "＋ テストを追加" }).click(); await settle(800);
+ok(!(await text()).includes("下書きを復元しました"), "登録したら下書きを消す");
+await page.getByRole("button", { name: "閉じる（下書きは残ります）" }).click();
+
 // 12. レポート3種
 await page.goto(BASE + "/reports"); await settle();
 for (const [v, label] of [["student", "個人成績票"], ["unit", "単元別到達度レポート"], ["class", "成績レポート"]]) {
