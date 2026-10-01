@@ -67,26 +67,47 @@ export function createSupabaseSource(): DataSource {
         return { enabled: false, model: null };
       }
     },
-    async aiGrade(submissionId) {
-      let res: Response;
-      try {
-        res = await fetch("/api/grade", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ submissionId }),
-        });
-      } catch {
-        throw new Error("サーバーに接続できないためAI採点できませんでした。インターネット接続を確認して、もう一度お試しください。");
+    // 1回の要求でサーバーが呼ぶモデルは1つ。3モデル併用で上の段階に回すときは、同じ requestId で続きを要求する。
+    // 通信が切れて応答を受け取れなかったときも同じ requestId で送り直すので、同じモデルを二重に呼ばない（二重課金しない）。
+    async aiGrade(submissionId, { mode, onProgress }) {
+      const requestId = crypto.randomUUID();
+      const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      let networkErrors = 0;
+      for (let step = 0; step < 60; step++) {
+        let res: Response;
+        try {
+          res = await fetch("/api/grade", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ submissionId, mode, requestId }),
+          });
+        } catch {
+          if (++networkErrors > 3) {
+            throw new Error("サーバーに接続できないためAI採点できませんでした。インターネット接続を確認して、もう一度お試しください。");
+          }
+          await wait(2000 * networkErrors);
+          continue;
+        }
+        const json = await res.json().catch(() => null);
+        if (res.status === 202 && json?.pending) { await wait(3000); continue; }   // 同じ採点がまだモデルを呼んでいる
+        if (res.status === 504 || (res.status === 502 && !json)) {
+          // 関数の時間切れ：サーバー側の記録が残っているので、同じ requestId で状況を確かめる
+          if (++networkErrors > 3) throw new Error("AI採点に時間がかかりすぎて中断されました。もう一度お試しください。");
+          await wait(3000);
+          continue;
+        }
+        if (!res.ok || !json?.ok) {
+          throw new Error(json?.error ?? "AI採点に失敗しました。時間をおいて、もう一度お試しください。");
+        }
+        if (!json.done) { onProgress?.({ stage: json.stage, next: json.next, reasons: json.reasons }); continue; }
+        return {
+          model: json.model, total: json.total, needReview: json.needReview, blank: json.blank,
+          mode: json.mode, finalStage: json.finalStage, stages: json.stages, costUsd: json.costUsd,
+        };
       }
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.ok) {
-        throw new Error(json?.error
-          ?? (res.status === 504
-            ? "AI採点に時間がかかりすぎて中断されました。もう一度お試しください。"
-            : "AI採点に失敗しました。時間をおいて、もう一度お試しください。"));
-      }
-      return { model: json.model, total: json.total, needReview: json.needReview, blank: json.blank };
+      throw new Error("AI採点が終わりませんでした。「採点中」の画面から、もう一度お試しください。");
     },
+    gradingLog: (submissionId) => db.loadGradingLog(submissionId),
 
     signedImageUrl: (path) => db.signedImageUrl(path),
     loadAudit: () => db.loadAudit(),

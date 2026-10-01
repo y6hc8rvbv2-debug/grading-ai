@@ -7,6 +7,7 @@ import { SOURCES, STATUS_META } from "@/lib/grading/engine";
 import { useUI } from "@/components/ui-context";
 import { Badge, Btn, Card, Field, Input, Select, Table, grid } from "@/components/ui";
 import type { Submission } from "@/lib/types";
+import { MODE_LABEL, STAGE_LABEL } from "@/lib/grading/cost";
 
 export default function History() {
   const { T, go, subs, toast, who, ws, testById, classById, studentById } = useUI();
@@ -90,6 +91,8 @@ export default function History() {
               <span style={{ font: `700 13px ${FONT_MONO}` }}>{r.result.total}<span style={{ color: T.textFaint, fontWeight: 400 }}>/{testById(r.testId)!.maxScore}</span></span> },
             { key: "rt", label: "得点率", align: "right", render: (r) => r.status === "blank" ? "—" : `${pct(r.result.total, testById(r.testId)!.maxScore)}%` },
             { key: "st", label: "状態", align: "center", render: (r) => <Badge tone={STATUS_META[r.status].tone}>{STATUS_META[r.status].label}</Badge> },
+            { key: "gm", label: "採点方式", render: (r: Submission) => <span style={{ fontSize: 12, color: T.textSub }}>
+              {r.gradingMode ? `${MODE_LABEL[r.gradingMode]}${r.gradingMode === "cascade" && r.gradingStage ? `（${STAGE_LABEL[r.gradingStage]}）` : ""}` : "—"}</span> },
             { key: "src", label: "取込方法", render: (r) => <span style={{ fontSize: 12, color: T.textSub }}>{SOURCES[r.source]?.icon} {SOURCES[r.source]?.label ?? r.source}</span> },
             { key: "act", label: "", align: "right", render: (r) => <Btn size="sm" variant="soft" onClick={() => go("detail", r.id)}>開く</Btn> },
           ]}

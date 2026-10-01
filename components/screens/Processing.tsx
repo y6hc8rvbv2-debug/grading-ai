@@ -8,6 +8,7 @@ import { fmtDateTime } from "@/lib/util";
 import { PIPELINE, SOURCES } from "@/lib/grading/engine";
 import { useUI } from "@/components/ui-context";
 import { Badge, Bar, Btn, Card, Empty } from "@/components/ui";
+import { GradingModeSelect } from "@/components/GradingModePicker";
 
 export default function Processing() {
   const { T, go, subs, testById, who, refresh, ds, ai, aiGradeSub, toast } = useUI();
@@ -52,6 +53,7 @@ export default function Processing() {
                 : "採点AIが設定されていません。サーバーに ANTHROPIC_API_KEY を設定すると、ここから採点できます。"}
             {bulk && <div style={{ marginTop: 6 }}><Bar value={bulk.done} max={bulk.total} tone="accent" height={6} label={`まとめて採点中 ${bulk.done} / ${bulk.total} 枚`} /></div>}
           </div>
+          {ai.enabled && <GradingModeSelect />}
           {ai.enabled && (
             <Btn size="sm" variant="primary" disabled={!!bulk} onClick={gradeAll}>
               {bulk ? "採点しています…" : `まとめてAI採点（${list.filter((s) => s.imagePaths.length).length}枚）`}

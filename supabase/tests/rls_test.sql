@@ -546,3 +546,137 @@ begin
   assert (select count(*) from public.model_compare_results) = 0, '試験を消すとモデルの結果も消えること';
 end $$;
 reset role;
+
+-- ============================================================================
+-- 0006 採点方式と AI採点の記録：二重実行の防止・途中失敗で成績を壊さない・他校から見えない
+-- ============================================================================
+set role authenticated;
+select pg_temp.login('aaaaaaaa-0000-0000-0000-00000000000b');   -- 学校Aの教員
+do $$
+declare
+  v_sub   uuid := 'aaaaaaaa-0000-0000-0000-0000000000a5';
+  v_total integer;
+  v_items jsonb;
+  v_status public.submission_status;
+begin
+  select total_score, status into v_total, v_status from public.submissions where id = v_sub;
+
+  -- 1回目の採点を始める（採点前の状態を覚えておく）
+  insert into public.grading_jobs (id, school_id, submission_id, created_by, request_id, mode, prev_status, prev_progress)
+  values ('dddddddd-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000000', v_sub,
+          'aaaaaaaa-0000-0000-0000-00000000000b', 'dddddddd-1111-0000-0000-000000000001', 'cascade', v_status, 100);
+  update public.submissions set status = 'processing', progress = 30 where id = v_sub;
+
+  -- 同じ答案で2つ目の採点は始められない
+  begin
+    insert into public.grading_jobs (school_id, submission_id, created_by, request_id, mode)
+    values ('aaaaaaaa-0000-0000-0000-000000000000', v_sub, 'aaaaaaaa-0000-0000-0000-00000000000b', gen_random_uuid(), 'opus');
+    raise exception 'FAIL: 同じ答案で同時に2つのAI採点を始められてしまう';
+  exception when unique_violation then null;
+  end;
+
+  -- 同じ段階は1回しか呼べない
+  insert into public.grading_stages (school_id, job_id, submission_id, stage, position, model_id)
+  values ('aaaaaaaa-0000-0000-0000-000000000000', 'dddddddd-0000-0000-0000-000000000001', v_sub, 'haiku', 1, 'claude-haiku-4-5');
+  begin
+    insert into public.grading_stages (school_id, job_id, submission_id, stage, position, model_id)
+    values ('aaaaaaaa-0000-0000-0000-000000000000', 'dddddddd-0000-0000-0000-000000000001', v_sub, 'haiku', 1, 'claude-haiku-4-5');
+    raise exception 'FAIL: 同じ段階を二重に呼び出せてしまう';
+  exception when unique_violation then null;
+  end;
+  update public.grading_stages set status = 'done', escalate = true, cost_usd = 0.01,
+         reasons = '[{"code":"missing","qno":2,"msg":"回答の欠落"}]'
+   where job_id = 'dddddddd-0000-0000-0000-000000000001' and stage = 'haiku';
+  begin
+    update public.grading_stages set status = 'calling'
+     where job_id = 'dddddddd-0000-0000-0000-000000000001' and stage = 'haiku';
+    raise exception 'FAIL: 結果が確定した段階を呼び直せてしまう';
+  exception when invalid_parameter_value then null;
+  end;
+  insert into public.grading_stages (school_id, job_id, submission_id, stage, position, model_id, status, cost_usd)
+  values ('aaaaaaaa-0000-0000-0000-000000000000', 'dddddddd-0000-0000-0000-000000000001', v_sub, 'sonnet', 2, 'claude-sonnet-5-5', 'calling', null);
+  update public.grading_stages set status = 'done', cost_usd = 0.02
+   where job_id = 'dddddddd-0000-0000-0000-000000000001' and stage = 'sonnet';
+
+  -- 確定：保存と記録が同時に行われる
+  perform public.finish_grading_job('dddddddd-0000-0000-0000-000000000001', 'sonnet', '{"ok": true}',
+    '[{"qno":1,"detected":"5","confidence":0.9,"mark":"○","earned":5,"is_blank":false,"need_review":false,"reason":"","comment":""},
+      {"qno":2,"detected":"説明","confidence":0.9,"mark":"×","earned":0,"is_blank":false,"need_review":true,"reason":"","comment":""}]',
+    true, '{"reasons":[]}');
+  assert (select grading_mode from public.submissions where id = v_sub) = 'cascade', '採点方式が答案に記録されること';
+  assert (select grading_stage from public.submissions where id = v_sub) = 'sonnet', '確定した段階が答案に記録されること';
+  assert (select total_score from public.submissions where id = v_sub) = 5, '確定した採点結果が保存されること';
+  assert (select status from public.grading_jobs where id = 'dddddddd-0000-0000-0000-000000000001') = 'done', '採点の記録が確定すること';
+  assert (select total_cost_usd from public.grading_jobs where id = 'dddddddd-0000-0000-0000-000000000001') = 0.03, '各段階の費用の合計を記録すること';
+  begin
+    perform public.finish_grading_job('dddddddd-0000-0000-0000-000000000001', 'sonnet', '{"ok": true}', '[]', false, '{}');
+    raise exception 'FAIL: 確定済みの採点をもう一度保存できてしまう';
+  exception when sqlstate '55000' then null;
+  end;
+
+  -- 途中失敗：既存の成績を壊さず、状態を採点前に戻す
+  select total_score, status into v_total, v_status from public.submissions where id = v_sub;
+  select jsonb_agg(to_jsonb(i) - 'updated_at' order by qno) into v_items from public.submission_items i where submission_id = v_sub;
+  insert into public.grading_jobs (id, school_id, submission_id, created_by, request_id, mode, prev_status, prev_progress)
+  values ('dddddddd-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000000', v_sub,
+          'aaaaaaaa-0000-0000-0000-00000000000b', 'dddddddd-1111-0000-0000-000000000002', 'cascade', v_status, 100);
+  update public.submissions set status = 'processing', progress = 30 where id = v_sub;
+  insert into public.grading_stages (school_id, job_id, submission_id, stage, position, model_id)
+  values ('aaaaaaaa-0000-0000-0000-000000000000', 'dddddddd-0000-0000-0000-000000000002', v_sub, 'haiku', 1, 'claude-haiku-4-5');
+  perform public.fail_grading_job('dddddddd-0000-0000-0000-000000000002', 'Sonnet の呼び出しに失敗');
+  assert (select status from public.submissions where id = v_sub) = v_status, '失敗したら答案の状態を採点前に戻すこと';
+  assert (select total_score from public.submissions where id = v_sub) = v_total, '失敗しても合計点は変わらないこと';
+  assert (select jsonb_agg(to_jsonb(i) - 'updated_at' order by qno) from public.submission_items i where submission_id = v_sub) = v_items,
+    '失敗しても設問ごとの採点結果は変わらないこと';
+  assert (select status from public.grading_stages where job_id = 'dddddddd-0000-0000-0000-000000000002') = 'error',
+    '呼び出し中だった段階は失敗として記録すること';
+  begin
+    perform public.finish_grading_job('dddddddd-0000-0000-0000-000000000002', 'haiku', '{"ok": true}', '[]', false, '{}');
+    raise exception 'FAIL: 失敗した採点の結果を後から保存できてしまう';
+  exception when sqlstate '55000' then null;
+  end;
+
+  -- 教員は記録を消せない（管理者だけ）
+  delete from public.grading_jobs where id = 'dddddddd-0000-0000-0000-000000000001';
+  assert (select count(*) from public.grading_jobs where id = 'dddddddd-0000-0000-0000-000000000001') = 1, '教員はAI採点の記録を削除できないこと';
+end $$;
+
+-- 時間切れの採点は、答案の状態を戻して終わらせる
+insert into public.grading_jobs (id, school_id, submission_id, created_by, request_id, mode, prev_status, prev_progress)
+values ('dddddddd-0000-0000-0000-000000000003', 'aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-0000000000a5',
+        'aaaaaaaa-0000-0000-0000-00000000000b', 'dddddddd-1111-0000-0000-000000000003', 'opus',
+        (select status from public.submissions where id = 'aaaaaaaa-0000-0000-0000-0000000000a5'), 100);
+update public.submissions set status = 'processing', progress = 30 where id = 'aaaaaaaa-0000-0000-0000-0000000000a5';
+reset role;
+alter table public.grading_jobs disable trigger grading_jobs_guard;
+update public.grading_jobs set updated_at = now() - interval '30 minutes' where id = 'dddddddd-0000-0000-0000-000000000003';
+alter table public.grading_jobs enable trigger grading_jobs_guard;
+set role authenticated;
+select pg_temp.login('aaaaaaaa-0000-0000-0000-00000000000b');
+do $$
+begin
+  assert public.expire_stale_grading_jobs('aaaaaaaa-0000-0000-0000-0000000000a5') = 1, '時間切れの採点を1件終わらせること';
+  assert (select status from public.grading_jobs where id = 'dddddddd-0000-0000-0000-000000000003') = 'failed', '時間切れは失敗として記録すること';
+  assert (select status from public.submissions where id = 'aaaaaaaa-0000-0000-0000-0000000000a5') <> 'processing', '時間切れの答案は採点中のまま残らないこと';
+end $$;
+
+-- 他校からは見えず、採点も始められない
+select pg_temp.login('bbbbbbbb-0000-0000-0000-00000000000b');
+do $$
+begin
+  assert (select count(*) from public.grading_jobs) = 0, '他校のAI採点の記録は見えないこと';
+  assert (select count(*) from public.grading_stages) = 0, '他校のAI採点の段階は見えないこと';
+  begin
+    insert into public.grading_jobs (school_id, submission_id, created_by, request_id, mode)
+    values ('bbbbbbbb-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-0000000000a5',
+            'bbbbbbbb-0000-0000-0000-00000000000b', gen_random_uuid(), 'opus');
+    raise exception 'FAIL: 他校の答案のAI採点を始められてしまう';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.finish_grading_job('dddddddd-0000-0000-0000-000000000001', 'opus', '{"ok": true}', '[]', false, '{}');
+    raise exception 'FAIL: 他校のAI採点を確定できてしまう';
+  exception when no_data_found then null;
+  end;
+end $$;
+reset role;

@@ -3,7 +3,8 @@
 // 実体は components/AppShell.tsx の Provider が作る。
 import { createContext, useContext } from "react";
 import type { Theme } from "@/lib/ui/theme";
-import type { DataSource, SessionInfo } from "@/lib/data/source";
+import type { GradingMode } from "@/lib/grading/cost";
+import type { AiGradeProgress, DataSource, SessionInfo } from "@/lib/data/source";
 import type {
   AiGradeSummary, AiStatus, ClassRoom, Item, ItemPatch, Rubric, Student, Submission, Test, Workspace,
 } from "@/lib/types";
@@ -45,8 +46,12 @@ export type UIContext = {
   ai: AiStatus;
   /** 保存済みの答案を AI で採点する。成功したら答案を読み直す。
    *  silent でなければ結果をトーストで知らせる。失敗しても例外にせず、理由を返す。 */
-  aiGradeSub: (submissionId: string, opts?: { silent?: boolean }) =>
+  aiGradeSub: (submissionId: string, opts?: { silent?: boolean; mode?: GradingMode; onProgress?: (p: AiGradeProgress) => void }) =>
     Promise<{ ok: true; summary: AiGradeSummary } | { ok: false; error: string }>;
+
+  /** 採点方式（Opus単独 / 3モデル併用）。端末ごとに覚える */
+  gradingMode: GradingMode;
+  setGradingMode: (m: GradingMode) => void;
 
   anonMode: boolean;
   setAnonMode: (v: boolean) => void;

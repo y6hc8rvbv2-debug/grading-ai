@@ -16,7 +16,7 @@
   デモモードはプロトタイプと同じデモデータで全機能を試せるが、何も保存しない（画面上部に「デモモード（保存されません）」と出る）。
 - 採点AI: サーバーの `ANTHROPIC_API_KEY` があれば、「新規採点」は画像を保存して続けて AI 採点する。
   保存済み（AI採点待ち）の答案も「採点中」画面・答案詳細から採点できる。キーが無ければ画像の保存だけ。
-- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004・0005 はまだ**（0005 はモデル比較試験の記録）。
+- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004・0005・0006 はまだ**（0005 はモデル比較試験、0006 は採点方式と AI採点の記録）。
   Vercel の Preview で、ログイン・名簿表示・答案画像の保存まで動作確認済み（ユーザー報告）。
 - **本物の Claude API での採点はまだ一度も実行していない**（開発環境にキーが無い）。
   E2E はリクエストの形を検査する代役サーバー（`tests/e2e/mock-anthropic.mjs`）で検証している。
@@ -27,7 +27,8 @@
 
 ### 1. 本番で AI 採点を動かす ← ユーザー作業待ち
 
-- Supabase の SQL Editor で `0004_ai_grading.sql` と `0005_model_compare.sql` を実行する
+- Supabase の SQL Editor で `0004_ai_grading.sql`・`0005_model_compare.sql`・`0006_grading_modes.sql` を実行する
+- Preview で「3モデル併用」を試し、Sonnet・Opus に回った割合（目安 20%・5%）と実際の費用を「AI採点の記録」で確かめる
 - Preview で管理者がモデル比較試験（`/compare`）を実行し、結果を確認する
 - Vercel に `ANTHROPIC_API_KEY` を設定して再デプロイする（`docs/SUPABASE-SETUP.md` ステップ6.5）
 - 保存済みの確認用答案（「2＋3＝5」）を「採点中」画面から AI 採点し、○・4点になるか確かめる
@@ -44,7 +45,7 @@
   root 環境では `su postgres -c "bash supabase/tests/run.sh"`
 - `npm run test:e2e` … Supabase CLI のローカル環境（Docker）にアプリを繋ぎ、ブラウザで教員の作業を通しで検証（`tests/e2e/`）。
   採点AIは代役サーバー（本物の API は呼ばない）。ECR に届かない環境では `SUPABASE_INTERNAL_IMAGE_REGISTRY=docker.io` を付ける
-- `npm run test:unit` … 採点AIの出力の後処理（`normalizeResult`）・比較試験・HEIC 変換（`tests/fixtures/sample.heic` は合成画像）の単体テスト
+- `npm run test:unit` … 採点AIの出力の後処理（`normalizeResult`）・3モデル併用の振り分けと料金の目安・比較試験・HEIC 変換（`tests/fixtures/sample.heic` は合成画像）の単体テスト
 
 検証中に見つけて直したもの（0001/0002 は未適用だったので直接修正、0003 で追加修正）:
 - サインアップ時の `user_metadata` で任意校の管理者になれた → `app_metadata` から読むよう変更
@@ -58,7 +59,7 @@
 
 ### 2. 採点AI（実装済み）の仕組みと、残りの接続ポイント
 
-- `app/api/grade/route.ts`（POST `{ submissionId }`）が採点する。**教員のセッション（RLS）で** 答案・設問・採点基準・画像を読み、
+- `app/api/grade/route.ts`（POST `{ submissionId, mode, requestId }`）が採点する。**教員のセッション（RLS）で** 答案・設問・採点基準・画像を読み、
   `lib/ai/grade.ts` の `callClaude()` で Claude に送り、`normalizeResult()` で整えてから `save_ai_grading()`（0004）で保存する。
   service_role は使わない。サーバーに置く秘密は `ANTHROPIC_API_KEY` だけ
 - モデルは `claude-opus-5`（`ANTHROPIC_MODEL` で変更可）。adaptive thinking・effort high・structured outputs（JSON スキーマ）。
@@ -66,6 +67,16 @@
 - **AI の出力はそのまま信じない**: 得点は判定に合わせて 0〜配点に決め直し、判定と得点が食い違えば要確認。
   信頼度 < `rubrics.review_threshold`、記述問題で `require_teacher`、AI が返さなかった設問も要確認。設問ID は DB 側で qno から決める
 - 失敗したら答案の状態を元に戻す（AI採点待ちのまま）。1枚ずつ順に採点する（Vercel の関数は `maxDuration = 300`）
+- **採点方式（0006）**: 「Opus単独」と「3モデル併用」（`lib/ai/cascade.ts`）。新規採点で選び、端末に覚える（採点中・答案詳細でも切り替え可）
+  - 3モデル併用: 全答案を Haiku（`claude-haiku-4-5`、thinking なし）→ 点検で理由が残れば Sonnet（`claude-sonnet-5-5`、adaptive・effort high）→ さらに残れば Opus。
+    点検の理由は 回答の欠落 / 判読不能・無記入なのに文字 / 判定と得点の食い違い / 部分点なしの△ / 正答との照合と判定の矛盾 / 画質 / 応答が使えない / 自信が低い（confidence は理由の1つにすぎない）。
+    記述の教員確認必須は上に回す理由にしない。Opus でも残った理由と、Sonnet と判定が分かれた設問は要確認にし、理由を `ai_raw.grading.review_reasons` と `grading_jobs.decision` に残す
+  - Sonnet 20%・Opus 5% は料金試算の目安（`lib/grading/cost.ts`）で、上限ではない
+  - 1回の要求で呼ぶモデルは1つ。画面が同じ requestId で続きを要求する（`lib/data/supabase.ts` の `aiGrade`）
+  - 二重課金の防止: requestId ごとに `grading_jobs` を1つ / 同じ答案の実行中は1つ（一意索引）/ 各段階は呼ぶ前に `grading_stages` の行を作る（job_id, stage 一意、確定後は変更不可）
+  - 途中失敗: 保存は `finish_grading_job()` で記録の確定と同じトランザクション。失敗・時間切れ（10分）は `fail_grading_job()` が状態を採点前に戻す
+  - 記録: 各段階のモデルID・採点結果・理由・トークン数・概算費用。答案詳細の「AI採点の記録」タブ、採点履歴の「採点方式」列
+  - 0006 を実行する前の DB でも画面は動く（採点方式の列が無ければ外して読み直す）が、AI採点は 0006 が必要
 - 画像はブラウザで長辺 2400px の JPEG に縮小してから保存する（`lib/image.ts`。API の上限は1枚5MB）
 - HEIC（iPhone の写真）: ブラウザが読めれば（Safari）そのまま、読めなければ `heic-to`（libheif の WASM、LGPL-3.0、HEIC のときだけ動的読み込み）で JPEG に変換してから保存する。
   以前に HEIC のまま保存された答案は、採点時にサーバーで変換する（`lib/ai/heic.ts`、`heic-decode` + `jpeg-js`。`next.config.mjs` で外部パッケージ扱い）
@@ -153,7 +164,7 @@ Next.js 14 (App Router, TypeScript)
       └── supabase/{client,server}.ts
 
 Supabase
-  ├── PostgreSQL             14テーブル + RLS + トリガー + 分析ビュー + AI採点の保存関数（supabase/migrations/0001〜0005）
+  ├── PostgreSQL             16テーブル + RLS + トリガー + 分析ビュー + AI採点の保存関数（supabase/migrations/0001〜0006）
   ├── Storage                answer-sheets（非公開・署名付きURLのみ）。パスは {school_id}/{test_id}/{submission_id}/{page}.{ext}
   └── Auth                   教職員のみ。所属校と役割は app_metadata で付与（一般サインアップでは所属が付かない）
 ```
@@ -247,7 +258,8 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
 ## 未検証・未解決の事項
 
 1. **本物の Claude API での採点が未実行** — 代役サーバーでリクエストの形と保存までを検証済み。読み取り精度・bbox の精度・所要時間・費用は本番で確かめる
-2. **0004・0005 が本番 Supabase に未適用**（「次にやること」1）
+2. **0004・0005・0006 が本番 Supabase に未適用**（「次にやること」1）
+15. **3モデル併用は代役 API でのみ検証** — 本物の Haiku / Sonnet での読み取り精度・振り分けの割合・費用は未確認。正答との照合（`normAnswer`）は表記ゆれで誤検知しうる（誤検知は上のモデル・要確認に回るので、精度側に倒れる）
 14. **モデル比較試験は未実行** — Preview で管理者が実行する準備まで完了（代役サーバーでの E2E のみ検証済み）
 3. **生徒モバイル提出・複合機スキャン連携は「準備中」** — 画面に準備中と表示し、代わりの取り込み方法を案内している
 4. **保存期間による自動削除で Storage の画像が消えない**（「次にやること」4）

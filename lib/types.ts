@@ -1,5 +1,6 @@
 // アプリ全体で使う型。画面はこの形だけを見る。
 // Supabase / デモのどちらのデータソースも、この形に変換して返す。
+import type { GradingMode, GradingStage } from "@/lib/grading/cost";
 
 export type Mark = "○" | "△" | "×" | "-";
 
@@ -101,6 +102,9 @@ export type Submission = {
   edited: boolean;
   reviewedBy: string;     // 確認した教員の表示名。未確認なら ""
   uploadedAt: string;
+  /** 最後にAI採点したときの方式と、結果を確定した段階（0006。AI採点前・仮採点は null） */
+  gradingMode?: GradingMode | null;
+  gradingStage?: GradingStage | null;
   result: { items: Item[]; total: number; blank: boolean };
 };
 
@@ -193,11 +197,29 @@ export type NewTestInput = {
   }>;
 };
 
-/** 採点AIが使えるか（サーバーに ANTHROPIC_API_KEY があるか） */
-export type AiStatus = { enabled: boolean; model: string | null };
+/** 採点AIが使えるか（サーバーに ANTHROPIC_API_KEY があるか）と、各段階のモデルID */
+export type AiStatus = {
+  enabled: boolean; model: string | null;
+  models?: Record<GradingStage, string> | null;
+};
 
 /** 採点AIの結果の要約（詳細は答案を読み直して得る） */
-export type AiGradeSummary = { model: string; total: number; needReview: number; blank: boolean };
+export type AiGradeSummary = {
+  model: string; total: number; needReview: number; blank: boolean;
+  mode?: GradingMode; finalStage?: GradingStage | null; stages?: GradingStage[]; costUsd?: number;
+};
+
+/** AI採点の記録（1回分）と、その各段階 */
+export type GradingLog = {
+  id: string; mode: GradingMode; status: "running" | "done" | "failed"; finalStage: GradingStage | null;
+  needsReview: boolean | null; reviewReasons: string[]; costUsd: number; error: string | null;
+  createdAt: string; finishedAt: string | null; by: string;
+  stages: {
+    stage: GradingStage; modelId: string; servedModel: string | null; status: "calling" | "done" | "error";
+    escalate: boolean; reasons: string[]; inputTokens: number | null; outputTokens: number | null;
+    costUsd: number | null; elapsedMs: number | null; error: string | null;
+  }[];
+};
 
 export type AuditRow = {
   id: number; createdAt: string; action: string; targetTable: string;

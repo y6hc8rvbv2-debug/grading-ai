@@ -9,6 +9,9 @@ import { useUI } from "@/components/ui-context";
 import { Badge, Bar, Btn, Card, Empty, Tabs, grid, inputStyle } from "@/components/ui";
 import { RedPenSheet } from "@/components/RedPenSheet";
 import { RedPenOverlay, type ItemBox } from "@/components/RedPenOverlay";
+import { GradingLogCard } from "@/components/GradingLogCard";
+import { GradingModeSelect } from "@/components/GradingModePicker";
+import { MODE_LABEL, STAGE_LABEL } from "@/lib/grading/cost";
 import type { Item, Submission } from "@/lib/types";
 
 /** 得点の入力欄。入力中は保存せず、確定（フォーカスが外れる・Enter）したときに保存する。 */
@@ -148,7 +151,11 @@ export default function GradingDetail({ subId }: { subId: string }) {
         {!sub.quality.ok && <Badge tone="ng">画質に注意</Badge>}
         {pending && <Badge tone="info">AI採点待ち</Badge>}
         {sub.status === "blank" && <Badge tone="warn">全問白紙 → 模範解答を生成</Badge>}
+        {sub.gradingMode && (
+          <Badge tone="mute">採点方式：{MODE_LABEL[sub.gradingMode]}{sub.gradingMode === "cascade" && sub.gradingStage ? `（${STAGE_LABEL[sub.gradingStage]}で確定）` : ""}</Badge>
+        )}
         <span style={{ flex: 1 }} />
+        {canAi && <GradingModeSelect />}
         {canAi && !pending && (
           <Btn size="sm" disabled={aiBusy} onClick={() => runAi(true)}>{aiBusy ? "AIが採点しています…" : "AIで採点し直す"}</Btn>
         )}
@@ -187,6 +194,7 @@ export default function GradingDetail({ subId }: { subId: string }) {
         { k: "analysis", label: "弱点分析" },
         { k: "feedback", label: "フィードバック" },
         ...(sub.status === "blank" ? [{ k: "model", label: "模範解答" }] : []),
+        ...(ds.mode === "supabase" ? [{ k: "log", label: "AI採点の記録" }] : []),
       ]} />
 
       {tab === "sheet" && (
@@ -306,6 +314,8 @@ export default function GradingDetail({ subId }: { subId: string }) {
           </div>
         </Card>
       )}
+
+      {tab === "log" && <GradingLogCard submissionId={sub.id} refreshKey={`${sub.gradingStage}|${sub.result.total}|${sub.status}`} />}
 
       {tab === "quality" && !Object.keys(sub.quality.scores).length && (
         <Card><Empty icon="🖼" title="画像品質の検査結果はありません" hint="画像品質の検査は、採点AIと一緒に行います。" /></Card>

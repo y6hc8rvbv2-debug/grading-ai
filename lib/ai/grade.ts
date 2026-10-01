@@ -70,7 +70,22 @@ export type NormalizedItem = {
   comment: string;
   bbox: { page: number; x: number; y: number; w: number; h: number } | null;
   ai_raw: unknown;
+  /** 教員の確認に回した理由（後処理で見つけたもの）。lib/ai/cascade.ts の判定にも使う */
+  flags: ReviewFlag[];
 };
+
+/** 確認が必要な理由の種類 */
+export type ReviewFlag =
+  | "missing"             // AI がこの設問を返さなかった（回答の欠落）
+  | "inconsistent"        // 判定と得点が食い違う
+  | "low_confidence"      // 読み取り・判定の自信が低い（自己申告）
+  | "teacher_required"    // 記述問題で教員の確認が必須（採点基準）
+  | "partial_not_allowed" // 部分点なしの基準なのに △
+  | "quality"             // 画質が悪い（採点基準で全設問を確認に回す）
+  | "unreadable"          // 無記入ではないのに読み取れていない・判読不能の印がある
+  | "blank_mismatch"      // 無記入なのに読み取った文字がある
+  | "key_contradiction"   // 正答と読み取った解答が一致するのに × / 一致しないのに ○
+  | "model_disagreement"; // 前の段階のモデルと判定が分かれた
 
 export type NormalizedQuality = {
   ok: boolean;
@@ -210,31 +225,44 @@ function testText(test: GradeTest) {
 
 /* ---------------------------------------------------------------- 呼び出し */
 
+/** 1回の呼び出しの設定。既定は Opus単独の採点（adaptive thinking・effort high・fallbacks） */
+export type CallOptions = {
+  model?: string;
+  /** adaptive thinking を使う（Haiku 4.5 は非対応なので false） */
+  thinking?: boolean;
+  effort?: "low" | "medium" | "high";
+  /** 拒否されたときに別モデルで自動再実行する（server-side fallbacks） */
+  fallbacks?: boolean;
+};
+
 export async function callClaude(params: {
   pages: AnswerPage[];
   test: GradeTest;
   rubric: Rubric;
-}) {
+}, opts: CallOptions = {}) {
   const cfg = aiConfig();
   if (!cfg.enabled) {
     throw new GradingError("採点AIが設定されていません。サーバーの環境変数 ANTHROPIC_API_KEY を設定してください。", 503);
   }
+  const model = opts.model ?? cfg.model;
+  const thinking = opts.thinking ?? true;
+  const fallbacks = opts.fallbacks ?? cfg.fallbacks;
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2 });
   const { system, content } = buildGradingPrompt(params);
 
   let response: Anthropic.Beta.BetaMessage;
   try {
     response = await client.beta.messages.create({
-      model: cfg.model,
+      model,
       max_tokens: 16000,
-      thinking: { type: "adaptive" },
+      ...(thinking ? { thinking: { type: "adaptive" as const } } : {}),
       output_config: {
-        effort: "high",
+        ...(thinking ? { effort: opts.effort ?? "high" } : {}),
         format: { type: "json_schema", schema: OUTPUT_SCHEMA as unknown as Record<string, unknown> },
       },
       system,
       messages: [{ role: "user", content }],
-      ...(cfg.fallbacks
+      ...(fallbacks
         ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
         : {}),
     });
@@ -274,11 +302,14 @@ export function readGradingResponse(response: {
   stop_reason: string | null; content: Array<{ type: string; text?: string }>;
   model: string; usage: Anthropic.Beta.BetaUsage | Anthropic.Usage;
 }) {
+  // 応答が使えないとき（拒否・途中終了・壊れた JSON）は usage を付けて投げる（費用の記録に使う）
+  const unusable = (message: string, status: number) =>
+    Object.assign(new GradingError(message, status), { unusable: true, usage: response.usage, model: response.model, stopReason: response.stop_reason });
   if (response.stop_reason === "refusal") {
-    throw new GradingError("AIがこの答案の採点を断りました。画像の内容を確認し、先生が手で採点してください。", 422);
+    throw unusable("AIがこの答案の採点を断りました。画像の内容を確認し、先生が手で採点してください。", 422);
   }
   if (response.stop_reason === "max_tokens") {
-    throw new GradingError("採点結果が長くなりすぎて途中で止まりました。設問数を分けて登録するか、もう一度お試しください。", 502);
+    throw unusable("採点結果が長くなりすぎて途中で止まりました。設問数を分けて登録するか、もう一度お試しください。", 502);
   }
   const text = response.content
     .map((b) => (b.type === "text" ? b.text ?? "" : ""))
@@ -287,9 +318,9 @@ export function readGradingResponse(response: {
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new GradingError("AIの採点結果を読み取れませんでした。もう一度お試しください。", 502);
+    throw unusable("AIの採点結果を読み取れませんでした。もう一度お試しください。", 502);
   }
-  return { parsed, model: response.model, usage: response.usage };
+  return { parsed, model: response.model, usage: response.usage, stopReason: response.stop_reason };
 }
 
 export function toGradingError(e: unknown): GradingError {
@@ -339,6 +370,7 @@ export function normalizeResult(raw: unknown, test: GradeTest, rubric: Rubric) {
       return {
         qno: q.no, detected: "", confidence: 0, mark: "-", earned: 0, is_blank: false,
         need_review: true, reason: "AIが読み取れませんでした", comment: "", bbox: null, ai_raw: null,
+        flags: ["missing"],
       };
     }
     const blank = o.is_blank === true;
@@ -358,11 +390,12 @@ export function normalizeResult(raw: unknown, test: GradeTest, rubric: Rubric) {
 
     const confidence = Math.round(clamp(num(o.confidence), 0, 1) * 1000) / 1000;
     const written = q.type === "short" || q.type === "long";
-    const need_review =
-      inconsistent
-      || confidence < threshold
-      || (rubric.requireTeacher && written && !blank)
-      || (rubric.partialStep <= 1 && mark === "△");
+    const flags: ReviewFlag[] = [];
+    if (inconsistent) flags.push("inconsistent");
+    if (confidence < threshold) flags.push("low_confidence");
+    if (rubric.requireTeacher && written && !blank) flags.push("teacher_required");
+    if (rubric.partialStep <= 1 && mark === "△") flags.push("partial_not_allowed");
+    const need_review = flags.length > 0;
 
     const b = (o.bbox ?? {}) as Record<string, unknown>;
     const box = {
@@ -382,6 +415,7 @@ export function normalizeResult(raw: unknown, test: GradeTest, rubric: Rubric) {
       comment: str(o.comment).slice(0, 200),
       bbox: box.w > 0 && box.h > 0 ? box : null,
       ai_raw: o,
+      flags,
     };
   });
 
@@ -401,7 +435,7 @@ export function normalizeResult(raw: unknown, test: GradeTest, rubric: Rubric) {
   };
 
   // 画質不良の答案は採点せず再撮影を依頼する（採点基準）→ 全設問を要確認にする
-  if (!quality.ok && rubric.strictQuality) items.forEach((i) => { i.need_review = true; });
+  if (!quality.ok && rubric.strictQuality) items.forEach((i) => { i.need_review = true; i.flags.push("quality"); });
 
   return { items, quality };
 }

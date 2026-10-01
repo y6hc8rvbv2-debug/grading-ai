@@ -139,7 +139,7 @@ await toastSeen(/採点AIが混み合っています/);
 await settle(800);
 ok((await text()).includes("この答案はまだ採点されていません"), "AI採点に失敗したら、答案は採点待ちのまま（元の状態に戻る）");
 await page.getByRole("button", { name: "AIで採点する" }).click();
-await toastSeen(/AI採点が終わりました（\d+点）/);
+await toastSeen(/AI採点が終わりました（\d+点・Opus単独）/);
 await page.locator('svg[aria-label="原本に赤ペンを重ねた採点画像"]').waitFor({ timeout: 15000 });
 ok(true, "採点後は原本の上に赤ペンが重なる");
 ok(await page.locator('svg[aria-label="原本に赤ペンを重ねた採点画像"] image').count() === 1, "赤ペン画像の下地は原本画像");
@@ -292,6 +292,134 @@ ok((await page.locator("tbody tr").count()) === histBeforeCompare, "比較試験
 page.off("response", onCompareResponse);
 ok(compareBodies.length > 0 && compareBodies.every((b) => !b.includes(process.env.DUMMY_KEY || "sk-ant-e2e-dummy-key-not-real")), "比較試験の API の応答に APIキーが含まれない");
 
+// 11c. 採点方式「3モデル併用」（Haiku → 必要なら Sonnet → Opus）。採点AIは代役で、モデルごとに台本どおりの結果を返す
+const allReqs = async () => (await (await fetch(MOCK + "/__requests")).json()).filter((r) => r.kind === "grade");
+const script = (o) => fetch(MOCK + "/__script", { method: "POST", body: JSON.stringify(o) });
+const idOf = async (label) => {
+  await page.goto(BASE + "/history"); await settle(1000);
+  await page.locator("tbody tr", { hasText: label }).first().click();
+  await page.waitForURL(/\/history\/.+/);
+  return page.url().split("/").pop();
+};
+const rowText = async (label) => {
+  await page.goto(BASE + "/history"); await settle(1000);
+  return page.locator("tbody tr", { hasText: label }).first().innerText();
+};
+// 画面と同じ手順で /api/grade を呼ぶ（同じ requestId で、終わるまで続きを要求する）
+const gradeApi = async (submissionId, mode, requestId = randomUUID()) => {
+  for (let i = 0; i < 12; i++) {
+    const r = await page.request.post(BASE + "/api/grade", { data: { submissionId, mode, requestId } });
+    const j = await r.json();
+    if (r.status() === 202) { await settle(800); continue; }
+    if (!r.ok() || j.done) return { status: r.status(), ...j, requestId };
+  }
+  throw new Error("採点が終わらない");
+};
+const ids = {
+  s1: await idOf("A組 1番"), s3: await idOf("A組 3番"), s4: await idOf("A組 4番"),
+  s5: await idOf("A組 5番"), s6: await idOf("A組 6番"), s7: await idOf("A組 7番"),
+};
+
+// (1) 画面：採点方式を選ぶと、実行前のボタンと料金の比較に表示される
+await page.goto(BASE + "/new"); await settle(1000);
+ok((await text()).includes("料金の比較（目安）") && (await text()).includes("Opus単独の約"), "新規採点：採点方式と料金の比較（目安）を表示");
+await page.getByRole("radio", { name: /3モデル併用/ }).check();
+await page.locator('input[type=file]:not([capture])').setInputFiles([img(3)]); await settle(600);
+ok(await page.getByRole("button", { name: "保存してAI採点する（3モデル併用）" }).isVisible(), "実行前に、選んだ採点方式をボタンに表示");
+await page.getByRole("button", { name: "すべて外す" }).click();
+
+// (2) Haiku で問題がなければ Haiku で確定（画面から採点し直す）
+let mark = (await allReqs()).length;
+await page.goto(BASE + "/history/" + ids.s3); await settle(1200);
+ok((await page.getByLabel("採点方式").inputValue()) === "cascade", "選んだ採点方式は答案詳細でも使われる");
+page.once("dialog", (d) => d.accept());
+await page.getByRole("button", { name: "AIで採点し直す" }).click();
+await toastSeen(/AI採点が終わりました（\d+点・3モデル併用・Haikuで確定）/);
+let calls = (await allReqs()).slice(mark);
+ok(calls.length === 1 && calls[0].model === "claude-haiku-4-5" && calls[0].problems.length === 0,
+  `問題の無い答案は Haiku だけで確定（${calls.map((c) => c.model).join(",")} ${JSON.stringify(calls.flatMap((c) => c.problems))}）`);
+await settle(800);
+ok((await text()).includes("採点方式：3モデル併用（Haikuで確定）"), "答案詳細に採点方式を表示");
+await page.getByRole("button", { name: /^AI採点の記録/ }).click(); await settle(1000);
+ok((await text()).includes("claude-haiku-4-5") && /入力 1200・出力 300 トークン/.test(await text()), "AI採点の記録：モデルID・トークン数");
+ok(/\$0\.00\d+/.test(await text()), "AI採点の記録：概算費用");
+ok((await rowText("A組 3番")).includes("3モデル併用（Haiku）"), "採点履歴に採点方式を保存・表示");
+
+// (3) Haiku で回答の欠落 → Sonnet で解決
+mark = (await allReqs()).length;
+await script({ "claude-haiku-4-5": ["missing"] });
+let r = await gradeApi(ids.s4, "cascade");
+calls = (await allReqs()).slice(mark);
+ok(r.done && r.finalStage === "sonnet" && calls.map((c) => c.model).join(",") === "claude-haiku-4-5,claude-sonnet-5-5"
+  && calls.every((c) => c.problems.length === 0), `回答の欠落 → Sonnet で確定（${calls.map((c) => c.model).join(",")}）`);
+ok(calls.every((c) => JSON.stringify(c.questions) === JSON.stringify(calls[0].questions) && c.rubric === calls[0].rubric),
+  "Haiku と Sonnet に同じ模範解答・配点・採点基準を渡す");
+await page.goto(BASE + "/history/" + ids.s4); await settle(1000);
+await page.getByRole("button", { name: /^AI採点の記録/ }).click(); await settle(1000);
+ok((await text()).includes("回答の欠落") && (await text()).includes("上のモデルへ") && (await text()).includes("claude-sonnet-5-5"),
+  "確認に回した理由と各段階のモデルIDを記録");
+
+// (4) Haiku で採点基準と矛盾 → Sonnet で判読不能 → Opus でも Sonnet と判定が分かれた → 要確認（理由を記録）
+mark = (await allReqs()).length;
+await script({ "claude-haiku-4-5": ["contradict"], "claude-sonnet-5-5": ["unreadable"], "claude-opus-5": ["disagree"] });
+r = await gradeApi(ids.s5, "cascade");
+calls = (await allReqs()).slice(mark);
+ok(r.done && r.finalStage === "opus" && r.needReview >= 1 && calls.length === 3 && calls.every((c) => c.problems.length === 0),
+  `解決しない答案は Opus まで回し、要確認にする（${calls.map((c) => c.model).join(",")}・要確認 ${r.needReview}）`);
+await page.goto(BASE + "/history/" + ids.s5); await settle(1000);
+await page.getByRole("button", { name: /^AI採点の記録/ }).click(); await settle(1000);
+const log5 = await text();
+ok((log5.includes("正答との照合と判定が矛盾") || log5.includes("判定と得点が食い違う")) && log5.includes("判読不能") && log5.includes("最後のモデルでも解決しなかった") && log5.includes("前のモデルと判定が分かれた"),
+  "要確認にした判断理由（各段階の理由と、最後に残った理由）を記録");
+
+// (5) 複数ページの答案：各段階に全ページを送り、ページ別に赤ペンを重ねる
+mark = (await allReqs()).length;
+await script({ "claude-haiku-4-5": ["missing"] });
+r = await gradeApi(ids.s1, "cascade");
+calls = (await allReqs()).slice(mark);
+ok(r.done && calls.length === 2 && calls.every((c) => c.images === 2), `2ページの答案は Haiku・Sonnet とも2枚の画像を送る（${calls.map((c) => c.images).join(",")}）`);
+await page.goto(BASE + "/history/" + ids.s1); await settle(1500);
+await page.locator('svg[aria-label="原本に赤ペンを重ねた採点画像"]').waitFor({ timeout: 15000 });
+await page.getByRole("button", { name: "▶" }).first().click(); await settle(1000);
+ok((await text()).includes("原本 2 / 2 ページ") && await page.locator('svg[aria-label="原本に赤ペンを重ねた採点画像"] path').count() > 0,
+  "2ページ目の原本にも赤ペンを重ねる");
+
+// (6) 二重実行の防止：連打（同じ requestId の同時送信）と再送では、同じモデルを二重に呼ばない
+mark = (await allReqs()).length;
+await script({ "claude-haiku-4-5": ["slow"] });
+const ridDup = randomUUID();
+const [a1, a2] = await Promise.all([
+  page.request.post(BASE + "/api/grade", { data: { submissionId: ids.s7, mode: "cascade", requestId: ridDup } }),
+  (async () => { await settle(400); return page.request.post(BASE + "/api/grade", { data: { submissionId: ids.s7, mode: "cascade", requestId: ridDup } }); })(),
+]);
+ok([a1.status(), a2.status()].sort().join(",") === "200,202", `連打：2つ目は「採点中」で待たせる（${a1.status()},${a2.status()}）`);
+const resent = await gradeApi(ids.s7, "cascade", ridDup);
+ok(resent.done && resent.finalStage === "haiku", "再送：同じ requestId は確定済みの結果を返す");
+ok((await allReqs()).length - mark === 1, `連打・再送でもモデルの呼び出しは1回（${(await allReqs()).length - mark}回）`);
+// 採点中の答案に、別の操作で採点を始めようとしても断る
+await script({ "claude-haiku-4-5": ["missing"] });
+const rA = randomUUID();
+const first = await (await page.request.post(BASE + "/api/grade", { data: { submissionId: ids.s7, mode: "cascade", requestId: rA } })).json();
+ok(first.done === false && first.next === "sonnet", "Haiku の結果に問題があれば、次は Sonnet と返す");
+const other = await page.request.post(BASE + "/api/grade", { data: { submissionId: ids.s7, mode: "opus", requestId: randomUUID() } });
+ok(other.status() === 409, `採点中の答案は、別の操作では採点できない（HTTP ${other.status()}）`);
+const rest = await gradeApi(ids.s7, "cascade", rA);
+ok(rest.done && rest.finalStage === "sonnet", "続きは同じ requestId で Sonnet から再開する");
+
+// (7) 途中失敗：Sonnet が失敗しても、既存の成績（得点・状態）を壊さない
+const before6 = await rowText("A組 6番");
+mark = (await allReqs()).length;
+await script({ "claude-haiku-4-5": ["missing"], "claude-sonnet-5-5": ["error500"] });
+r = await gradeApi(ids.s6, "cascade");
+calls = (await allReqs()).slice(mark);
+ok(!r.ok && r.status >= 500 && calls.length === 2, `Sonnet が失敗したら採点を止める（HTTP ${r.status}・${calls.map((c) => c.model).join(",")}）`);
+const after6 = await rowText("A組 6番");
+ok(after6.replace(/\s+/g, " ") === before6.replace(/\s+/g, " "), "途中で失敗しても、採点履歴の得点・状態・採点方式は変わらない");
+await page.goto(BASE + "/history/" + ids.s6); await settle(1000);
+await page.getByRole("button", { name: /^AI採点の記録/ }).click(); await settle(1000);
+ok((await text()).includes("失敗（成績は変更なし）"), "失敗した採点も記録に残る");
+await page.getByLabel("採点方式").selectOption("opus");
+
 // 12. レポート3種
 await page.goto(BASE + "/reports"); await settle();
 for (const [v, label] of [["student", "個人成績票"], ["unit", "単元別到達度レポート"], ["class", "成績レポート"]]) {
@@ -325,6 +453,9 @@ await page.goto(subUrl); await settle(2500);
 ok((await text()).includes("答案が見つかりません"), "他校の答案URLを直接開いても表示されない");
 await page.goto(BASE + "/tests"); await settle();
 ok(!(await text()).includes("E2E 小テスト"), "他校のテストは見えない");
+const markB = (await allReqs()).length;
+const crossGrade = await page.request.post(BASE + "/api/grade", { data: { submissionId: ids.s3, mode: "cascade", requestId: randomUUID() } });
+ok(crossGrade.status() === 404 && (await allReqs()).length === markB, `他校の答案は AI採点できず、モデルも呼ばない（HTTP ${crossGrade.status()}）`);
 
 // 想定どおりのエラーは除く：誤ったパスワードのログイン（手順0）の 400、
 // 採点AIが混み合っている場合の確認（手順6b）の 429、比較試験の二重実行を断った 409（手順11b）

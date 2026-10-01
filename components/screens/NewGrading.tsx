@@ -11,6 +11,8 @@ import { FONT_MONO } from "@/lib/ui/theme";
 import { pct, uid } from "@/lib/util";
 import { PIPELINE, SOURCES, checkQuality, gradeSubmission } from "@/lib/grading/engine";
 import { isHeic, prepareImage } from "@/lib/image";
+import { MODE_LABEL, STAGE_LABEL } from "@/lib/grading/cost";
+import { GradingModePicker } from "@/components/GradingModePicker";
 import { friendlyError } from "@/lib/errors";
 import { useUI } from "@/components/ui-context";
 import { Badge, Bar, Btn, Card, Empty, Field, Modal, PseudoQR, Section, Select, Table, grid } from "@/components/ui";
@@ -25,7 +27,7 @@ const ACCEPT = "image/jpeg,image/png,image/heic,image/heif,.heic,.heif,applicati
 const EMPTY_QUALITY: Quality = { scores: {}, issues: [], fixes: [], ok: true, avg: 0 };
 
 export default function NewGrading() {
-  const { T, go, toast, ws, testById, classById, who, rubric, ds, subs, refresh, ai, aiGradeSub } = useUI();
+  const { T, go, toast, ws, testById, classById, who, rubric, ds, subs, refresh, ai, aiGradeSub, gradingMode } = useUI();
   const demo = ds.mode === "demo";
 
   const [stage, setStage] = useState<"select" | "run" | "done">("select");
@@ -212,14 +214,19 @@ export default function NewGrading() {
     let aiNg = 0;
     if (mode === "ai" && ids.length) {
       setAiProgress({ done: 0, total: ids.length });
+      addLog("AI採点", `採点方式：${MODE_LABEL[gradingMode]}`);
       for (let i = 0; i < ids.length; i++) {
         const name = names[i];
         addLog("AI採点", `${name}：採点しています…（${i + 1}/${ids.length}）`);
-        const r = await aiGradeSub(ids[i], { silent: true });
+        const r = await aiGradeSub(ids[i], {
+          silent: true,
+          onProgress: (p) => addLog("AI採点", `${name}：${STAGE_LABEL[p.stage]}の結果に確認が必要な点があるため、${p.next ? STAGE_LABEL[p.next] : "次のモデル"}で採点し直します（${(p.reasons ?? []).slice(0, 3).join("／")}${(p.reasons?.length ?? 0) > 3 ? " ほか" : ""}）`),
+        });
         if (r.ok) {
+          const where = r.summary.mode === "cascade" && r.summary.finalStage ? `・${STAGE_LABEL[r.summary.finalStage]}で確定` : "";
           addLog("AI採点", r.summary.blank
             ? `${name}：全問白紙でした`
-            : `${name}：${r.summary.total}点${r.summary.needReview ? `（要確認 ${r.summary.needReview} 問）` : ""}`);
+            : `${name}：${r.summary.total}点${where}${r.summary.needReview ? `（要確認 ${r.summary.needReview} 問）` : ""}`);
         } else {
           aiNg++;
           addLog("エラー", `${name}：${r.error}（画像は保存済みです。「採点中」の画面から採点し直せます）`);
@@ -534,6 +541,10 @@ export default function NewGrading() {
                 答案画像・正答・配点・採点基準をもとに、設問ごとに判定・得点・赤ペンコメントを付けます。
                 1枚あたり数十秒かかります。結果は下書きなので、返却前に「要確認一覧」を確認してください。
               </div>
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 6 }}>採点方式</div>
+                <GradingModePicker pages={pagesPer} questions={test?.questions.length ?? 10} answers={Math.max(1, groups.length)} />
+              </div>
               <label style={{ display: "flex", gap: 7, alignItems: "flex-start", fontSize: 12, color: T.textSub, cursor: "pointer", marginTop: 8 }}>
                 <input type="checkbox" checked={uploadOnly} onChange={(e) => setUploadOnly(e.target.checked)} style={{ marginTop: 3 }} />
                 <span>画像の保存だけ行い、あとで採点する（「採点中」の画面からまとめてAI採点できます）</span>
@@ -556,7 +567,7 @@ export default function NewGrading() {
           <div style={{ marginTop: 16, display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
             <Btn variant="shu" size="lg" onClick={run} disabled={!files.length || preparing}>
               {preparing ? "画像を準備しています…"
-                : mode === "ai" ? "保存してAI採点する"
+                : mode === "ai" ? `保存してAI採点する（${MODE_LABEL[gradingMode]}）`
                 : mode === "local" ? (demo ? "AI採点をはじめる" : "仮採点をはじめる")
                 : "答案を保存する"}
             </Btn>

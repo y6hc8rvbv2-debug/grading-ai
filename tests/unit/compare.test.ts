@@ -40,7 +40,7 @@ test("同じ画像なら入力の指紋は同じ、違う画像なら違う", ()
 });
 
 const item = (qno: number, detected: string, mark: "○" | "×", earned: number): NormalizedItem => ({
-  qno, detected, mark, earned, confidence: 0.9, is_blank: false, need_review: false, reason: "", comment: "", bbox: null, ai_raw: null,
+  qno, detected, mark, earned, confidence: 0.9, is_blank: false, need_review: false, reason: "", comment: "", bbox: null, ai_raw: null, flags: [],
 });
 
 test("期待結果との照合（全問一致・不一致）", () => {

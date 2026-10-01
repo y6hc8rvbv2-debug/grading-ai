@@ -11,7 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import { typeLabelOf } from "@/lib/grading/engine";
 import { rubricFromRow } from "@/lib/db/rubric";
 import type {
-  AuditRow, ClassRoom, GradingInput, Item, ItemPatch, Mark, NewTestInput, Profile,
+  AuditRow, ClassRoom, GradingInput, GradingLog, Item, ItemPatch, Mark, NewTestInput, Profile,
   QType, Quality, QuestionStat, RateRow, Retention, ReviewEntry, Rubric, School,
   Student, Submission, Test, Workspace,
 } from "@/lib/types";
@@ -123,9 +123,11 @@ export async function loadWorkspace(): Promise<Workspace> {
   return { classes: classRows, students: studentRows, tests: testRows };
 }
 
-const SUBMISSION_SELECT = `
+// 採点方式（0006）の列。0006 を実行する前の DB でも画面が動くよう、列が無ければ外して読み直す
+let gradingCols = true;
+const submissionSelect = () => `
   id, test_id, student_id, class_id, source, status, pages, total_score,
-  progress, quality, image_paths, is_blank, edited, uploaded_at,
+  progress, quality, image_paths, is_blank, edited, uploaded_at,${gradingCols ? " grading_mode, grading_stage," : ""}
   reviewed_at, reviewer:profiles!submissions_reviewed_by_fkey ( display_name ),
   submission_items (
     id, qno, detected, confidence, mark, earned, is_blank,
@@ -170,6 +172,8 @@ function mapSubmission(s: any): Submission {
     // 確認済みなら確認した教員の表示名（表示名が未設定でも「教員」と出す）
     reviewedBy: s.reviewed_at ? (s.reviewer?.display_name || "教員") : "",
     uploadedAt: s.uploaded_at,
+    gradingMode: s.grading_mode ?? null,
+    gradingStage: s.grading_stage ?? null,
     result: { items, total: s.total_score, blank: s.is_blank },
   };
 }
@@ -179,28 +183,64 @@ export async function loadSubmissions(opts: {
   testId?: string; classId?: string; limit?: number;
 } = {}): Promise<Submission[]> {
   const sb = createClient();
-  let q = sb
-    .from("submissions")
-    .select(SUBMISSION_SELECT)
-    .is("deleted_at", null)
-    .order("uploaded_at", { ascending: false })
-    .limit(opts.limit ?? 200);
-
-  if (opts.testId) q = q.eq("test_id", opts.testId);
-  if (opts.classId) q = q.eq("class_id", opts.classId);
-
-  const { data, error } = await q;
+  const run = () => {
+    let q = sb
+      .from("submissions")
+      .select(submissionSelect())
+      .is("deleted_at", null)
+      .order("uploaded_at", { ascending: false })
+      .limit(opts.limit ?? 200);
+    if (opts.testId) q = q.eq("test_id", opts.testId);
+    if (opts.classId) q = q.eq("class_id", opts.classId);
+    return q;
+  };
+  let { data, error } = await run();
+  if (error && missingGradingCols(error)) ({ data, error } = await run());
   if (error) throw error;
   return (data ?? []).map(mapSubmission);
+}
+
+/** 0006 を実行する前の DB（採点方式の列が無い）なら、次からその列を読まない */
+function missingGradingCols(error: { code?: string; message?: string }) {
+  if (gradingCols && (error.code === "42703" || /grading_(mode|stage)/.test(error.message ?? ""))) {
+    gradingCols = false;
+    return true;
+  }
+  return false;
 }
 
 /** 答案1枚を読み直す（修正後にトリガーが計算した合計点・状態を取り込むため） */
 export async function loadSubmission(id: string): Promise<Submission | null> {
   const sb = createClient();
-  const { data, error } = await sb
-    .from("submissions").select(SUBMISSION_SELECT).eq("id", id).maybeSingle();
+  const run = () => sb.from("submissions").select(submissionSelect()).eq("id", id).maybeSingle();
+  let { data, error } = await run();
+  if (error && missingGradingCols(error)) ({ data, error } = await run());
   if (error) throw error;
   return data ? mapSubmission(data) : null;
+}
+
+/** AI採点の記録（新しい順）。0006 を実行する前の DB では空 */
+export async function loadGradingLog(submissionId: string): Promise<GradingLog[]> {
+  const sb = createClient();
+  const { data, error } = await sb
+    .from("grading_jobs")
+    .select("id, mode, status, final_stage, needs_review, decision, total_cost_usd, error, created_at, finished_at, creator:profiles!grading_jobs_created_by_fkey ( display_name ), grading_stages ( stage, position, model_id, status, escalate, reasons, usage, cost_usd, elapsed_ms, error, served_model )")
+    .eq("submission_id", submissionId)
+    .order("created_at", { ascending: false })
+    .limit(10);
+  if (error) return [];
+  return (data ?? []).map((j: any) => ({
+    id: j.id, mode: j.mode, status: j.status, finalStage: j.final_stage, needsReview: j.needs_review,
+    reviewReasons: (j.decision?.review_reasons ?? []) as string[],
+    costUsd: Number(j.total_cost_usd ?? 0), error: j.error, createdAt: j.created_at, finishedAt: j.finished_at,
+    by: j.creator?.display_name ?? "",
+    stages: (j.grading_stages ?? []).sort((a: any, b: any) => a.position - b.position).map((st: any) => ({
+      stage: st.stage, modelId: st.model_id, servedModel: st.served_model, status: st.status, escalate: st.escalate,
+      reasons: (st.reasons ?? []).map((r: any) => r.msg as string),
+      inputTokens: st.usage?.input ?? null, outputTokens: st.usage?.output ?? null,
+      costUsd: st.cost_usd == null ? null : Number(st.cost_usd), elapsedMs: st.elapsed_ms, error: st.error,
+    })),
+  }));
 }
 
 /* --------------------------------------------------------- 書き込み */

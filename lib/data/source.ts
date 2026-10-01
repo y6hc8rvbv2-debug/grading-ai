@@ -3,9 +3,13 @@
 //   - supabase: 本番。RLS 付きで Supabase に保存する（lib/data/supabase.ts）
 //   - demo    : Supabase 未設定時。メモリ上のデモデータで動き、再読み込みで元に戻る（lib/data/demo.ts）
 import type {
-  AiGradeSummary, AiStatus, AuditRow, GradingInput, ItemPatch, NewTestInput, Profile, QuestionStat, RateRow,
+  AiGradeSummary, AiStatus, AuditRow, GradingInput, GradingLog, ItemPatch, NewTestInput, Profile, QuestionStat, RateRow,
   Retention, ReviewEntry, Rubric, School, Submission, Workspace,
 } from "@/lib/types";
+import type { GradingMode, GradingStage } from "@/lib/grading/cost";
+
+/** AI採点の進み具合（3モデル併用で上の段階に回るたびに呼ばれる） */
+export type AiGradeProgress = { stage: GradingStage; next?: GradingStage; reasons?: string[] };
 
 export type SessionInfo = {
   userId: string;
@@ -43,8 +47,11 @@ export interface DataSource {
 
   /** 採点AIが使えるか */
   aiStatus(): Promise<AiStatus>;
-  /** 保存済みの答案を採点AIで採点して保存する（サーバーの /api/grade が行う） */
-  aiGrade(submissionId: string): Promise<AiGradeSummary>;
+  /** 保存済みの答案を採点AIで採点して保存する（サーバーの /api/grade が行う）。
+   *  mode: opus = Opus単独、cascade = 3モデル併用（Haiku → 必要なら Sonnet → Opus） */
+  aiGrade(submissionId: string, opts: { mode: GradingMode; onProgress?: (p: AiGradeProgress) => void }): Promise<AiGradeSummary>;
+  /** AI採点の記録（使ったモデル・確認に回した理由・トークン数・概算費用） */
+  gradingLog(submissionId: string): Promise<GradingLog[]>;
 
   signedImageUrl(path: string): Promise<string>;
   loadAudit(): Promise<AuditRow[]>;

@@ -179,6 +179,7 @@ export function createDemoSource(): DataSource {
     aiGrade: async () => {
       throw new Error("デモモードでは採点AIを使えません。Supabase と ANTHROPIC_API_KEY を設定すると使えます。");
     },
+    gradingLog: async () => [],
 
     signedImageUrl: async () => "",
     loadAudit: async () => clone(audit),

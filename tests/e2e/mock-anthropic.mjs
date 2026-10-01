@@ -15,6 +15,10 @@ import http from "node:http";
 const PORT = Number(process.env.MOCK_ANTHROPIC_PORT || 4010);
 const requests = [];
 let nextMode = "";
+// モデルごとの台本：POST /__script {"claude-haiku-4-5": ["missing"], ...} で、次の呼び出しの結果を決める
+// clean（既定）/ missing（最後の設問を返さない）/ contradict（正答と同じ解答を ×）/ unreadable（判読不能）/
+// disagree（1問目を別の解答として ×）/ error500 / ratelimit / refusal / slow（2.5秒待ってから clean）
+const scripts = {};
 
 const MODELS = [
   { type: "model", id: "claude-haiku-4-5-20251001", display_name: "Claude Haiku 4.5", created_at: "2025-10-01T00:00:00Z" },
@@ -56,13 +60,30 @@ function compareResult(model) {
   };
 }
 
+// 採点のリクエストの形を、モデルごとの決まりで検査する
+//   claude-opus-5     … adaptive thinking・effort high・fallbacks（Opus単独とこれまでの採点）
+//   claude-sonnet-5-5 … adaptive thinking・effort high、fallbacks なし（3モデル併用の2段目）
+//   claude-haiku-4-5  … thinking・effort なし（Haiku 4.5 は非対応）、fallbacks なし（3モデル併用の1段目）
 function problems(req, body) {
   const p = [];
   if (req.headers["x-api-key"] !== process.env.EXPECTED_API_KEY) p.push("x-api-key が違う");
-  if (!String(req.headers["anthropic-beta"] || "").includes("server-side-fallback-2026-07-01")) p.push("fallback の beta ヘッダーが無い");
-  if (body.fallbacks !== "default") p.push("fallbacks が default でない");
-  if (body.model !== "claude-opus-5") p.push(`model が claude-opus-5 でない（${body.model}）`);
-  if (body.thinking?.type !== "adaptive") p.push("thinking が adaptive でない");
+  const beta = String(req.headers["anthropic-beta"] || "");
+  if (body.model === "claude-opus-5") {
+    if (!beta.includes("server-side-fallback-2026-07-01")) p.push("fallback の beta ヘッダーが無い");
+    if (body.fallbacks !== "default") p.push("fallbacks が default でない");
+    if (body.thinking?.type !== "adaptive") p.push("thinking が adaptive でない");
+    if (body.output_config?.effort !== "high") p.push("effort が high でない");
+  } else if (body.model === "claude-sonnet-5-5") {
+    if (body.thinking?.type !== "adaptive") p.push("Sonnet の thinking が adaptive でない");
+    if (body.output_config?.effort !== "high") p.push("Sonnet の effort が high でない");
+    if ("fallbacks" in body || beta.includes("server-side-fallback")) p.push("3モデル併用の Sonnet に fallbacks を付けている");
+  } else if (body.model === "claude-haiku-4-5") {
+    if ("thinking" in body) p.push("Haiku に thinking を付けている（非対応）");
+    if (body.output_config?.effort) p.push("Haiku に effort を付けている（非対応）");
+    if ("fallbacks" in body || beta.includes("server-side-fallback")) p.push("3モデル併用の Haiku に fallbacks を付けている");
+  } else {
+    p.push(`想定外のモデル（${body.model}）`);
+  }
   if (body.output_config?.format?.type !== "json_schema") p.push("output_config.format が json_schema でない");
   if ("budget_tokens" in (body.thinking || {})) p.push("budget_tokens を送っている");
   const content = body.messages?.[0]?.content ?? [];
@@ -89,6 +110,10 @@ const server = http.createServer((req, res) => {
     };
     if (req.method === "GET" && req.url === "/__requests") return send(200, requests);
     if (req.method === "POST" && req.url === "/__mode") { nextMode = JSON.parse(raw || "{}").mode || ""; return send(200, { ok: true }); }
+    if (req.method === "POST" && req.url === "/__script") {
+      for (const [m, list] of Object.entries(JSON.parse(raw || "{}"))) scripts[m] = [...(scripts[m] ?? []), ...list];
+      return send(200, { ok: true });
+    }
     if (req.method === "GET" && req.url.startsWith("/v1/models")) {
       requests.push({ url: req.url, kind: "models", problems: req.headers["x-api-key"] === process.env.EXPECTED_API_KEY ? [] : ["x-api-key が違う"] });
       return send(200, { data: MODELS, has_more: false, first_id: MODELS[0].id, last_id: MODELS.at(-1).id });
@@ -109,33 +134,45 @@ const server = http.createServer((req, res) => {
     }
     const bad = problems(req, body);
     const qs = questionsFrom(body);
-    requests.push({ url: req.url, kind: "grade", beta: req.headers["anthropic-beta"], model: body.model, problems: bad, questions: qs,
+    const scripted = scripts[body.model]?.shift();
+    const mode = nextMode || scripted || "clean"; nextMode = "";
+    requests.push({ url: req.url, kind: "grade", beta: req.headers["anthropic-beta"], model: body.model, mode, problems: bad, questions: qs,
       rubric: body.messages[0].content.find((c) => c.type === "text")?.text.split("採点基準:\n")[1] ?? "",
       imageType: body.messages[0].content[0]?.source?.media_type ?? body.messages[0].content[0]?.type,
       images: body.messages[0].content.filter((c) => c.type === "image" || c.type === "document").length });
 
-    const mode = nextMode; nextMode = "";
     if (mode === "ratelimit") {
       res.writeHead(429, { "content-type": "application/json", "retry-after": "0", "x-should-retry": "false" });
       return res.end(JSON.stringify({ type: "error", error: { type: "rate_limit_error", message: "rate limited (mock)" } }));
     }
+    if (mode === "error500") {
+      res.writeHead(500, { "content-type": "application/json", "x-should-retry": "false" });
+      return res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: "internal error (mock)" } }));
+    }
     if (bad.length) return send(400, { type: "error", error: { type: "invalid_request_error", message: bad.join(" / ") } });
 
-    const result = {
-      quality: { tilt: 92, brightness: 90, blur: 94, shadow: 88, coverage: 96, contrast: 91, issues: [] },
-      items: qs.map((q, i) => ({
-        qno: q.qno,
-        detected: q.correct || "（記述：要点を満たす解答）",
-        is_blank: false,
-        mark: "○",
-        earned: q.points,
-        confidence: 0.95,
-        reason: "",
-        comment: "よくできました",
-        bbox: { page: 1, x: 0.12, y: 0.18 + i * 0.12, w: 0.45, h: 0.08 },
-      })),
-    };
-    send(200, {
+    const pageCount = body.messages[0].content.filter((c) => c.type === "image" || c.type === "document").length;
+    const items = qs.map((q, i) => ({
+      qno: q.qno,
+      detected: q.correct || "（記述：要点を満たす解答）",
+      is_blank: false,
+      mark: "○",
+      earned: q.points,
+      confidence: 0.95,
+      reason: "",
+      comment: "よくできました",
+      // 2ページの答案では、2問目を2ページ目に置く（ページ別の赤ペン表示の確認用）
+      bbox: { page: i === 1 && pageCount > 1 ? 2 : 1, x: 0.12, y: 0.18 + i * 0.12, w: 0.45, h: 0.08 },
+    }));
+    const keyed = items.findIndex((_, i) => qs[i].correct);
+    if (mode === "missing") items.pop();
+    // 採点基準との矛盾：正答のある設問は「正答と同じ解答なのに ×」、無ければ「満点なのに △」（判定と得点の食い違い）
+    if (mode === "contradict" && keyed >= 0) Object.assign(items[keyed], { mark: "×", earned: 0, reason: "計算ミス" });
+    if (mode === "contradict" && keyed < 0) Object.assign(items[0], { mark: "△" });
+    if (mode === "unreadable") Object.assign(items[0], { detected: "？？（判読不能）", confidence: 0.9 });
+    if (mode === "disagree") Object.assign(items[keyed >= 0 ? keyed : 0], { detected: "別の解答", mark: "×", earned: 0, reason: "誤答" });
+    const result = { quality: { tilt: 92, brightness: 90, blur: 94, shadow: 88, coverage: 96, contrast: 91, issues: [] }, items };
+    const reply = () => send(200, {
       id: "msg_mock",
       type: "message",
       role: "assistant",
@@ -145,6 +182,7 @@ const server = http.createServer((req, res) => {
       stop_sequence: null,
       usage: { input_tokens: 1200, output_tokens: 300 },
     });
+    if (mode === "slow") setTimeout(reply, 2500); else reply();
   });
 });
 

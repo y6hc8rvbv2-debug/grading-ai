@@ -235,10 +235,11 @@ function ReadinessCard() {
       { label: "Supabase（データの保存先）", ok: h.supabase, fix: "環境変数 NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY を設定してください。" },
       { label: "採点AI（ANTHROPIC_API_KEY）", ok: h.ai, fix: `Vercel の Settings → Environment Variables に ANTHROPIC_API_KEY を追加し、${h.env === "preview" ? "Preview" : h.env === "production" ? "Production" : "この環境"} にチェックを入れて再デプロイしてください（ステップ6.5）。` },
       { label: "AI採点の保存（0004_ai_grading.sql）", ok: h.migrations?.["0004"] ?? null, fix: "Supabase の SQL Editor で supabase/migrations/0004_ai_grading.sql を実行してください。" },
+      { label: "採点方式と AI採点の記録（0006_grading_modes.sql）", ok: h.migrations?.["0006"] ?? null, fix: "Supabase の SQL Editor で supabase/migrations/0006_grading_modes.sql を実行してください。AI採点（Opus単独・3モデル併用とも）に必要です。" },
       { label: "モデル比較試験の記録（0005_model_compare.sql）", ok: h.migrations?.["0005"] ?? null, fix: "管理者がモデル比較試験を使う場合だけ必要です。Supabase の SQL Editor で 0005_model_compare.sql を実行してください。" },
       { label: "iPhone の写真（HEIC）", ok: true, fix: "" },
     ] : [];
-  const ready = h && h.supabase && h.ai && h.migrations?.["0004"];
+  const ready = h && h.supabase && h.ai && h.migrations?.["0004"] && h.migrations?.["0006"];
 
   return (
     <Card title="AI採点の準備状況" sub={h ? `実行環境: ${h.env === "preview" ? "Preview（プレビュー）" : h.env === "production" ? "Production（本番）" : "ローカル"}` : "AI採点に必要な設定がそろっているかを確認します"}

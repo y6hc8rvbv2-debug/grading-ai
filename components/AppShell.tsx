@@ -13,7 +13,13 @@ import { createDemoSource } from "@/lib/data/demo";
 import { createSupabaseSource } from "@/lib/data/supabase";
 import { Ctx, useUI, type DisplayMode, type UIContext, type View } from "@/components/ui-context";
 import { Btn, Toast, inputStyle } from "@/components/ui";
-import type { AiStatus, Item, ItemPatch, Rubric, Submission, Workspace } from "@/lib/types";
+import type { AiGradeSummary, AiStatus, Item, ItemPatch, Rubric, Submission, Workspace } from "@/lib/types";
+import { MODE_LABEL, STAGE_LABEL, type GradingMode } from "@/lib/grading/cost";
+import type { AiGradeProgress } from "@/lib/data/source";
+
+/** 採点結果の通知に添える方式（例: 3モデル併用・Sonnetで確定） */
+const modeNote = (r: AiGradeSummary) =>
+  r.mode === "cascade" && r.finalStage ? `${MODE_LABEL.cascade}・${STAGE_LABEL[r.finalStage]}で確定` : MODE_LABEL[r.mode ?? "opus"];
 
 /* ------------------------------------------------------------ 画面の対応表 */
 const NAV: { k: View; i: string; tk: string; admin?: boolean }[] = [
@@ -103,6 +109,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [lang, setLangState] = usePref<string>("lang", "ja");
   const [favs, setFavs] = usePref<string[]>("favs", ["new", "review"]);
   const [anonMode, setAnonMode] = usePref<boolean>("anonMode", false);
+  // 採点方式（Opus単独 / 3モデル併用）。端末ごとに覚えておき、新規採点・採点中・答案詳細で使う
+  const [gradingMode, setGradingMode] = usePref<GradingMode>("gradingMode", "opus");
   const [display, setDisplay] = usePref<DisplayMode>("display", "class");
   const [answerLang, setAnswerLang] = usePref<string>("answerLang", "ja");
   const [studentLang, setStudentLang] = usePref<string>("studentLang", "ja");
@@ -240,16 +248,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
     }
   }, [ds, refreshSub, toast]);
 
-  const aiGradeSub = useCallback(async (submissionId: string, opts: { silent?: boolean } = {}) => {
+  const aiGradeSub = useCallback(async (submissionId: string, opts: { silent?: boolean; mode?: GradingMode; onProgress?: (p: AiGradeProgress) => void } = {}) => {
     // 採点中の表示にする（サーバーも status = processing にしている）
     setSubs((prev) => prev.map((s) => (s.id === submissionId ? { ...s, status: "processing", progress: 30 } : s)));
     try {
-      const r = await ds.aiGrade(submissionId);
+      const r = await ds.aiGrade(submissionId, { mode: opts.mode ?? gradingMode, onProgress: opts.onProgress });
       await refreshSub(submissionId);
       if (!opts.silent) {
         toast(r.blank ? "全問白紙の答案でした。模範解答タブを確認してください"
-          : r.needReview ? `AI採点が終わりました（${r.total}点）。要確認が ${r.needReview} 問あります`
-          : `AI採点が終わりました（${r.total}点）`);
+          : r.needReview ? `AI採点が終わりました（${r.total}点・${modeNote(r)}）。要確認が ${r.needReview} 問あります`
+          : `AI採点が終わりました（${r.total}点・${modeNote(r)}）`);
       }
       return { ok: true as const, summary: r };
     } catch (e) {
@@ -259,7 +267,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       if (!opts.silent) toast(error, "ng");
       return { ok: false as const, error };
     }
-  }, [ds, refreshSub, toast]);
+  }, [ds, refreshSub, toast, gradingMode]);
 
   const toggleFav = useCallback((k: string) => {
     setFavs(favs.includes(k) ? favs.filter((x) => x !== k) : [...favs, k]);
@@ -312,7 +320,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     T, t, lang, setLang, mode, setMode, mobile, view, go, toast,
     ds, session, isAdmin: session.profile?.role === "admin",
     ws, subs, studentById, classById, testById, who,
-    rubric, setRubric, ai, aiGradeSub,
+    rubric, setRubric, ai, aiGradeSub, gradingMode, setGradingMode,
     anonMode, setAnonMode, display, setDisplay, answerLang, setAnswerLang, studentLang, setStudentLang,
     favs, toggleFav, refresh, refreshSub, editItem, reviewSub,
   };
