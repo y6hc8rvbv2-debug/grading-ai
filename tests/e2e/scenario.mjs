@@ -78,13 +78,17 @@ await page.getByRole("button", { name: "登録する" }).click();
 await toastSeen(/「E2E 小テスト」を登録しました/);
 ok((await text()).includes("E2E 小テスト"), "登録したテストが一覧に出る");
 
-// 3. 画像だけ保存（AI採点待ち）
+// 3. 画像だけ保存（AI採点待ち）。1人分を2枚で取り込む（1枚目は iPhone の写真＝HEIC）
+const heic = new URL("../fixtures/sample.heic", import.meta.url).pathname;
 await page.goto(BASE + "/new"); await settle(1200);
 ok((await text()).includes("AI（Claude）が答案を読み取って採点します"), "採点AIが使えることを表示");
 ok(!(await text()).includes("動作確認用の仮採点"), "採点AIがあるときは乱数の仮採点を選べない");
-await page.locator('input[type=file]:not([capture])').setInputFiles([img(1), img(2)]);
-await settle(600);
-ok((await text()).includes("2 / 40 枚"), "2枚取り込み");
+await page.locator("#pages-per").selectOption("2");
+await page.locator('input[type=file]:not([capture])').setInputFiles([heic, img(1), img(2), img(1)]);
+await page.getByText("4 / 80 枚").waitFor({ timeout: 30000 });
+ok(true, "4枚取り込み（HEIC を含む）");
+ok((await text()).includes("sample.jpg") && !(await text()).includes("sample.heic"), "HEIC は取り込み時に JPEG に変換される");
+ok((await text()).includes("2 名分（4 枚）") && (await page.getByText("1 / 2 ページ").count()) === 2, "2枚ずつ1人分の答案（2ページ）にまとめる");
 await page.getByLabel(/画像の保存だけ行い/).check();
 await page.getByRole("button", { name: "答案を保存する" }).click();
 await toastSeen(/2 枚の答案を保存しました/);
@@ -92,6 +96,7 @@ ok((await text()).includes("AI採点待ち"), "保存だけを選ぶと AI採点
 
 // 4. 保存してAI採点（3〜9番）
 await page.getByRole("button", { name: "続けて取り込む" }).click(); await settle();
+await page.locator("#pages-per").selectOption("1");   // 「1人分の枚数」は続けて取り込むときも残る
 await page.locator('input[type=file]:not([capture])').setInputFiles([3, 4, 5, 6, 7, 8, 9].map(img));
 await settle(600);
 // 1,2番は保存済みなので、3〜9番へ割り当て直す
@@ -120,6 +125,10 @@ const src = await page.locator('img[alt*="答案（原本）"]').getAttribute("s
 ok(src.includes("/storage/v1/object/sign/answer-sheets/"), "原本画像は署名付きURLで表示");
 const loaded = await page.locator('img[alt*="答案（原本）"]').evaluate((img) => img.complete && img.naturalWidth > 0);
 ok(loaded, "原本画像が実際に読み込める");
+ok((await text()).includes("原本 1 / 2 ページ"), "2ページの答案は原本のページを切り替えられる");
+await page.getByRole("button", { name: "▶" }).first().click(); await settle(800);
+ok((await text()).includes("原本 2 / 2 ページ"), "2ページ目の原本を表示");
+await page.getByRole("button", { name: "◀" }).first().click(); await settle(500);
 const direct = await page.request.get(src.replace("/object/sign/", "/object/public/").split("?")[0]);
 ok(direct.status() >= 400, `署名なしの直リンクは開けない（HTTP ${direct.status()}）`);
 
@@ -151,7 +160,9 @@ ok(sent.length === 10, `採点AIへのリクエストは10回（7 + 失敗1 + �
 ok(sent.every((r) => r.problems.length === 0), `リクエストの形が正しい ${JSON.stringify(sent.flatMap((r) => r.problems))}`);
 ok(sent.every((r) => r.questions.length === 3 && r.questions.every((q) => typeof q.points === "number")), "3問の設問と配点を送っている");
 ok(sent.every((r) => r.rubric.includes("要点を 70% 以上")), "採点基準を送っている");
-ok(sent.every((r) => r.imageType === "image/png"), "答案画像を PNG として送っている");
+const graded = sent.filter((r) => r.kind === "grade");
+ok(graded.every((r) => ["image/png", "image/jpeg"].includes(r.imageType)), `答案画像を PNG / JPEG として送っている ${JSON.stringify(graded.map((r) => r.imageType))}`);
+ok(graded.filter((r) => r.images === 2).length >= 2 && graded.some((r) => r.imageType === "image/jpeg"), "2ページの答案は2枚の画像を送る（HEIC は JPEG に変換済み）");
 
 // 7. 採点結果を修正 → 合計点は DB のトリガーの値
 await page.goto(BASE + "/history"); await settle(1000);
@@ -201,8 +212,12 @@ await toastSeen(/採点基準を保存しました/);
 await page.reload(); await page.locator("header h1").waitFor(); await settle(800);
 ok(await page.getByLabel(/大文字・小文字を区別する/).isChecked(), "採点基準が保存されている");
 
-// 11. 設定：保存期間（管理者）・監査ログ
+// 11. 設定：AI採点の準備状況・保存期間（管理者）・監査ログ
 await page.goto(BASE + "/settings"); await settle();
+await page.getByText("AI採点できます").waitFor({ timeout: 15000 });
+const stext = await text();
+ok(stext.includes("AI採点の保存（0004_ai_grading.sql）：OK") && stext.includes("採点AI（ANTHROPIC_API_KEY）：OK"), "設定：AI採点の準備状況（キー・0004・0005）を確認できる");
+ok(!stext.includes(process.env.DUMMY_KEY || "sk-ant-e2e-dummy-key-not-real"), "準備状況にキーの値は出ない");
 await page.locator("select").filter({ has: page.locator('option:text("30日で自動削除")') }).selectOption("180");
 await toastSeen(/保存期間を変更しました/);
 await page.getByRole("button", { name: "改ざんがないか確認する" }).click();

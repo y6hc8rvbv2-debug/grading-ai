@@ -1,7 +1,7 @@
 "use client";
 // 設定。docs/prototype-v3.jsx から移植。
 // 表示の設定は端末に、保存期間は学校（schools.retention）に保存する。
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { FONT_UI, FONT_MONO } from "@/lib/ui/theme";
 import { LANGS } from "@/lib/i18n";
 import { download, fmtDateTime, toCSV } from "@/lib/util";
@@ -187,6 +187,8 @@ export default function SettingsView() {
         ))}
       </Card>}
 
+      <ReadinessCard />
+
       <Card title="AIエンジン" sub="本番接続の設定">
         <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -210,5 +212,53 @@ export default function SettingsView() {
         </div>
       </Card>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------ AI採点の準備状況 */
+type Health = { supabase: boolean; ai: boolean; migrations?: Record<string, boolean>; env: string };
+
+function ReadinessCard() {
+  const { T, ds } = useUI();
+  const [h, setH] = useState<Health | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (ds.mode === "demo") return;
+    fetch("/api/health", { cache: "no-store" })
+      .then(async (r) => (r.ok ? setH(await r.json()) : setError("準備状況を確認できませんでした。画面を再読み込みしてください。")))
+      .catch(() => setError("準備状況を確認できませんでした。通信状態を確認してください。"));
+  }, [ds.mode]);
+
+  const rows: { label: string; ok: boolean | null; fix: string }[] = ds.mode === "demo"
+    ? [{ label: "Supabase（データの保存先）", ok: false, fix: "環境変数 NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY を設定すると、答案を保存してAI採点できます（docs/SUPABASE-SETUP.md ステップ5）。" }]
+    : h ? [
+      { label: "Supabase（データの保存先）", ok: h.supabase, fix: "環境変数 NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY を設定してください。" },
+      { label: "採点AI（ANTHROPIC_API_KEY）", ok: h.ai, fix: `Vercel の Settings → Environment Variables に ANTHROPIC_API_KEY を追加し、${h.env === "preview" ? "Preview" : h.env === "production" ? "Production" : "この環境"} にチェックを入れて再デプロイしてください（ステップ6.5）。` },
+      { label: "AI採点の保存（0004_ai_grading.sql）", ok: h.migrations?.["0004"] ?? null, fix: "Supabase の SQL Editor で supabase/migrations/0004_ai_grading.sql を実行してください。" },
+      { label: "モデル比較試験の記録（0005_model_compare.sql）", ok: h.migrations?.["0005"] ?? null, fix: "管理者がモデル比較試験を使う場合だけ必要です。Supabase の SQL Editor で 0005_model_compare.sql を実行してください。" },
+      { label: "iPhone の写真（HEIC）", ok: true, fix: "" },
+    ] : [];
+  const ready = h && h.supabase && h.ai && h.migrations?.["0004"];
+
+  return (
+    <Card title="AI採点の準備状況" sub={h ? `実行環境: ${h.env === "preview" ? "Preview（プレビュー）" : h.env === "production" ? "Production（本番）" : "ローカル"}` : "AI採点に必要な設定がそろっているかを確認します"}
+      right={ready ? <Badge tone="ok">AI採点できます</Badge> : h || ds.mode === "demo" ? <Badge tone="warn">準備が必要です</Badge> : null}>
+      {error && <div role="alert" style={{ fontSize: 12.5, color: T.ng }}>{error}</div>}
+      {!error && !rows.length && <div style={{ fontSize: 12.5, color: T.textSub }}>確認しています…</div>}
+      <div style={{ display: "grid", gap: 8 }}>
+        {rows.map((r) => (
+          <div key={r.label} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <span style={{ width: 22, textAlign: "center", fontWeight: 700, color: r.ok ? T.ok : T.warn }}>{r.ok ? "✓" : "!"}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, color: T.text, fontWeight: 600 }}>
+                {r.label}：{r.ok ? "OK" : "未設定"}
+                {r.label.startsWith("iPhone") && <span style={{ fontWeight: 400, color: T.textSub }}>（取り込み時に JPEG へ自動変換します）</span>}
+              </div>
+              {!r.ok && <div style={{ fontSize: 11.5, color: T.textSub, lineHeight: 1.7, marginTop: 2 }}>{r.fix}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }

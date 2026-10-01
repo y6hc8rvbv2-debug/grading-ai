@@ -16,6 +16,7 @@ import {
   aiConfig, callClaude, normalizeResult, GradingError,
   type AnswerPage, type GradeTest,
 } from "@/lib/ai/grade";
+import { heicToJpeg, looksLikeHeic } from "@/lib/ai/heic";
 import type { QType } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -91,29 +92,37 @@ export async function POST(request: Request) {
   const pages: AnswerPage[] = [];
   for (const path of paths) {
     const ext = path.split(".").pop()?.toLowerCase() ?? "";
-    if (ext === "heic" || ext === "heif") {
-      return fail("HEIC 形式の画像はAI採点に使えません。iPhone の「設定 → カメラ → フォーマット」を「互換性優先」にして撮り直すか、JPEG で保存し直して取り込んでください。", 400);
-    }
+    const heicExt = ext === "heic" || ext === "heif";
     const mediaType =
       ext === "jpg" || ext === "jpeg" ? "image/jpeg"
       : ext === "png" ? "image/png"
       : ext === "webp" ? "image/webp"
       : ext === "gif" ? "image/gif"
-      : ext === "pdf" ? "pdf" : null;
-    if (!mediaType) return fail(`対応していない形式のファイルです（.${ext}）。JPEG / PNG / PDF で取り込んでください。`, 400);
+      : ext === "pdf" ? "pdf" : heicExt ? "heic" : null;
+    if (!mediaType) return fail(`対応していない形式のファイルです（.${ext}）。JPEG / PNG / HEIC / PDF で取り込んでください。`, 400);
 
     const { data: blob, error } = await supabase.storage.from("answer-sheets").download(path);
     if (error || !blob) return fail("答案画像を読み込めませんでした。時間をおいて、もう一度お試しください。", 500);
-    const buf = Buffer.from(await blob.arrayBuffer());
+    let buf: Buffer = Buffer.from(await blob.arrayBuffer());
     if (mediaType === "pdf") {
       if (buf.length > MAX_PDF_BYTES) return fail("PDF が大きすぎます（25MBまで）。ページを分けて取り込んでください。", 400);
       pages.push({ kind: "pdf", data: buf.toString("base64") });
-    } else {
-      if (buf.length > MAX_IMAGE_BYTES) {
-        return fail("答案画像が大きすぎます（1枚5MBまで）。「新規採点」で取り込み直すと自動で縮小されます。", 400);
-      }
-      pages.push({ kind: "image", mediaType, data: buf.toString("base64") });
+      continue;
     }
+    // HEIC のまま保存された答案（以前の取り込み）は、採点AIが読める JPEG に変換してから送る
+    let type = mediaType as "image/jpeg" | "image/png" | "image/webp" | "image/gif" | "heic";
+    if (type === "heic" || looksLikeHeic(buf)) {
+      try {
+        buf = await heicToJpeg(buf);
+        type = "image/jpeg";
+      } catch {
+        return fail("HEIC 形式の写真を変換できませんでした。iPhone の「設定 → カメラ → フォーマット」を「互換性優先」にして撮り直すか、JPEG で保存し直して取り込んでください。", 400);
+      }
+    }
+    if (buf.length > MAX_IMAGE_BYTES) {
+      return fail("答案画像が大きすぎます（1枚5MBまで）。「新規採点」で取り込み直すと自動で縮小されます。", 400);
+    }
+    pages.push({ kind: "image", mediaType: type as Exclude<typeof type, "heic">, data: buf.toString("base64") });
   }
 
   /* ------------------------------------------------ 採点中にする */

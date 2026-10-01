@@ -10,7 +10,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FONT_MONO } from "@/lib/ui/theme";
 import { pct, uid } from "@/lib/util";
 import { PIPELINE, SOURCES, checkQuality, gradeSubmission } from "@/lib/grading/engine";
-import { prepareImage } from "@/lib/image";
+import { isHeic, prepareImage } from "@/lib/image";
 import { friendlyError } from "@/lib/errors";
 import { useUI } from "@/components/ui-context";
 import { Badge, Bar, Btn, Card, Empty, Field, Modal, PseudoQR, Section, Select, Table, grid } from "@/components/ui";
@@ -18,7 +18,9 @@ import type { GradingInput, Quality, Source, Submission } from "@/lib/types";
 
 type Picked = { id: string; name: string; kb: number; src: Source; file?: File; studentId: string };
 
-const MAX_FILES = 40;
+const MAX_FILES = 80;
+// 1人分の答案のページ数の上限（app/api/grade/route.ts の MAX_PAGES と同じ）
+const MAX_PAGES = 10;
 const ACCEPT = "image/jpeg,image/png,image/heic,image/heif,.heic,.heif,application/pdf";
 const EMPTY_QUALITY: Quality = { scores: {}, issues: [], fixes: [], ok: true, avg: 0 };
 
@@ -36,6 +38,8 @@ export default function NewGrading() {
   const [demoIssue, setDemoIssue] = useState(false);
   const [trialGrade, setTrialGrade] = useState(false);
   const [uploadOnly, setUploadOnly] = useState(false);
+  // 1人分の答案が何枚の写真か。2以上なら、取り込んだ順に p.1, p.2 … として同じ生徒にまとめる
+  const [pagesPer, setPagesPer] = useState(1);
   const [aiProgress, setAiProgress] = useState<{ done: number; total: number } | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [step, setStep] = useState(-1);
@@ -63,14 +67,15 @@ export default function NewGrading() {
   const grading = mode === "local";
 
   // クラスを変えたら、取り込んだ答案を出席番号順に割り当て直す
+  // （1人分が複数枚なら、pagesPer 枚ずつ同じ生徒にする）
   useEffect(() => {
-    setFiles((prev) => prev.map((f, i) => ({ ...f, studentId: roster[i]?.id ?? "" })));
-  }, [roster]);
+    setFiles((prev) => prev.map((f, i) => ({ ...f, studentId: roster[Math.floor(i / pagesPer)]?.id ?? "" })));
+  }, [roster, pagesPer]);
 
   const addPicked = (list: Omit<Picked, "studentId" | "id">[]) => {
     setFiles((prev) => {
       const next = [...prev, ...list.map((f, i) => ({
-        ...f, id: uid("f"), studentId: roster[prev.length + i]?.id ?? "",
+        ...f, id: uid("f"), studentId: roster[Math.floor((prev.length + i) / pagesPer)]?.id ?? "",
       }))];
       if (next.length > MAX_FILES) toast(`一度にアップロードできるのは${MAX_FILES}枚までです。残りは次の回に分けてください`, "warn");
       return next.slice(0, MAX_FILES);
@@ -90,9 +95,13 @@ export default function NewGrading() {
     const picked = Array.from(fileList || []);
     if (!picked.length) return;
     // 大きな写真は、採点AIが受け付ける大きさ（1枚5MBまで）に縮小してから保存する
+    // HEIC（iPhone の写真）は JPEG に変換する。メモリを使うので1枚ずつ順に処理する
     setPreparing(true);
-    const arr = await Promise.all(picked.map((f) => prepareImage(f)));
+    const arr: File[] = [];
+    for (const f of picked) arr.push(await prepareImage(f));
     setPreparing(false);
+    const heicLeft = arr.filter(isHeic).length;
+    if (heicLeft) toast(`${heicLeft} 件の HEIC 写真をこのブラウザで変換できませんでした。保存と採点はできますが、画面に原本を表示できない場合があります`, "warn");
     const tooBig = arr.filter((f) => f.size > 20 * 1024 * 1024);
     const ok = arr.filter((f) => f.size <= 20 * 1024 * 1024);
     if (tooBig.length) toast(`${tooBig.length} 件は20MBを超えているため外しました。解像度を下げて撮り直してください`, "warn");
@@ -102,16 +111,27 @@ export default function NewGrading() {
     toast(`${ok.length} 件のファイルを追加しました`);
   };
 
-  const assigned = files.filter((f) => f.studentId);
-  const duplicate = new Set(assigned.map((f) => f.studentId)).size !== assigned.length;
+  // 同じ生徒に割り当てた写真は、取り込んだ順に1人分の答案（複数ページ）にまとめる
+  const groups = useMemo(() => {
+    const m = new Map<string, Picked[]>();
+    files.forEach((f) => { if (f.studentId) m.set(f.studentId, [...(m.get(f.studentId) ?? []), f]); });
+    return [...m.values()];
+  }, [files]);
+  const pageOf = (f: Picked) => {
+    const g = groups.find((x) => x[0].studentId === f.studentId);
+    return g && g.length > 1 ? { n: g.indexOf(f) + 1, of: g.length } : null;
+  };
+  const tooManyPages = groups.some((g) => g.length > MAX_PAGES);
 
   /* ------------------------------------------------------------- 実行 */
-  const buildInput = (f: Picked, i: number): GradingInput => {
+  const buildInput = (group: Picked[], i: number): GradingInput => {
+    const f = group[0];
+    const pages = group.length;
     const st = ws.students.find((s) => s.id === f.studentId)!;
     const seed = 9000 + Math.floor(Math.random() * 9000) + i * 13;
     if (!grading) {
       return {
-        testId, studentId: st.id, classId, source: f.src, pages: 1,
+        testId, studentId: st.id, classId, source: f.src, pages,
         quality: EMPTY_QUALITY, isBlank: false, pending: true, items: [],
       };
     }
@@ -119,7 +139,7 @@ export default function NewGrading() {
     const quality = checkQuality(seed, demoIssue && i === 1);
     const result = gradeSubmission(test!, st, seed, { forceBlank, reviewThreshold: rubric.reviewThreshold });
     return {
-      testId, studentId: st.id, classId, source: f.src, pages: 1, quality, isBlank: forceBlank,
+      testId, studentId: st.id, classId, source: f.src, pages, quality, isBlank: forceBlank,
       items: result.items.map((it) => ({
         questionId: it.questionId, qno: it.qno, detected: it.detected, confidence: it.confidence,
         mark: it.mark, earned: it.earned, blank: it.blank, needReview: it.needReview,
@@ -132,7 +152,7 @@ export default function NewGrading() {
     if (!test || !klass) { toast("先にテストとクラスを選んでください", "warn"); return; }
     if (!files.length) { toast("答案画像を追加してください", "warn"); return; }
     if (files.some((f) => !f.studentId)) { toast("生徒が割り当てられていない答案があります。一覧で生徒を選んでください", "warn"); return; }
-    if (duplicate) { toast("同じ生徒に2枚以上の答案が割り当てられています。一覧で割り当てを直してください", "warn"); return; }
+    if (tooManyPages) { toast(`1人分の答案は${MAX_PAGES}枚までです。一覧で生徒の割り当てを直してください`, "warn"); return; }
 
     setStage("run"); setStep(0); setLog([]); setCreatedIds([]); setFailed(0);
     timers.current.forEach(clearTimeout); timers.current = [];
@@ -142,14 +162,14 @@ export default function NewGrading() {
     const animation = new Promise<void>((resolve) => {
       if (!grading) { resolve(); return; }
       const lines: [string, string][] = [
-        ["quality", `${files.length} 枚を検査 → 自動トリミング / 傾き補正 / コントラスト補正を適用`],
+        ["quality", `${files.length} 枚（${groups.length} 名分）を検査 → 自動トリミング / 傾き補正 / コントラスト補正を適用`],
         ["quality", demoIssue ? "1 枚でぼやけと影を検出。再撮影の候補として記録しました" : "全ページが採点可能な品質です"],
         ["test", `${test.subject}「${test.name}」${test.grade}年 ${test.term} / 試験番号 ${test.testNo} を抽出`],
         ["test", `問題数 ${test.questions.length} 問・満点 ${test.maxScore} 点・単元 ${test.units.length} 種を確定`],
         ["student", `${klass.label} の出席番号を割り当て、匿名IDで管理します（実名は保存しません）`],
         ["answer", demo ? "手書き文字・計算式・選択肢・記述を認識（デモ）" : "仮採点：解答の読み取りは行っていません（AI採点は準備中）"],
         ["answer", demoBlank ? "1 枚が全問白紙と判定 → 採点をスキップし模範解答生成へ" : "全ページで解答を検出"],
-        ["grade", `${files.length} 枚 × ${test.questions.length} 問の採点と部分点判定が完了`],
+        ["grade", `${groups.length} 名分 × ${test.questions.length} 問の採点と部分点判定が完了`],
         ["grade", "赤ペン採点画像・弱点分析・フィードバックを生成しました"],
       ];
       PIPELINE.forEach((p, i) => {
@@ -167,13 +187,15 @@ export default function NewGrading() {
       const ids: string[] = [];
       const names: string[] = [];
       let ng = 0;
-      for (let i = 0; i < files.length; i++) {
-        const f = files[i];
+      for (let i = 0; i < groups.length; i++) {
+        const group = groups[i];
+        const f = group[0];
         try {
-          const id = await ds.saveGrading(buildInput(f, i), f.file ? [f.file] : []);
+          const id = await ds.saveGrading(buildInput(group, i), group.flatMap((g) => (g.file ? [g.file] : [])));
           ids.push(id);
           names.push(who(f.studentId));
-          if (!grading) addLog("保存", `${who(f.studentId)}：${f.name} を保存しました（${i + 1}/${files.length}）`);
+          const what = group.length > 1 ? `${group.length} 枚（${group.map((g) => g.name).join("・")}）` : f.name;
+          if (!grading) addLog("保存", `${who(f.studentId)}：${what} を保存しました（${i + 1}/${groups.length}）`);
         } catch (e) {
           ng++;
           addLog("エラー", `${who(f.studentId)}：${friendlyError(e, "保存")}`);
@@ -209,8 +231,8 @@ export default function NewGrading() {
     setFailed(ng);
     setStep(PIPELINE.length);
     setStage("done");
-    if (ng) toast(`${ng} 枚を保存できませんでした。処理ログを確認して、もう一度取り込んでください`, "ng");
-    else if (aiNg) toast(`${aiNg} 枚をAI採点できませんでした。処理ログを確認してください（画像は保存済みです）`, "ng");
+    if (ng) toast(`${ng} 名分を保存できませんでした。処理ログを確認して、もう一度取り込んでください`, "ng");
+    else if (aiNg) toast(`${aiNg} 名分をAI採点できませんでした。処理ログを確認してください（画像は保存済みです）`, "ng");
     else if (mode === "ai") toast(`${ids.length} 枚のAI採点が終わりました。返却前に結果を確認してください`);
     else toast(grading ? `${ids.length} 枚の採点が完了しました` : `${ids.length} 枚の答案を保存しました。あとで「採点中」の画面からAI採点できます`);
   };
@@ -281,7 +303,7 @@ export default function NewGrading() {
                     答案画像を学校専用の保管場所（非公開）に保存し、1枚ずつ AI が採点しています。1枚あたり数十秒かかります。
                     この画面を閉じると、残りの答案は「AI採点待ち」のまま残ります（「採点中」の画面から採点し直せます）。
                   </div>
-                  <Bar value={aiProgress?.done ?? 0} max={aiProgress?.total || files.length} tone="accent" />
+                  <Bar value={aiProgress?.done ?? 0} max={aiProgress?.total || groups.length} tone="accent" />
                   <div style={{ fontSize: 11.5, color: T.textFaint, marginTop: 5 }}>
                     {aiProgress ? `AI採点 ${aiProgress.done} / ${aiProgress.total} 枚` : "答案を保存しています…"}
                   </div>
@@ -385,7 +407,7 @@ export default function NewGrading() {
         <div style={{ fontSize: 26, marginBottom: 7 }}>{drag ? "📥" : "🗂"}</div>
         <div style={{ fontSize: 13.5, fontWeight: 700, color: T.text }}>ここに答案画像をドラッグ＆ドロップ</div>
         <div style={{ fontSize: 11.5, color: T.textSub, marginTop: 5, lineHeight: 1.7 }}>
-          JPEG / PNG / HEIC / PDF に対応。1ファイル20MBまで、一度に最大{MAX_FILES}枚まで。
+          JPEG / PNG / HEIC（iPhone の写真）/ PDF に対応。HEIC は自動で JPEG に変換します。1ファイル20MBまで、一度に最大{MAX_FILES}枚まで。
         </div>
         <div style={{ marginTop: 11, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
           <Btn size="sm" onClick={() => { setSource("file"); inputRef.current?.click(); }}>ファイルを選ぶ</Btn>
@@ -432,14 +454,25 @@ export default function NewGrading() {
 
       <Section title={`2. 取り込んだ答案（${files.length} / ${MAX_FILES} 枚）`}
         right={files.length ? <Btn size="sm" variant="ghost" onClick={() => setFiles([])}>すべて外す</Btn> : null}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+          <label htmlFor="pages-per" style={{ fontSize: 12, fontWeight: 700, color: T.textSub }}>1人分の答案の枚数</label>
+          <select id="pages-per" value={pagesPer} onChange={(e) => setPagesPer(Number(e.target.value))}
+            style={{ padding: "5px 8px", borderRadius: 8, border: `1px solid ${T.line}`, background: T.panel, color: T.text, font: "inherit", fontSize: 12.5 }}>
+            {Array.from({ length: MAX_PAGES }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n} 枚</option>)}
+          </select>
+          <span style={{ fontSize: 11.5, color: T.textFaint, lineHeight: 1.6 }}>
+            2枚以上のときは、取り込んだ順に {pagesPer} 枚ずつ同じ生徒の答案（1ページ目・2ページ目…）にまとめます。
+            同じ生徒を選んだ写真も、1人分の答案としてまとめます。
+          </span>
+        </div>
         {files.length === 0 ? (
           <Card><Empty icon="📄" title="まだ答案がありません"
             hint={demo ? "上の取り込み方法を選ぶか、デモ答案を入れて動作を試してください。" : "上の取り込み方法を選ぶか、ここに画像をドラッグしてください。"} /></Card>
         ) : (
           <Card pad={12}>
-            {duplicate && (
+            {tooManyPages && (
               <div style={{ background: T.warnSoft, color: T.warn, border: `1px solid ${T.warn}`, borderRadius: 9, padding: "8px 11px", fontSize: 12, marginBottom: 10 }}>
-                同じ生徒に2枚以上の答案が割り当てられています。生徒の選択を直してください。
+                1人分の答案は{MAX_PAGES}枚までです。生徒の選択を直してください。
               </div>
             )}
             <div style={grid(170, 9)}>
@@ -449,7 +482,10 @@ export default function NewGrading() {
                     {SOURCES[f.src] ? SOURCES[f.src].icon : "🖼"}
                   </div>
                   <div style={{ fontSize: 11, color: T.text, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
-                  <div style={{ fontSize: 10.5, color: T.textFaint, marginTop: 2, marginBottom: 6 }}>{f.kb.toLocaleString()} KB</div>
+                  <div style={{ fontSize: 10.5, color: T.textFaint, marginTop: 2, marginBottom: 6, display: "flex", gap: 6, alignItems: "center" }}>
+                    {f.kb.toLocaleString()} KB
+                    {pageOf(f) && <Badge tone="info">{pageOf(f)!.n} / {pageOf(f)!.of} ページ</Badge>}
+                  </div>
                   <Select value={f.studentId} style={{ padding: "5px 7px", fontSize: 11.5 }}
                     onChange={(v: string) => setFiles((p) => p.map((x) => (x.id === f.id ? { ...x, studentId: v } : x)))}
                     options={[{ value: "", label: "生徒を選ぶ" }, ...roster.map((s) => ({ value: s.id, label: who(s.id) }))]} />
@@ -525,7 +561,7 @@ export default function NewGrading() {
                 : "答案を保存する"}
             </Btn>
             <span style={{ fontSize: 11.5, color: T.textFaint }}>
-              {files.length && test ? `${files.length} 名分・${test.questions.length} 問 × 満点 ${test.maxScore} 点` : "答案を追加すると開始できます"}
+              {files.length && test ? `${groups.length} 名分（${files.length} 枚）・${test.questions.length} 問 × 満点 ${test.maxScore} 点` : "答案を追加すると開始できます"}
             </span>
           </div>
         </Card>

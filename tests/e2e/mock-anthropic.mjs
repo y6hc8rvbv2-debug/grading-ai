@@ -111,7 +111,8 @@ const server = http.createServer((req, res) => {
     const qs = questionsFrom(body);
     requests.push({ url: req.url, kind: "grade", beta: req.headers["anthropic-beta"], model: body.model, problems: bad, questions: qs,
       rubric: body.messages[0].content.find((c) => c.type === "text")?.text.split("採点基準:\n")[1] ?? "",
-      imageType: body.messages[0].content[0]?.source?.media_type ?? body.messages[0].content[0]?.type });
+      imageType: body.messages[0].content[0]?.source?.media_type ?? body.messages[0].content[0]?.type,
+      images: body.messages[0].content.filter((c) => c.type === "image" || c.type === "document").length });
 
     const mode = nextMode; nextMode = "";
     if (mode === "ratelimit") {

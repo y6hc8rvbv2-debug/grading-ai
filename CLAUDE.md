@@ -44,7 +44,7 @@
   root 環境では `su postgres -c "bash supabase/tests/run.sh"`
 - `npm run test:e2e` … Supabase CLI のローカル環境（Docker）にアプリを繋ぎ、ブラウザで教員の作業を通しで検証（`tests/e2e/`）。
   採点AIは代役サーバー（本物の API は呼ばない）。ECR に届かない環境では `SUPABASE_INTERNAL_IMAGE_REGISTRY=docker.io` を付ける
-- `npm run test:unit` … 採点AIの出力の後処理（`normalizeResult`）の単体テスト
+- `npm run test:unit` … 採点AIの出力の後処理（`normalizeResult`）・比較試験・HEIC 変換（`tests/fixtures/sample.heic` は合成画像）の単体テスト
 
 検証中に見つけて直したもの（0001/0002 は未適用だったので直接修正、0003 で追加修正）:
 - サインアップ時の `user_metadata` で任意校の管理者になれた → `app_metadata` から読むよう変更
@@ -66,8 +66,12 @@
 - **AI の出力はそのまま信じない**: 得点は判定に合わせて 0〜配点に決め直し、判定と得点が食い違えば要確認。
   信頼度 < `rubrics.review_threshold`、記述問題で `require_teacher`、AI が返さなかった設問も要確認。設問ID は DB 側で qno から決める
 - 失敗したら答案の状態を元に戻す（AI採点待ちのまま）。1枚ずつ順に採点する（Vercel の関数は `maxDuration = 300`）
-- 画像はブラウザで長辺 2400px の JPEG に縮小してから保存する（`lib/image.ts`。API の上限は1枚5MB）。HEIC は採点できない旨を案内する
-- 赤ペン: AI が返す `bbox`（解答欄の位置）に `components/RedPenOverlay.tsx` でマークを重ねる。1ページ目のみ。「清書版」（`RedPenSheet`）にも切り替えられる
+- 画像はブラウザで長辺 2400px の JPEG に縮小してから保存する（`lib/image.ts`。API の上限は1枚5MB）
+- HEIC（iPhone の写真）: ブラウザが読めれば（Safari）そのまま、読めなければ `heic-to`（libheif の WASM、LGPL-3.0、HEIC のときだけ動的読み込み）で JPEG に変換してから保存する。
+  以前に HEIC のまま保存された答案は、採点時にサーバーで変換する（`lib/ai/heic.ts`、`heic-decode` + `jpeg-js`。`next.config.mjs` で外部パッケージ扱い）
+- 1人分を複数枚で撮った答案: 「新規採点」の「1人分の答案の枚数」で N 枚ずつ同じ生徒にまとめる（同じ生徒を選んだ写真もまとめる）。1答案10ページまで。採点AIには全ページを送る
+- 設定画面の「AI採点の準備状況」（`/api/health`）で、Supabase・ANTHROPIC_API_KEY・0004・0005 がそろっているかを確認できる（値は返さない）
+- 赤ペン: AI が返す `bbox`（解答欄の位置・ページ番号）に `components/RedPenOverlay.tsx` でマークを重ねる。答案詳細で原本のページを切り替えられる。「清書版」（`RedPenSheet`）にも切り替えられる
 
 まだ生成AIに置き換えていないもの（`// PROD-API:` コメントが残っている）:
 - `buildFeedback`（生徒向けフィードバック・教師向け指導提案）/ `buildModelAnswers`（白紙時の模範解答）… テンプレート文面のまま。`model_answer_sets` は未使用
@@ -251,7 +255,7 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
 6. **役割（role）の変更・教職員の招待画面がない** — 招待は SUPABASE-SETUP.md のサーバー側コード、役割変更は SQL で行う
 7. **クラス・生徒の登録画面がない** — 名簿は SQL で登録する（SUPABASE-SETUP.md ステップ4）。テストは画面から登録できる
 8. **フィードバック・模範解答はテンプレート文面** — 生成AIへの置き換えは未実装（`buildFeedback` / `buildModelAnswers`）
-9. **赤ペンの重ね描きは1ページ目のみ** — 2ページ目以降の答案は「清書版」で確認する
+9. **（解決）複数ページの答案** — 1人分を複数枚で取り込み、原本の各ページに赤ペンを重ねられる。合計点の表示は1ページ目だけ
 10. **AI採点は1枚ずつ順番に実行** — 40枚で数十分かかりうる。画面を閉じると残りは「AI採点待ち」のまま（「まとめてAI採点」で再開できる）。サーバー側のキュー処理は未実装
 11. **多言語は主要12言語のみ実翻訳** — ナビゲーション等のみ。画面本文は日本語のまま（残りは英語フォールバック）
 12. **ダッシュボードの為替レート・ユーザーの声の評価数はデモ値** — プロトタイプから引き継いだ表示。問い合わせはメールソフトを開く方式

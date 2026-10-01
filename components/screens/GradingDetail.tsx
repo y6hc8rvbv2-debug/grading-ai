@@ -35,7 +35,9 @@ export default function GradingDetail({ subId }: { subId: string }) {
   const sub = subs.find((s) => s.id === subId);
   const [tab, setTab] = useState("sheet");
   const [lookup, setLookup] = useState<"idle" | "loading" | "missing">("idle");
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  // 原本画像（ページごと）と、表示中の原本のページ（0 始まり）
+  const [imageUrls, setImageUrls] = useState<(string | null)[]>([]);
+  const [origPage, setOrigPage] = useState(0);
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [sheetMode, setSheetMode] = useState<"overlay" | "clean">("overlay");
@@ -61,15 +63,18 @@ export default function GradingDetail({ subId }: { subId: string }) {
   }, [sub, subId, lookup, refreshSub]);
 
   // 原本画像（非公開の保管場所から、10分だけ有効な署名付きURLで表示する）
-  const firstPath = sub?.imagePaths?.[0];
+  // 複数ページの答案（1人分を複数枚で撮った場合）は、すべてのページの URL を用意する
+  const pathKey = (sub?.imagePaths ?? []).join("|");
   useEffect(() => {
-    if (!firstPath) { setImageUrl(null); return; }
+    const paths = pathKey ? pathKey.split("|") : [];
+    if (!paths.length) { setImageUrls([]); return; }
     let alive = true;
-    ds.signedImageUrl(firstPath)
-      .then((u) => { if (alive) setImageUrl(u || null); })
-      .catch(() => { if (alive) setImageUrl(null); });
+    Promise.all(paths.map((p) => ds.signedImageUrl(p).catch(() => null)))
+      .then((urls) => { if (alive) setImageUrls(urls.map((u) => u || null)); });
     return () => { alive = false; };
-  }, [ds, firstPath]);
+  }, [ds, pathKey]);
+  const imageUrl = imageUrls[origPage] ?? null;
+  const origPages = imageUrls.length;
 
   if (!sub || !test || !st || !kl || !ana || !fb) {
     if (!sub && lookup !== "missing") {
@@ -82,7 +87,7 @@ export default function GradingDetail({ subId }: { subId: string }) {
   const pages = Math.ceil(sub.result.items.length / 7);
   const whoName = who(sub.studentId);
   const pending = sub.status === "uploaded" || sub.status === "processing";
-  // 採点AIが返した解答の位置（1ページ目の原本に赤ペンを重ねるのに使う）
+  // 採点AIが返した解答の位置（各ページの原本に赤ペンを重ねるのに使う）
   const boxes: ItemBox[] = sub.result.items
     .filter((i) => i.bbox)
     .map((i) => ({ qno: i.qno, ...i.bbox! }));
@@ -159,6 +164,13 @@ export default function GradingDetail({ subId }: { subId: string }) {
               {aiBusy ? "採点しています…" : sub.status === "processing" ? "AIで採点し直す" : "AIで採点する"}
             </Btn>
           ) : null}>
+          {origPages > 1 && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+              <Btn size="sm" disabled={origPage === 0} onClick={() => setOrigPage((p) => Math.max(0, p - 1))}>◀</Btn>
+              <span style={{ fontSize: 12, color: T.textSub, fontWeight: 700 }}>原本 {origPage + 1} / {origPages} ページ</span>
+              <Btn size="sm" disabled={origPage >= origPages - 1} onClick={() => setOrigPage((p) => Math.min(origPages - 1, p + 1))}>▶</Btn>
+            </div>
+          )}
           {imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={imageUrl} alt={`${whoName} の答案（原本）`} style={{ width: "100%", maxHeight: "72vh", objectFit: "contain", borderRadius: 8, background: T.bgAlt }} />
@@ -180,7 +192,11 @@ export default function GradingDetail({ subId }: { subId: string }) {
       {tab === "sheet" && (
         <Card pad={0}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "10px 14px", borderBottom: `1px solid ${T.line}`, flexWrap: "wrap", background: T.panelAlt }}>
-            {!(canOverlay && sheetMode === "overlay" && showMarks) && <>
+            {(canOverlay && sheetMode === "overlay") || !showMarks ? (origPages > 1 && <>
+              <Btn size="sm" disabled={origPage === 0} onClick={() => setOrigPage((p) => Math.max(0, p - 1))}>◀</Btn>
+              <span style={{ fontSize: 12, color: T.textSub, fontWeight: 700 }}>原本 {origPage + 1} / {origPages} ページ</span>
+              <Btn size="sm" disabled={origPage >= origPages - 1} onClick={() => setOrigPage((p) => Math.min(origPages - 1, p + 1))}>▶</Btn>
+            </>) : <>
               <Btn size="sm" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>◀</Btn>
               <span style={{ fontSize: 12, color: T.textSub, fontWeight: 700 }}>ページ {page + 1} / {pages}</span>
               <Btn size="sm" disabled={page >= pages - 1} onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}>▶</Btn>
@@ -204,7 +220,7 @@ export default function GradingDetail({ subId }: { subId: string }) {
               // eslint-disable-next-line @next/next/no-img-element
               <img src={imageUrl} alt={`${whoName} の答案（原本）`} style={{ width: "100%", maxHeight: "72vh", objectFit: "contain", borderRadius: 8 }} />
             ) : canOverlay && sheetMode === "overlay" ? (
-              <RedPenOverlay imageUrl={imageUrl!} sub={sub} test={test} boxes={boxes} showComments={showComments} svgRef={svgRef} />
+              <RedPenOverlay imageUrl={imageUrl!} sub={sub} test={test} boxes={boxes} page={origPage + 1} showComments={showComments} svgRef={svgRef} />
             ) : (
               <RedPenSheet test={test} sub={sub} page={page} showMarks={showMarks} showComments={showComments} svgRef={svgRef} />
             )}
