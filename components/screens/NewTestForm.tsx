@@ -455,7 +455,7 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
           </Btn>
         )}
         <Btn onClick={onClose} disabled={saving}>閉じる（下書きは残ります）</Btn>
-        <Btn variant="primary" onClick={save} disabled={saving || !!importing}>{saving ? "登録しています…" : onCreated ? "登録して採点に戻る" : "登録する"}</Btn>
+        <Btn variant="primary" onClick={save} disabled={saving || !!importing}>{saving ? "登録しています…" : onCreated ? "登録して採点を始める" : "登録する"}</Btn>
       </>}>
       {onCreated && <p>答案の印刷された問題と配点から解答案を作成します。生徒の手書き回答を正答には使いません。模範解答がある場合は追加して「模範解答がない」のチェックを外してください。読み取り後、正答・配点を確認して登録してください。</p>}
       {draftNote && (
