@@ -54,6 +54,18 @@ export default function NewGrading() {
   // 1人分の答案が何枚の写真か。2以上なら、取り込んだ順に p.1, p.2 … として同じ生徒にまとめる
   const [pagesPer, setPagesPer] = useState(1);
   const [aiProgress, setAiProgress] = useState<{ done: number; total: number } | null>(null);
+  const [savedCount, setSavedCount] = useState(0);
+  const [saveErrors, setSaveErrors] = useState(0);
+  const [gradeErrors, setGradeErrors] = useState(0);
+  const [currentWork, setCurrentWork] = useState("");
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (stage !== "run" || startedAt === null) return;
+    const tick = () => setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    tick(); const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [stage, startedAt]);
   const [preparing, setPreparing] = useState(false);
   const [checked, setChecked] = useState(false);
   const [autoAssign, setAutoAssign] = useState(false);
@@ -199,6 +211,8 @@ export default function NewGrading() {
     if (!demo && !checked) {toast("生徒・ページ順・画質を確認し、確認済みにチェックしてください", "warn");return;}
     if (tooManyPages) { toast(`1人分の答案は${MAX_PAGES}枚までです。一覧で生徒の割り当てを直してください`, "warn"); return; }
 
+    setSavedCount(0); setSaveErrors(0); setGradeErrors(0); setAiProgress(null);
+    setStartedAt(Date.now()); setElapsed(0); setCurrentWork("答案を保存しています");
     setStage("run"); setStep(0); setLog([]); setCreatedIds([]); setFailed(0);
     timers.current.forEach(clearTimeout); timers.current = [];
     const addLog = (t: string, m: string) => setLog((prev) => [...prev, { t, m }]);
@@ -236,13 +250,14 @@ export default function NewGrading() {
         const group = groups[i];
         const f = group[0];
         try {
+          setCurrentWork(`${who(f.studentId)}：答案画像を保存中`);
           const id = await ds.saveGrading(buildInput(group, i), group.flatMap((g) => (g.file ? [g.file] : [])));
-          ids.push(id);
+          ids.push(id); setSavedCount(ids.length);
           names.push(who(f.studentId));
           const what = group.length > 1 ? `${group.length} 枚（${group.map((g) => g.name).join("・")}）` : f.name;
           if (!grading) addLog("保存", `${who(f.studentId)}：${what} を保存しました（${i + 1}/${groups.length}）`);
         } catch (e) {
-          ng++;
+          ng++; setSaveErrors(ng);
           addLog("エラー", `${who(f.studentId)}：${friendlyError(e, "保存")}`);
         }
       }
@@ -260,10 +275,11 @@ export default function NewGrading() {
       addLog("AI採点", `採点方式：${MODE_LABEL[gradingMode]}`);
       for (let i = 0; i < ids.length; i++) {
         const name = names[i];
+        setCurrentWork(`${name}：${gradingMode === "cascade" ? "Haiku" : "Opus"}で採点中`);
         addLog("AI採点", `${name}：採点しています…（${i + 1}/${ids.length}）`);
         const r = await aiGradeSub(ids[i], {
           silent: true,
-          onProgress: (p) => addLog("AI採点", `${name}：${STAGE_LABEL[p.stage]}の結果に確認が必要な点があるため、${p.next ? STAGE_LABEL[p.next] : "次のモデル"}で採点し直します（${(p.reasons ?? []).slice(0, 3).join("／")}${(p.reasons?.length ?? 0) > 3 ? " ほか" : ""}）`),
+          onProgress: (p) => { setCurrentWork(`${name}：${p.next ? STAGE_LABEL[p.next] : STAGE_LABEL[p.stage]}で確認中`); addLog("AI採点", `${name}：${STAGE_LABEL[p.stage]}の結果に確認が必要な点があるため、${p.next ? STAGE_LABEL[p.next] : "次のモデル"}で採点し直します（${(p.reasons ?? []).slice(0, 3).join("／")}${(p.reasons?.length ?? 0) > 3 ? " ほか" : ""}）`); },
         });
         if (r.ok) {
           const where = r.summary.mode === "cascade" && r.summary.finalStage ? `・${STAGE_LABEL[r.summary.finalStage]}で確定` : "";
@@ -271,13 +287,14 @@ export default function NewGrading() {
             ? `${name}：全問白紙でした`
             : `${name}：${r.summary.total}点${where}${r.summary.needReview ? `（要確認 ${r.summary.needReview} 問）` : ""}`);
         } else {
-          aiNg++;
+          aiNg++; setGradeErrors(aiNg);
           addLog("エラー", `${name}：${r.error}（画像は保存済みです。「採点中」の画面から採点し直せます）`);
         }
         setAiProgress({ done: i + 1, total: ids.length });
       }
     }
 
+    setCurrentWork(ng || aiNg ? "処理終了：失敗した答案は処理ログを確認してください" : "処理が完了しました");
     setFailed(ng);
     setStep(PIPELINE.length);
     setStage("done");
@@ -301,10 +318,28 @@ export default function NewGrading() {
     return (
       <div>
         <Section title={stage === "done"
-            ? (mode === "upload" ? "答案を保存しました" : "採点が完了しました")
+            ? (saveErrors || gradeErrors ? "処理終了（一部失敗）" : mode === "upload" ? "答案を保存しました" : "採点が完了しました")
             : mode === "ai" ? (aiProgress ? "AIが採点しています" : "答案を保存しています")
             : grading ? "AIエージェントが処理中です" : "答案を保存しています"}
           right={stage === "done" ? <Btn size="sm" onClick={reset}>続けて取り込む</Btn> : null}>
+          {!grading && <Card title="採点の進捗" style={{ marginBottom: 16 }}>
+            <p role="status">{currentWork}</p>
+            <p>経過時間 {Math.floor(elapsed / 60)}分{elapsed % 60}秒 ／ 全{groups.length}人分・{files.length}ページ</p>
+            <div>① 答案保存：{savedCount} / {groups.length}人　失敗 {saveErrors}人</div>
+            <div role="progressbar" aria-label="答案保存の進捗" aria-valuemin={0} aria-valuemax={groups.length} aria-valuenow={savedCount + saveErrors}>
+              <Bar value={savedCount + saveErrors} max={groups.length} tone="accent" />
+            </div>
+            {mode === "ai" && <>
+              <p>② AI採点：成功 {(aiProgress?.done ?? 0) - gradeErrors}人 ／ 失敗 {gradeErrors}人 ／ 保存済み {savedCount}人</p>
+              <div role="progressbar" aria-label="AI採点の処理済み割合" aria-valuemin={0} aria-valuemax={savedCount || groups.length} aria-valuenow={aiProgress?.done ?? 0}
+                style={{display:"flex",height:22,background:T.bgAlt,borderRadius:8,overflow:"hidden"}}>
+                <div style={{width:`${((aiProgress?.done ?? 0)-gradeErrors)/Math.max(1,savedCount)*100}%`,background:T.ok}} />
+                <div style={{width:`${gradeErrors/Math.max(1,savedCount)*100}%`,background:T.ng}} />
+              </div>
+              <p>緑：採点成功　赤：失敗　空白：処理中・待機中</p>
+              <small>人数に基づく進捗です。1人分のAI応答を待つ間は帯が止まります。残り時間の推測は表示しません。</small>
+            </>}
+          </Card>}
           {grading ? (
             <div style={{ display: "grid", gap: 9 }}>
               {PIPELINE.map((p, i) => {
@@ -341,10 +376,6 @@ export default function NewGrading() {
                   <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.8, marginBottom: 10 }}>
                     答案画像を学校専用の保管場所（非公開）に保存し、1枚ずつ AI が採点しています。1枚あたり数十秒かかります。
                     この画面を閉じると、残りの答案は「AI採点待ち」のまま残ります（「採点中」の画面から採点し直せます）。
-                  </div>
-                  <Bar value={aiProgress?.done ?? 0} max={aiProgress?.total || groups.length} tone="accent" />
-                  <div style={{ fontSize: 11.5, color: T.textFaint, marginTop: 5 }}>
-                    {aiProgress ? `AI採点 ${aiProgress.done} / ${aiProgress.total} 枚` : "答案を保存しています…"}
                   </div>
                 </>
               ) : (

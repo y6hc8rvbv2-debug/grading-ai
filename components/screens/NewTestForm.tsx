@@ -94,6 +94,7 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
   })));
   const [imported, setImported] = useState<Draft["imported"]>(null);
   const [importing, setImporting] = useState<"" | "upload" | "read">("");
+  const [uploadedSources, setUploadedSources] = useState(0);
   const [force, setForce] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [view, setView] = useState<{ source: string; box: Ref } | null>(null);
@@ -287,15 +288,16 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
     setError("");
     try {
       // 資料を学校専用の保管場所に置く（同じ資料・同じ読み取りなら置き直さない）
-      setImporting("upload");
+      setUploadedSources(0); setImporting("upload");
       const requestId = crypto.randomUUID();
       const placed: Source[] = [];
       for (let i = 0; i < sources.length; i++) {
         const s = sources[i];
-        if (s.path && s.requestId === requestId) { placed.push(s); continue; }
+        if (s.path && s.requestId === requestId) { placed.push(s); setUploadedSources(i + 1); continue; }
         const ext = s.type === "application/pdf" ? "pdf" : s.type === "image/png" ? "png" : "jpg";
         const file = new File([s.blob], `${i + 1}.${ext}`, { type: s.type });
         placed.push({ ...s, path: await ds.uploadImportFile(requestId, i, file), requestId });
+        setUploadedSources(i + 1);
       }
       setSources(placed);
       setImporting("read");
@@ -457,6 +459,11 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
         <Btn onClick={onClose} disabled={saving}>閉じる（下書きは残ります）</Btn>
         <Btn variant="primary" onClick={save} disabled={saving || !!importing}>{saving ? "登録しています…" : onCreated ? "登録して採点を始める" : "登録する"}</Btn>
       </>}>
+      {!!importing && <div role="status" style={{padding:16,background:T.infoSoft,borderRadius:10,marginBottom:12}}>
+        <b>{importing === "upload" ? `資料を送信中：${uploadedSources} / ${sources.length}件` : "AIが問題・正答・配点を読み取っています"}</b>
+        <progress aria-label="模範解答・配点の準備状況" max={sources.length || 1} value={importing === "upload" ? uploadedSources : undefined} style={{display:"block",width:"100%",height:24,marginTop:8}} />
+        {importing === "read" && <small>AIの応答を待っています。処理中のため、画面を閉じずにお待ちください。</small>}
+      </div>}
       {onCreated && <p>答案の印刷された問題と配点から解答案を作成します。生徒の手書き回答を正答には使いません。模範解答がある場合は追加して「模範解答がない」のチェックを外してください。読み取り後、正答・配点を確認して登録してください。</p>}
       {draftNote && (
         <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 11px", borderRadius: 9, background: T.infoSoft, color: T.info, fontSize: 12.5, marginBottom: 10 }}>
