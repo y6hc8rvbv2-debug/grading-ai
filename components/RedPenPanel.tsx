@@ -27,14 +27,15 @@ export function RedPenPanel({ sub, layouts, selected, onSelect, onConfirm, onRes
   analyzed: boolean;
 }) {
   const { T } = useUI();
+  const [onlyCurrentPage, setOnlyCurrentPage] = useState(false);
   const byQno = new Map<number, Placed>();
   layouts.forEach((l) => l.placed.forEach((p) => byQno.set(p.qno, p)));
   const pageCount = layouts.length;
   // 表示中のページの設問と、位置が分からない設問（どのページにも置けていない）だけを並べる
   const shown = sub.result.items.filter((it) => {
     const p = byQno.get(it.qno);
-    return !p || p.page === currentPage || p.source === "none";
-  });
+    return !onlyCurrentPage || !p || p.page === currentPage || p.source === "none";
+  }).slice().sort((a, b) => a.qno - b.qno);
   const needPos = shown.filter((it) => (byQno.get(it.qno)?.issues.length ?? 0) > 0).length;
   const needOther = [...byQno.values()].filter((p) => p.issues.length > 0 && p.page !== currentPage && p.source !== "none").length;
 
@@ -42,10 +43,13 @@ export function RedPenPanel({ sub, layouts, selected, onSelect, onConfirm, onRes
     <div data-testid="redpen-panel" style={{ display: "grid", gap: 8, alignContent: "start" }}>
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         <span style={{ font: `700 13px ${FONT_UI}`, color: T.text }}>
-          {pageCount > 1 ? `${currentPage} ページ目の設問` : "設問ごとのコメント・赤ペンの位置"}
+          {onlyCurrentPage ? `${currentPage} ページ目の設問` : "全問題のコメント・赤ペンの位置"}
         </span>
         {needPos > 0 && <Badge tone="warn">位置の要確認 {needPos} 問</Badge>}
       </div>
+      {pageCount > 1 && <label style={{fontSize:12,color:T.textSub}}>
+        <input type="checkbox" checked={onlyCurrentPage} onChange={e => setOnlyCurrentPage(e.target.checked)} /> 表示中のページだけに絞る
+      </label>}
       {needOther > 0 && (
         <div data-testid="other-page-review" style={{ fontSize: 11.5, color: T.warn }}>ほかのページに、位置の要確認が {needOther} 問あります（◀ ▶ でページを切り替えてください）。</div>
       )}
