@@ -152,6 +152,31 @@ export function resolveAnchors(items: LayoutInput[], pages: PageInput[]): Work[]
     gi.page == null || !gi.mid ? Infinity : (c.page !== gi.page ? 1 : 0) + Math.abs(c.cy - gi.mid.y) + 0.5 * Math.abs(c.cx - gi.mid.x);
   const MAX_SCORE = 0.3;     // 同じページで、ページの高さの3割より遠い表には割り当てない
   const used = new Set<Col>();
+  // 全ページに同じ横位置の解答欄が並び、全大問の行数まで一致する場合は、
+  // 不正確なAI座標より用紙全体の構造を優先する。作図欄も順序の照合に含める。
+  const allGroups = new Map<number, LayoutInput[]>();
+  for (const it of items) allGroups.set(it.big, [...(allGroups.get(it.big) ?? []), it]);
+  const expected = [...allGroups.entries()].sort((a, b) => a[0] - b[0]);
+  const sequences: Col[][] = [];
+  for (const seed of cols) {
+    const left = seed.rows[0].l / seed.f.width;
+    const right = seed.rows[0].r / seed.f.width;
+    // This path is for the conventional right-hand answer column only.
+    if (left < 0.55) continue;
+    const aligned = cols.filter(c => Math.abs(c.rows[0].l / c.f.width - left) < 0.045
+      && Math.abs(c.rows[0].r / c.f.width - right) < 0.045)
+      .sort((a, b) => a.page - b.page || a.cy - b.cy);
+    if (expected.length < 3 || aligned.length !== expected.length
+      || !aligned.every((c, i) => c.rows.length === expected[i][1].length)) continue;
+    if (!sequences.some(seq => seq.every((c, i) => c === aligned[i]))) sequences.push(aligned);
+  }
+  if (sequences.length === 1) {
+    sequences[0].forEach((c, i) => {
+      const gi = info.find(g => g.big === expected[i][0]);
+      used.add(c); // A graph's answer cell must not be assigned to another question.
+      if (gi) gi.col = c;
+    });
+  }
   // 近い組から順に決める（取り合いになっても、より近い大問が先に取る）
   const pairs: { gi: (typeof info)[number]; c: Col; s: number }[] = [];
   for (const gi of info) for (const c of cols) if (c.rows.length === gi.g.length) {

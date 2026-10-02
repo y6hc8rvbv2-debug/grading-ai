@@ -237,3 +237,22 @@ test("実例の2ページ目：解答欄の表を AI の位置に頼らずに見
   const cols = allColumns(f).filter((c) => c[0].l > f.width * 0.6);
   assert.deepEqual(cols.map((c) => c.length), [1, 3, 2], "大問5・6・7 の表（1・3・2行）");
 });
+
+test('complete answer-table sequence overrides swapped AI positions', () => {
+  const f = detectFrames(sheet([
+    {x0:900,x1:1140,label:930,top:100,rows:5,rowH:40},
+    {x0:900,x1:1140,label:930,top:450,rows:5,rowH:40},
+    {x0:900,x1:1140,label:930,top:1000,rows:3,rowH:40},
+  ]));
+  let no=0;
+  const items: LayoutInput[] = [5,5,3].flatMap((count,g) => Array.from({length:count}, (_,i)=>({
+    qno:++no,big:g+1,graph:false,
+    bbox:{page:1,x:.8,y:([450,100,1250][g]+i*40)/H,w:.13,h:40/H},
+  })));
+  const resolved=resolveAnchors(items,[{aspect:H/W,frames:f}]);
+  assert.ok(resolved.every(r=>r.source==='table'));
+  assert.ok(resolved[0].anchor!.y < resolved[5].anchor!.y);
+  assert.ok(Math.abs(resolved[10].anchor!.y-1000/H)<.01);
+  const saved=layoutMarks(items,[{aspect:H/W,frames:f}],[{qno:1,page:1,x:1.02,y:.9}]);
+  assert.equal(saved[0].placed.find(p=>p.qno===1)!.cy,.9);
+});
