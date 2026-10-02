@@ -386,6 +386,10 @@ export default function GradingDetail({ subId }: { subId: string }) {
             {overlayOn && layouts && (
               <div style={wide ? { maxHeight: "80vh", overflow: "auto", paddingInlineEnd: 2 } : undefined}>
                 <RedPenPanel sub={sub} layouts={layouts} selected={selected} onSelect={selectMark}
+                  onEditComment={async (qno, comment) => {
+                    const item = sub.result.items.find(it => it.qno === qno);
+                    return item ? applyEdit(item, {comment}) : false;
+                  }}
                   onConfirm={confirmMark} onReset={resetMark} analyzed={analyzed} currentPage={origPage + 1}
                   onMoveTo={(q, pg) => { moveMark(q, pg, 0.5, 0.5); setSelected(q); setOrigPage(pg - 1); toast(`${pg} ページ目の中央へ移しました。ドラッグで解答欄の右へ動かしてください`); }} />
               </div>

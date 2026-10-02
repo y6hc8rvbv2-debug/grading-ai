@@ -2,15 +2,16 @@
 // 原本の赤ペンの横に出す「設問ごとのコメント・赤ペンの位置」。
 // コメントは原本の画像には書かず、ここに設問ごとに並べる（答案の文字・罫線と重ならないように）。
 // 位置の要確認（解答欄を確かめられなかった設問）は、先生が位置を確かめて「この位置でよい」を押すか、ドラッグで直す。
-import React from "react";
+import React, { useState } from "react";
 import { FONT_HAND, FONT_MONO, FONT_UI } from "@/lib/ui/theme";
 import { useUI } from "@/components/ui-context";
-import { Badge, Btn } from "@/components/ui";
+import { Badge, Btn, inputStyle } from "@/components/ui";
 import { SOURCE_LABEL, type PageLayout, type Placed } from "@/lib/redpen/layout";
 import type { Submission } from "@/lib/types";
 
-export function RedPenPanel({ sub, layouts, selected, onSelect, onConfirm, onReset, onMoveTo, currentPage, analyzed }: {
+export function RedPenPanel({ sub, layouts, selected, onSelect, onConfirm, onReset, onMoveTo, currentPage, analyzed, onEditComment }: {
   sub: Submission;
+  onEditComment: (qno: number, comment: string) => Promise<boolean>;
   layouts: PageLayout[];
   selected: number | null;
   onSelect: (qno: number, page: number) => void;
@@ -71,9 +72,8 @@ export function RedPenPanel({ sub, layouts, selected, onSelect, onConfirm, onRes
               {it.needReview && <Badge tone="warn">採点の要確認</Badge>}
               {p?.source === "saved" && <Badge tone="accent">位置を調整済み</Badge>}
             </div>
-            <div style={{ marginTop: 4, font: `13px ${FONT_HAND}`, color: it.comment ? T.shu : T.textFaint, lineHeight: 1.6 }}>
-              {it.comment || "（コメントなし）"}
-            </div>
+            <CommentEditor key={`${sub.id}:${it.qno}`} label={it.label} comment={it.comment}
+              onSave={comment => onEditComment(it.qno, comment)} />
             {p && p.issues.length > 0 && (
               <div style={{ marginTop: 6, fontSize: 11.5, color: T.warn, lineHeight: 1.6 }}>
                 <b>位置の要確認：</b>{p.issues.join("／")}。原本で位置を確かめ、ずれていればドラッグで直してください。
@@ -96,4 +96,38 @@ export function RedPenPanel({ sub, layouts, selected, onSelect, onConfirm, onRes
       })}
     </div>
   );
+}
+
+function CommentEditor({label, comment, onSave}: {
+  label: string; comment: string; onSave: (value: string) => Promise<boolean>;
+}) {
+  const {T, toast} = useUI();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return <div style={{marginTop:6}} onClick={e => e.stopPropagation()}>
+    {editing ? <>
+      <textarea aria-label={`${label} のコメント`} value={draft} rows={4}
+        disabled={busy} onChange={e => setDraft(e.target.value)}
+        style={{...inputStyle(T),width:"100%",boxSizing:"border-box",resize:"vertical"}} />
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>
+        <Btn size="sm" variant="primary" disabled={busy} onClick={async () => {
+          setBusy(true); setError("");
+          try {
+            if (await onSave(draft)) { setEditing(false); toast("コメントを保存しました"); }
+            else setError("保存できませんでした。入力は残しています。もう一度保存してください。");
+          } catch { setError("保存できませんでした。入力は残しています。"); }
+          finally { setBusy(false); }
+        }}>{busy ? "保存中…" : "保存"}</Btn>
+        <Btn size="sm" variant="ghost" disabled={busy} onClick={() => {setDraft(comment);setEditing(false);setError("");}}>取消</Btn>
+        <Btn size="sm" variant="ghost" disabled={busy} onClick={() => setDraft("")}>文章を空にする</Btn>
+      </div>
+      <div style={{fontSize:11,color:T.textSub,marginTop:4}}>取消は編集前に戻します。削除する場合は「文章を空にする」→「保存」。</div>
+      {error && <div role="alert" style={{color:T.ng,fontSize:12}}>{error}</div>}
+    </> : <>
+      <div style={{font:`13px ${FONT_HAND}`,color:comment ? T.shu : T.textFaint,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{comment || "（コメントなし）"}</div>
+      <Btn size="sm" variant="ghost" onClick={() => {setDraft(comment);setError("");setEditing(true);}}>コメントを編集</Btn>
+    </>}
+  </div>;
 }
