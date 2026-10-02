@@ -1,33 +1,59 @@
 // 赤ペンを重ねた原本を、画像（PNG）にする・印刷する（ブラウザ専用）。
 // 画面と同じ部品（RedPenOverlay）・同じ置き場所（layoutMarks）で描いた SVG を、そのまま画像にする。
 
-/** 画像を data URL にする（保存した画像に原本を埋め込むため。署名付きURLは10分で切れる） */
-export async function toDataUrl(url: string): Promise<string> {
-  if (url.startsWith("data:")) return url;
-  const blob = await (await fetch(url)).blob();
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(String(fr.result));
-    fr.onerror = () => reject(fr.error);
-    fr.readAsDataURL(blob);
-  });
+/**
+ * 原本の写真を読み込む。応答がエラー（署名付きURLの期限切れなど）や画像でないときは、例外にする。
+ * （以前は応答をそのまま埋め込んでいたため、期限切れのエラー文が埋め込まれ、白地に赤ペンだけの画像になっていた）
+ */
+export async function loadPhoto(url: string): Promise<ImageBitmap> {
+  let res: Response;
+  try {
+    res = await fetch(url, { cache: "no-store" });
+  } catch {
+    throw new Error("原本の写真を取得できませんでした。通信状態を確かめて、もう一度お試しください。");
+  }
+  if (!res.ok) throw new Error(`原本の写真を取得できませんでした（HTTP ${res.status}）。画面を再読み込みしてから、もう一度お試しください。`);
+  const blob = await res.blob();
+  if (!/^image\//.test(blob.type) && blob.type !== "") {
+    throw new Error("原本の写真を取得できませんでした（画像ではない応答でした）。画面を再読み込みしてから、もう一度お試しください。");
+  }
+  try {
+    return await createImageBitmap(blob);
+  } catch {
+    throw new Error("原本の写真を読み込めませんでした。画面を再読み込みしてから、もう一度お試しください。");
+  }
 }
 
-/** 描いた SVG を PNG にする。pxWidth は原本の画像の部分の幅（画素） */
-export async function svgToPng(svg: SVGSVGElement, pxWidth = 1600): Promise<Blob> {
+/**
+ * 原本の写真と赤ペンを1枚の PNG にする。pxWidth は原本の部分の幅（画素）。
+ * 写真は canvas に直接描き（SVG の中の画像の読み込み待ちに頼らない）、その上に赤ペン（SVG）を重ねる。
+ * 写真の部分が真っ白・単色なら、合成に失敗したとみなして例外にする（原本の無い PNG を保存しない）。
+ */
+export async function composePng(svg: SVGSVGElement, photo: ImageBitmap, pxWidth = 1600): Promise<Blob> {
   const vb = svg.viewBox.baseVal;
   const scale = pxWidth / 1000;
   const w = Math.round(vb.width * scale);
   const h = Math.round(vb.height * scale);
+  const imgEl = svg.querySelector("image");
+  if (!imgEl) throw new Error("赤ペン画像を作れませんでした");
+  const ix = (Number(imgEl.getAttribute("x")) - vb.x) * scale;
+  const iy = (Number(imgEl.getAttribute("y")) - vb.y) * scale;
+  const iw = Number(imgEl.getAttribute("width")) * scale;
+  const ih = Number(imgEl.getAttribute("height")) * scale;
+  // 画面に表示している原本と縦横比が違えば、別の画像を取得したとみなす
+  if (Math.abs(photo.height / photo.width - ih / iw) > 0.03) throw new Error("原本の写真の縦横比が画面と合いません。画面を再読み込みしてから、もう一度お試しください。");
+
+  // 赤ペンだけの SVG（原本の <image> と背景を外す）
   const clone = svg.cloneNode(true) as SVGSVGElement;
+  clone.querySelectorAll("image").forEach((n) => n.remove());
+  clone.querySelector("rect")?.setAttribute("fill", "none");
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   clone.setAttribute("width", String(w));
   clone.setAttribute("height", String(h));
   clone.removeAttribute("style");
-  const xml = new XMLSerializer().serializeToString(clone);
-  const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml;charset=utf-8" }));
+  const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(clone)], { type: "image/svg+xml;charset=utf-8" }));
   try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const marks = await new Promise<HTMLImageElement>((resolve, reject) => {
       const i = new Image();
       i.onload = () => resolve(i);
       i.onerror = () => reject(new Error("赤ペン画像を作れませんでした"));
@@ -36,17 +62,32 @@ export async function svgToPng(svg: SVGSVGElement, pxWidth = 1600): Promise<Blob
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) throw new Error("赤ペン画像を作れませんでした");
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
+    ctx.drawImage(photo, ix, iy, iw, ih);
+    if (!hasPicture(ctx, ix, iy, iw, ih)) throw new Error("原本の写真を合成できませんでした。画面を再読み込みしてから、もう一度お試しください。");
+    ctx.drawImage(marks, 0, 0, w, h);
     const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
     if (!png) throw new Error("赤ペン画像を作れませんでした");
     return png;
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+/** 写真の部分に濃淡があるか（真っ白・単色なら false） */
+function hasPicture(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+  const d = ctx.getImageData(Math.round(x), Math.round(y), Math.max(1, Math.round(w)), Math.max(1, Math.round(h))).data;
+  let n = 0, sum = 0, sq = 0;
+  const step = Math.max(4, Math.floor(d.length / 4 / 20000)) * 4;
+  for (let i = 0; i < d.length; i += step) {
+    const v = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+    sum += v; sq += v * v; n++;
+  }
+  const mean = sum / n;
+  return Math.sqrt(Math.max(0, sq / n - mean * mean)) > 4;
 }
 
 export function saveBlob(name: string, blob: Blob) {

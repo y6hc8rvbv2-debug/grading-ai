@@ -984,13 +984,89 @@ const pix = await page.evaluate(async ({ b64, pts }) => {
 ok(pix.marks.every((n) => n > 30) && pix.away < 5 && pix.dark > 1000,
   `保存した画像の赤ペンは画面と同じ位置（調整した位置を含む）。原本も写っている（赤 ${pix.marks.join(",")} / 離れた所 ${pix.away}）`);
 
+// (5b) 保存した PNG を開いて、原本の写真そのものが入っているかを確かめる（元の写真と画素で比べる）
+//      1→2→1ページの切り替え後、再読み込み直後、署名付きURLが期限切れのときも確かめる
+const photoMatch = async (pngPath, pg) => {
+  const png = (await fs.readFile(pngPath)).toString("base64");
+  const src = (await fs.readFile(sheets[pg - 1])).toString("base64");
+  const mime = sheets[pg - 1].endsWith(".png") ? "image/png" : "image/jpeg";
+  return page.evaluate(async ({ png, src, mime }) => {
+    const load = async (u) => { const i = new Image(); i.src = u; await i.decode(); return i; };
+    const a = await load("data:image/png;base64," + png), b = await load(`data:${mime};base64,` + src);
+    const vb = document.querySelector('svg[data-testid="redpen-overlay"]').viewBox.baseVal;
+    const H = Number(document.querySelector('svg[data-testid="redpen-overlay"] image').getAttribute("height"));
+    const s = a.width / vb.width;
+    const rx = 0, ry = -vb.y * s, rw = 1000 * s, rh = H * s;
+    const grab = (img, sx, sy, sw, sh) => {
+      const c = document.createElement("canvas"); c.width = 60; c.height = 80;
+      const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(img, sx, sy, sw, sh, 0, 0, 60, 80);
+      const d = x.getImageData(0, 0, 60, 80).data; const v = [];
+      for (let i = 0; i < d.length; i += 4) v.push(d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114);
+      return v;
+    };
+    const va = grab(a, rx, ry, rw, rh), vbb = grab(b, 0, 0, b.width, b.height);
+    // 赤ペンのある右側を除いて、左 6 割で比べる
+    let diff = 0, n = 0, mean = 0, sq = 0;
+    for (let y = 0; y < 80; y++) for (let x = 0; x < 36; x++) { const i = y * 60 + x; diff += Math.abs(va[i] - vbb[i]); mean += va[i]; sq += va[i] * va[i]; n++; }
+    mean /= n;
+    return { diff: diff / n, sd: Math.sqrt(sq / n - mean * mean), w: a.width, h: a.height };
+  }, { png, src, mime });
+};
+const saveAndCheck = async (pg, label) => {
+  const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 30000 }), page.getByRole("button", { name: "赤ペン画像を保存" }).click()]);
+  const path = `${OUT}redpen_${label}.png`;
+  await dl.saveAs(path);
+  const m = await photoMatch(path, pg);
+  ok(dl.suggestedFilename().endsWith(`_p${pg}.png`) && m.diff < 12 && m.sd > 5,
+    `${label}：保存した PNG に ${pg} ページ目の原本の写真が入っている（元の写真との差 ${m.diff.toFixed(1)}・濃淡 ${m.sd.toFixed(1)}・${m.w}×${m.h}px）`);
+  return m;
+};
+await saveAndCheck(1, "1ページ目");
+await page.getByRole("button", { name: "▶" }).first().click(); await settle(600);
+await overlay.locator('g[data-qno="16"]').waitFor();
+await saveAndCheck(2, "1→2ページ目");
+await page.getByRole("button", { name: "◀" }).first().click(); await settle(600);
+await overlay.locator('g[data-qno="2"]').waitFor();
+await saveAndCheck(1, "1→2→1ページ目");
+await openDetail();
+await saveAndCheck(1, "再読み込み直後の1ページ目");
+await page.getByRole("button", { name: "▶" }).first().click(); await overlay.locator('g[data-qno="16"]').waitFor();
+await saveAndCheck(2, "再読み込み直後の2ページ目");
+// 保存のたびに署名付きURLを取り直す。取り直した写真の取得が失敗（期限切れ相当）なら、原本の無い PNG は保存せずに知らせる
+let signCalls = 0;
+const signSeen = (q) => { if (q.url().includes("/storage/v1/object/sign/answer-sheets/") && q.method() === "POST") signCalls++; };
+page.on("request", signSeen);
+await page.route(/\/storage\/v1\/object\/sign\/answer-sheets\/.*token=/, (route) => route.request().resourceType() === "fetch"
+  ? route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ statusCode: "400", error: "InvalidJWT", message: '"exp" claim timestamp check failed' }) })
+  : route.continue());
+let gotDl = false;
+const onDl = () => { gotDl = true; };
+const errorsBefore = errors.length;
+page.on("download", onDl);
+await page.getByRole("button", { name: "赤ペン画像を保存" }).click();
+await toastSeen(/原本の写真を取得できませんでした（HTTP 400）.*画像は保存していません/);
+await settle(1500);
+ok(!gotDl && signCalls >= 1, `写真の取得に失敗したら（署名付きURLの期限切れ相当）、原本の無い PNG を保存せずにエラーを出す（URL の取り直し ${signCalls} 回）`);
+await page.unroute(/\/storage\/v1\/object\/sign\/answer-sheets\/.*token=/);
+// わざと起こした 400（期限切れ相当）の記録だけを、コンソールエラーの確認から外す
+for (let i = errors.length - 1; i >= errorsBefore; i--) if (/Failed to load resource: .* 400/.test(errors[i])) errors.splice(i, 1);
+page.off("download", onDl); page.off("request", signSeen);
+await saveAndCheck(2, "失敗のあとの2ページ目");
+await page.getByRole("button", { name: "◀" }).first().click(); await overlay.locator('g[data-qno="1"]').waitFor();
+
 // (6) 印刷：全ページを、画面と同じ部品で画像にして印刷する
 await page.getByRole("button", { name: "印刷" }).click();
 const pf = page.locator('iframe[data-testid="print-frame"]');
 await pf.waitFor({ state: "attached", timeout: 20000 });
 await settle(800);
-const printImgs = await pf.evaluate((f) => [...f.contentDocument.images].map((i) => i.naturalWidth));
-ok(printImgs.length === 2 && printImgs.every((w) => w > 1000), `印刷は2ページ分（${printImgs.join(",")}px）`);
+const printImgs = await pf.evaluate((f) => [...f.contentDocument.images].map((i) => {
+  const c = document.createElement("canvas"); c.width = 50; c.height = 70;
+  const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(i, 0, i.naturalHeight * 0.05, i.naturalWidth * 0.6, i.naturalHeight * 0.9, 0, 0, 50, 70);
+  const d = x.getImageData(0, 0, 50, 70).data; let m = 0, q = 0, n = 0;
+  for (let k = 0; k < d.length; k += 4) { const v = d[k]; m += v; q += v * v; n++; }
+  m /= n; return { w: i.naturalWidth, sd: Math.sqrt(q / n - m * m) };
+}));
+ok(printImgs.length === 2 && printImgs.every((p) => p.w > 1000 && p.sd > 5), `印刷は2ページ分で、どちらも原本の写真入り（${printImgs.map((p) => `${p.w}px・濃淡${p.sd.toFixed(0)}`).join(" / ")}）`);
 
 // (6b) 赤ペンを別のページへ移す（ページをまたいでドラッグできないため）。1ページ目の大問1-(1)を2ページ目へ
 await page.locator('[data-testid="panel-row"][data-qno="1"]').click(); await settle(300);

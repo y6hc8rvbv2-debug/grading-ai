@@ -12,7 +12,7 @@ import { RedPenOverlay } from "@/components/RedPenOverlay";
 import { RedPenPanel } from "@/components/RedPenPanel";
 import { layoutMarks, type PageLayout, type Placed } from "@/lib/redpen/layout";
 import { analyzePage, displayableUrl, type AnalyzedPage } from "@/lib/redpen/analyze";
-import { printImages, saveBlob, svgToPng, toDataUrl } from "@/lib/redpen/export";
+import { composePng, loadPhoto, printImages, saveBlob } from "@/lib/redpen/export";
 import { friendlyError } from "@/lib/errors";
 import { GradingLogCard } from "@/components/GradingLogCard";
 import { GradingModeSelect } from "@/components/GradingModePicker";
@@ -62,7 +62,7 @@ export default function GradingDetail({ subId }: { subId: string }) {
   const sheetRef = useRef<HTMLDivElement>(null);
   const saveTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
   // 画像の保存・印刷：画面と同じ部品で、原本を埋め込んだ SVG を画面の外に描いてから画像にする
-  const [exportJob, setExportJob] = useState<{ kind: "png" | "print"; pages: number[]; hrefs: string[] } | null>(null);
+  const [exportJob, setExportJob] = useState<{ kind: "png" | "print"; pages: number[]; photos: ImageBitmap[]; name: string } | null>(null);
   const exportRefs = useRef<(SVGSVGElement | null)[]>([]);
 
   const test = sub ? testById(sub.testId) : undefined;
@@ -142,10 +142,10 @@ export default function GradingDetail({ subId }: { subId: string }) {
         for (let i = 0; i < exportJob.pages.length; i++) {
           const node = exportRefs.current[i];
           if (!node) throw new Error("赤ペン画像を作れませんでした");
-          blobs.push(await svgToPng(node));
+          blobs.push(await composePng(node, exportJob.photos[i]));
         }
         if (!alive) return;
-        const name = `redpen_${test?.subject ?? ""}_${sub ? who(sub.studentId) : ""}`.replace(/[\\/:*?"<>|\s]+/g, "_");
+        const name = exportJob.name;
         if (exportJob.kind === "png") {
           saveBlob(`${name}_p${exportJob.pages[0]}.png`, blobs[0]);
           toast("赤ペンを重ねた原本を画像で保存しました");
@@ -153,14 +153,15 @@ export default function GradingDetail({ subId }: { subId: string }) {
           await printImages(blobs, name);
         }
       } catch (e) {
-        toast(friendlyError(e, "赤ペン画像の作成"), "ng");
+        toast(`${e instanceof Error ? e.message : "赤ペン画像を作れませんでした。"}画像は保存していません。`, "ng");
       } finally {
+        exportJob.photos.forEach((b) => b.close());
         if (alive) setExportJob(null);
       }
     };
     run();
     return () => { alive = false; };
-  }, [exportJob, sub, test, who, toast]);
+  }, [exportJob, toast]);
 
   if (!sub || !test || !st || !kl || !ana || !fb) {
     if (!sub && lookup !== "missing") {
@@ -208,11 +209,24 @@ export default function GradingDetail({ subId }: { subId: string }) {
   const startExport = async (kind: "png" | "print") => {
     if (!layouts) { toast("原本を調べています。少し待ってからもう一度押してください", "warn"); return; }
     const pages = kind === "png" ? [origPage + 1] : imageUrls.map((_, i) => i + 1);
+    // 原本の写真は、保存のたびに新しい署名付きURLで取り直す（画面を開いてから10分を過ぎると、表示中のURLは期限切れになる）
+    const photos: ImageBitmap[] = [];
     try {
-      const hrefs = await Promise.all(pages.map((p) => toDataUrl(imageUrls[p - 1] ?? "")));
-      setExportJob({ kind, pages, hrefs });
+      for (const p of pages) {
+        const path = sub.imagePaths[p - 1];
+        if (!path) throw new Error(`${p} ページ目の原本の写真がありません。`);
+        const url = await displayableUrl(path, await ds.signedImageUrl(path));
+        try {
+          photos.push(await loadPhoto(url));
+        } finally {
+          if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+        }
+      }
+      const name = `redpen_${test.subject}_${who(sub.studentId)}`.replace(/[\\/:*?"<>|\s]+/g, "_");
+      setExportJob({ kind, pages, photos, name });
     } catch (e) {
-      toast(friendlyError(e, "原本の読み込み"), "ng");
+      photos.forEach((b) => b.close());
+      toast(`${e instanceof Error ? e.message : "原本の写真を取得できませんでした。"}画像は保存していません。`, "ng");
     }
   };
   const canAi = ai.enabled && sub.imagePaths.length > 0;
@@ -387,7 +401,7 @@ export default function GradingDetail({ subId }: { subId: string }) {
           {exportJob && layouts && (
             <div aria-hidden style={{ position: "fixed", left: -20000, top: 0, width: 1000, pointerEvents: "none" }}>
               {exportJob.pages.map((pg, i) => layouts[pg - 1] && (
-                <RedPenOverlay key={pg} imageUrl={exportJob.hrefs[i]} sub={sub} test={test} page={pg}
+                <RedPenOverlay key={pg} imageUrl={imageUrls[pg - 1] ?? ""} sub={sub} test={test} page={pg}
                   aspect={pagesInfo?.pages[pg - 1]?.aspect ?? 1.414} layout={layouts[pg - 1]} forExport
                   svgRef={(el) => { exportRefs.current[i] = el; }} />
               ))}
