@@ -36,12 +36,14 @@ type Row = {
   model: string;
   flags: string[];              // 要確認の理由（自動入力）
   confirmed: boolean;           // 教師が確認したか
-  answerBox?: ImportBox;
-  figure?: ImportBox;
+  answerBox?: Ref;              // 元画像での正答の位置
+  figure?: Ref;                 // 作図の模範図の位置
 };
+/** 元の資料の中の位置。資料は id で指す（資料を削除しても、ほかの設問の参照がずれない） */
+type Ref = { sourceId: string; page: number; x: number; y: number; w: number; h: number } | null;
 type Source = { id: string; name: string; kind: Kind; type: string; blob: Blob; path?: string; requestId?: string };
 type Draft = {
-  v: 1; savedAt: string;
+  v: 1 | 2; savedAt: string;
   name: string; subject: string; grade: string; term: string; date: string; testNo: string; unitsText: string;
   rows: Row[]; sources: Source[];
   imported: { importId: string; maxScore: number | null; warnings: string[]; requestId: string } | null;
@@ -88,7 +90,26 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
   const [importing, setImporting] = useState<"" | "upload" | "read">("");
   const [force, setForce] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
-  const [view, setView] = useState<{ source: string; box: ImportBox | null } | null>(null);
+  const [view, setView] = useState<{ source: string; box: Ref } | null>(null);
+  // 元画像の表示・非表示（端末に覚える）。切り替えても資料・入力・確認状態は変わらない
+  const [imagesOn, setImagesOnState] = useState(true);
+  const setImagesOn = (v: boolean) => {
+    setImagesOnState(v);
+    try { window.localStorage.setItem("saiten.testFormImages", v ? "1" : "0"); } catch { /* 保存できない環境では覚えない */ }
+  };
+  useEffect(() => {
+    try { if (window.localStorage.getItem("saiten.testFormImages") === "0") setImagesOnState(false); } catch { /* 無視 */ }
+  }, []);
+  // 横に並べられる幅があるか（狭いときは画像を上、設問を下に分ける）
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [wide, setWide] = useState(true);
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!open || !el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => setWide((entries[0]?.contentRect.width ?? 0) >= 900));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [open]);
   const lock = useRef(false);
 
   // 下書き
@@ -116,11 +137,22 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
     if (!open || restored.current) return;
     restored.current = true;
     loadDraft<Draft>(DRAFT_KEY).then((d) => {
-      if (!d || d.v !== 1) return;
+      if (!d || (d.v !== 1 && d.v !== 2)) return;
       setName(d.name); setSubject(d.subject); setGrade(d.grade); setTerm(d.term); setDate(d.date);
       setTestNo(d.testNo); setUnitsText(d.unitsText);
-      if (d.rows?.length) { setRows(d.rows.map((r) => ({ ...r, key: ++rowKey }))); }
-      setSources(d.sources ?? []);
+      const srcs = d.sources ?? [];
+      // 以前の下書き（v1）は資料を「何番目か」で指していたので、資料の id に置き換える（AI は呼ばない）
+      const fromLegacy = (b: unknown): Ref => {
+        if (!b || typeof b !== "object") return null;
+        const o = b as Record<string, number | string>;
+        if ("sourceId" in o) return o as unknown as Ref;
+        const src = srcs[Number(o.file) - 1];
+        return src ? { sourceId: src.id, page: Number(o.page) || 1, x: Number(o.x), y: Number(o.y), w: Number(o.w), h: Number(o.h) } : null;
+      };
+      if (d.rows?.length) {
+        setRows(d.rows.map((r) => ({ ...r, key: ++rowKey, answerBox: fromLegacy(r.answerBox), figure: fromLegacy(r.figure) })));
+      }
+      setSources(srcs);
       setImported(d.imported ?? null);
       if ((d.sources ?? []).length) setImportOpen(true);
       setDraftNote(`下書きを復元しました（${new Date(d.savedAt).toLocaleString("ja-JP")} に自動保存）`);
@@ -128,7 +160,7 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
   }, [open]);
 
   const snapshot = useCallback((): Draft => ({
-    v: 1, savedAt: new Date().toISOString(), name, subject, grade, term, date, testNo, unitsText, rows, sources, imported,
+    v: 2, savedAt: new Date().toISOString(), name, subject, grade, term, date, testNo, unitsText, rows, sources, imported,
   }), [name, subject, grade, term, date, testNo, unitsText, rows, sources, imported]);
   const dirty = !!(name || testNo || unitsText || sources.length || rows.length > 1 || rows[0]?.correct || rows[0]?.model);
   useEffect(() => {
@@ -210,7 +242,7 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
       const r = await ds.importTestKey({
         requestId, force, files: placed.map((s) => ({ path: s.path!, kind: s.kind, name: s.name })),
       });
-      applyImport(r.result, { importId: r.importId, requestId });
+      applyImport(r.result, { importId: r.importId, requestId }, placed);
       setForce(false);
       toast(r.cached
         ? "同じ資料の読み取り結果を使いました（AI は呼んでいません）。要確認の設問を確認してください"
@@ -224,11 +256,15 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
     }
   };
 
-  const applyImport = (res: ImportResult, meta: { importId: string; requestId: string }) => {
+  const applyImport = (res: ImportResult, meta: { importId: string; requestId: string }, placed: Source[]) => {
+    const toRef = (b: ImportBox): Ref => {
+      const src = b ? placed[b.file - 1] : null;
+      return b && src ? { sourceId: src.id, page: b.page, x: b.x, y: b.y, w: b.w, h: b.h } : null;
+    };
     setRows(res.questions.map((q) => blankRow({
       big: q.big, sub: q.sub, type: q.type, unit: "", points: q.points ?? "", pointsHint: q.pointsHint,
       correct: q.correct, model: q.model, flags: q.flags, confirmed: q.flags.length === 0,
-      answerBox: q.answerBox, figure: q.figure,
+      answerBox: toRef(q.answerBox), figure: toRef(q.figure),
     })));
     if (!name && res.title) setName(res.title);
     if (res.subject) setSubject((s) => s || res.subject);
@@ -236,10 +272,48 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
     setSelected(null);
   };
 
-  const showBox = (box: ImportBox | undefined | null) => {
-    if (!box) return;
-    const s = sources[box.file - 1];
-    if (s) setView({ source: s.id, box });
+  const showBox = (ref: Ref | undefined) => {
+    if (!ref || !sources.some((s) => s.id === ref.sourceId)) return;
+    setView({ source: ref.sourceId, box: ref });
+    setImagesOn(true);
+  };
+  const sourceNo = (id: string) => sources.findIndex((s) => s.id === id) + 1;
+
+  /* ---------------------------------------------------- 資料の削除 */
+  const deleteSource = (id: string) => {
+    const s = sources.find((x) => x.id === id);
+    if (!s) return;
+    const no = sourceNo(id);
+    const figRows = rows.filter((r) => r.figure?.sourceId === id);
+    const ansRows = rows.filter((r) => r.answerBox?.sourceId === id && r.figure?.sourceId !== id);
+    const keysLeft = sources.filter((x) => x.id !== id && x.kind === "key").length;
+    const lines = [`「${s.name}」（資料${no}・${KIND_LABEL[s.kind]}）を削除しますか？`, "入力済みの設問は削除しません。"];
+    if (figRows.length) {
+      lines.push(`この資料は ${figRows.map((r) => labelOf(r.big, r.sub)).join("・")} の模範図の参照元です。削除すると模範図の参照が外れ、その設問は「要確認」に戻ります（採点条件の文章は残ります）。`);
+    }
+    if (ansRows.length) lines.push(`${ansRows.length} 問で、元画像の該当箇所を表示できなくなります（入力内容は残ります）。`);
+    if (s.kind === "key" && !keysLeft) lines.push("模範解答が無くなるため、AIでもう一度読み取ることはできなくなります。");
+    if (!window.confirm(lines.join("\n\n"))) return;
+
+    setRows((prev) => prev.map((r) => {
+      const fig = r.figure?.sourceId === id;
+      const ans = r.answerBox?.sourceId === id;
+      if (!fig && !ans) return r;
+      return {
+        ...r,
+        answerBox: ans ? null : r.answerBox,
+        figure: fig ? null : r.figure,
+        ...(fig ? {
+          flags: [...r.flags.filter((f) => !f.startsWith("模範図の参照元")), `模範図の参照元の資料「${s.name}」を削除しました。模範図を確認できる資料を追加するか、採点条件の文章で確認してください`],
+          confirmed: false,
+        } : {}),
+      };
+    }));
+    // 資料の組み合わせが変わったので、次に読み取るときは新しい読み取りとして扱う（入力済みの設問はそのまま）
+    setSources((prev) => prev.filter((x) => x.id !== id).map((x) => ({ ...x, requestId: undefined })));
+    if (view?.source === id) setView(null);
+    if (s.path) ds.removeImportFiles([s.path]).catch(() => {});
+    toast(`「${s.name}」を削除しました（設問の入力は残っています）`);
   };
 
   /* ---------------------------------------------------- 登録 */
@@ -272,8 +346,8 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
     setError(""); setSaving(true);
     try {
       const keep = sources.filter((s) => s.path && s.kind !== "student");
-      const figureOf = (b?: ImportBox | null): FigureRef | null => {
-        const s = b ? sources[b.file - 1] : null;
+      const figureOf = (b?: Ref): FigureRef | null => {
+        const s = b ? sources.find((x) => x.id === b.sourceId) : null;
         return b && s?.path && s.kind !== "student" ? { path: s.path, page: b.page, x: b.x, y: b.y, w: b.w, h: b.h } : null;
       };
       const input: NewTestInput = {
@@ -306,13 +380,19 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
   const cell: React.CSSProperties = { ...inputStyle(T), padding: "6px 8px", fontSize: 12.5 };
   const current = view ? sources.find((s) => s.id === view.source) : null;
   const showViewer = sources.length > 0;
+  const viewerOn = showViewer && imagesOn;
 
   return (
-    <Modal open={open} onClose={() => { if (!saving) onClose(); }} title="テストを追加" width={showViewer ? 1240 : 1000}
+    <Modal open={open} onClose={() => { if (!saving) onClose(); }} title="テストを追加" width={viewerOn ? 1320 : 1100}
       footer={<>
         <span style={{ flex: 1, fontSize: 12.5, color: error ? T.ng : T.textSub, alignSelf: "center" }} role={error ? "alert" : undefined}>
           {error || `${rows.length} 問・合計 ${total} 点${maxScore != null ? `（原本の満点 ${maxScore} 点）` : ""}`}
         </span>
+        {showViewer && (
+          <Btn onClick={() => setImagesOn(!imagesOn)} title="資料・入力内容・確認状態はそのまま残ります（AIは再実行しません）">
+            <span aria-hidden="true">{imagesOn ? "🙈 " : "🖼 "}</span>{imagesOn ? "画像を隠す" : "画像を表示"}
+          </Btn>
+        )}
         <Btn onClick={onClose} disabled={saving}>閉じる（下書きは残ります）</Btn>
         <Btn variant="primary" onClick={save} disabled={saving || !!importing}>{saving ? "登録しています…" : "登録する"}</Btn>
       </>}>
@@ -378,8 +458,11 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
                       style={{ ...cell, width: "auto", padding: "3px 6px" }}>
                       {(Object.keys(KIND_LABEL) as Kind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
                     </select>
-                    <Btn size="sm" variant="ghost" disabled={!!importing}
-                      onClick={() => setSources((prev) => prev.filter((x) => x.id !== s.id).map((x) => ({ ...x, path: undefined })))}>外す</Btn>
+                    <button type="button" disabled={!!importing} onClick={() => deleteSource(s.id)} aria-label={`「${s.name}」を削除`}
+                      style={{ display: "inline-flex", gap: 4, alignItems: "center", border: `1px solid ${T.ng}`, background: T.ngSoft, color: T.ng,
+                        borderRadius: 7, padding: "3px 9px", cursor: importing ? "not-allowed" : "pointer", font: "inherit", fontSize: 12 }}>
+                      <span aria-hidden="true">🗑</span>削除
+                    </button>
                   </div>
                 ))}
                 <div style={{ fontSize: 11, color: T.textFaint, lineHeight: 1.7 }}>
@@ -419,17 +502,28 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+      {/* 元画像と設問欄は、重ならないように別々の枠に分ける。
+          広いときは左右（画像の枠は自分の中でスクロール）、狭いとき（スマホ・縮小表示の狭い窓）は上下。
+          画像を隠すと、設問欄が横幅いっぱいになる。 */}
+      <div ref={bodyRef} data-layout={viewerOn ? (wide ? "side" : "stack") : "full"} style={{
+        display: "grid", gap: 14, alignItems: "start",
+        gridTemplateColumns: viewerOn && wide ? "minmax(280px, 2fr) minmax(0, 3fr)" : "minmax(0, 1fr)",
+      }}>
         {/* ------------------------------------------------ 元画像（見比べ用） */}
-        {showViewer && (
-          <div style={{ flex: "1 1 360px", minWidth: 280, maxWidth: 520, position: "sticky", top: 0 }}>
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
+        {viewerOn && (
+          <div aria-label="元の資料の表示" data-testid="source-viewer" style={{
+            minWidth: 0, maxHeight: wide ? "68vh" : "45vh", overflow: "auto",
+            position: wide ? "sticky" : "static", top: 0, zIndex: 0,
+            border: `1px solid ${T.line}`, borderRadius: 10, background: T.panel, padding: 8,
+          }}>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6, alignItems: "center" }}>
               {sources.map((s, i) => (
                 <Btn key={s.id} size="sm" variant={current?.id === s.id ? "primary" : "default"} onClick={() => setView({ source: s.id, box: null })}>
                   資料{i + 1}
                 </Btn>
               ))}
             </div>
+            {!current && <div style={{ fontSize: 12, color: T.textSub, padding: 8 }}>上の「資料1」などを押すと、元の資料を表示します。</div>}
             {current && (
               <div style={{ border: `1px solid ${T.line}`, borderRadius: 9, overflow: "hidden", background: T.bgAlt }}>
                 <div style={{ fontSize: 11, color: T.textSub, padding: "4px 8px" }}>
@@ -437,16 +531,16 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
                 </div>
                 {current.type === "application/pdf" ? (
                   <object data={`${urls.get(current.id)}#page=${view?.box?.page ?? 1}`} type="application/pdf" aria-label="元の資料（PDF）"
-                    style={{ width: "100%", height: 560 }}>PDF を表示できません。</object>
+                    style={{ width: "100%", height: wide ? 520 : 360 }}>PDF を表示できません。</object>
                 ) : (
-                  <div style={{ position: "relative" }}>
+                  <div style={{ position: "relative", overflow: "hidden" }}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={urls.get(current.id)} alt={`元の資料：${current.name}`} style={{ width: "100%", display: "block" }} />
                     {view?.box && (
                       <div aria-label="該当箇所" style={{
                         position: "absolute", left: `${view.box.x * 100}%`, top: `${view.box.y * 100}%`,
                         width: `${view.box.w * 100}%`, height: `${view.box.h * 100}%`,
-                        border: `3px solid ${T.shu}`, borderRadius: 4, boxShadow: "0 0 0 9999px rgba(0,0,0,.18)",
+                        border: `3px solid ${T.shu}`, borderRadius: 4, background: "rgba(200,52,43,.08)",
                       }} />
                     )}
                   </div>
@@ -457,7 +551,7 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
         )}
 
         {/* ------------------------------------------------ 設問 */}
-        <div style={{ flex: "3 1 560px", minWidth: 0 }}>
+        <div data-testid="question-editor" style={{ minWidth: 0, position: "relative", zIndex: 1, background: T.panel }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "0 0 10px" }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: T.text, flex: 1 }}>設問</div>
             <input type="number" min={1} max={40} value={bulk} onChange={(e) => setBulk(e.target.value)} aria-label="まとめて追加する問題数"
@@ -539,10 +633,10 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
                                 {r.flags.map((f, i) => <li key={i}>{f}</li>)}
                                 {r.type === "graph" && (
                                   <li>
-                                    模範図：{r.figure && sources[r.figure.file - 1]
+                                    模範図：{r.figure && sourceNo(r.figure.sourceId) > 0
                                       ? <button type="button" onClick={(e) => { e.stopPropagation(); showBox(r.figure); }}
                                           style={{ border: "none", background: "transparent", color: T.accent, cursor: "pointer", font: "inherit", textDecoration: "underline", padding: 0 }}>
-                                          資料{r.figure.file} の {r.figure.page} ページ目を表示
+                                          資料{sourceNo(r.figure.sourceId)} の {r.figure.page} ページ目を表示
                                         </button>
                                       : "未設定（元画像で模範図の場所を確認し、採点条件に書いてください）"}
                                   </li>

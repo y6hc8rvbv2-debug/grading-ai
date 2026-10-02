@@ -508,6 +508,169 @@ await page.getByRole("button", { name: "＋ テストを追加" }).click(); awai
 ok(!(await text()).includes("下書きを復元しました"), "登録したら下書きを消す");
 await page.getByRole("button", { name: "閉じる（下書きは残ります）" }).click();
 
+// 11e. 「テストを追加」の画面：画像と設問欄が重ならない・画像の表示切替・資料の削除・下書きの復元
+//      （以前の形式の下書き＝資料4件・20問・100点・要確認3問を入れておき、AI を呼ばずに再開できること）
+const fixture = JSON.parse(await fs.readFile(new URL("../fixtures/import-raw.json", import.meta.url), "utf8"));
+const legacyDraft = {
+  v: 1, savedAt: new Date().toISOString(),
+  name: "第1回 高校入試模擬テスト（下書き）", subject: "数学", grade: "3", term: "2学期", date: "", testNo: "", unitsText: "",
+  rows: fixture.questions.map((q, i) => {
+    const flagged = ["3|", "4|(1)", "6|(3)"].includes(`${q.big}|${q.sub}`);
+    return {
+      key: i + 1, big: q.big, sub: q.sub, type: q.type, unit: "", difficulty: "標準",
+      points: q.points, correct: q.type === "graph" ? "" : q.correct, model: q.type === "graph" ? `採点条件：${q.criteria}` : q.explanation,
+      flags: flagged ? ["確認してください（下書きのテスト）"] : [], confirmed: !flagged,
+      answerBox: q.answer_box.w ? q.answer_box : null, figure: q.figure_box.w ? q.figure_box : null,
+    };
+  }),
+  imported: { importId: "00000000-0000-0000-0000-000000000000", maxScore: 100, warnings: [], requestId: "00000000-0000-0000-0000-000000000001" },
+};
+const draftFiles = [
+  { name: "模範解答1.png", kind: "key", file: `${OUT}key1.png` },
+  { name: "模範解答2.png", kind: "key", file: img(2) },
+  { name: "配点表.png", kind: "paper", file: img(3) },
+  { name: "生徒答案.png", kind: "student", file: img(1) },
+];
+const seedDraft = async (p) => {
+  const files = await Promise.all(draftFiles.map(async (f) => ({ ...f, b64: (await fs.readFile(f.file)).toString("base64") })));
+  await p.evaluate(async ({ draft, files }) => {
+    draft.sources = files.map((f, i) => ({
+      id: `src${i + 1}`, name: f.name, kind: f.kind, type: "image/png",
+      blob: new Blob([Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0))], { type: "image/png" }),
+    }));
+    await new Promise((resolve, reject) => {
+      const req = indexedDB.open("saiten-drafts", 1);
+      req.onupgradeneeded = () => req.result.createObjectStore("drafts");
+      req.onsuccess = () => {
+        const tx = req.result.transaction("drafts", "readwrite");
+        tx.objectStore("drafts").put(draft, "new-test");
+        tx.oncomplete = () => { req.result.close(); resolve(null); };
+        tx.onerror = () => reject(tx.error);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  }, { draft: legacyDraft, files });
+};
+const boxesApart = async (p) => {
+  const v = await p.locator("[data-testid=source-viewer]").boundingBox();
+  const e = await p.locator("[data-testid=question-editor]").boundingBox();
+  if (!v || !e) return false;
+  return v.x + v.width <= e.x + 1 || e.x + e.width <= v.x + 1 || v.y + v.height <= e.y + 1 || e.y + e.height <= v.y + 1;
+};
+// その場所に見えているのが目的の要素か（ほかの要素に覆われていないか）
+const visibleOnTop = async (loc) => {
+  await loc.scrollIntoViewIfNeeded();
+  return loc.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return !!hit && (hit === el || el.contains(hit) || hit.contains(el));
+  });
+};
+const viewports = [
+  { label: "PC（通常表示）", opts: { viewport: { width: 1280, height: 800 } } },
+  { label: "PC（縮小表示）", opts: { viewport: { width: 1920, height: 1200 }, deviceScaleFactor: 0.67 } },
+  { label: "スマホ", opts: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 } },
+];
+const importBefore = (await importReqs()).length;
+for (const vp of viewports) {
+  const c = await browser.newContext(vp.opts);
+  const p = await c.newPage();
+  const errs = [];
+  p.on("pageerror", (e) => errs.push(e.message));
+  await p.goto(BASE + "/login");
+  await p.getByLabel("メールアドレス").fill("admin@a.example");
+  await p.getByLabel("パスワード").fill("pass-A-123");
+  await p.getByRole("button", { name: "ログイン" }).click();
+  await p.waitForURL(BASE + "/");
+  await p.goto(BASE + "/tests"); await p.waitForTimeout(800);
+  await seedDraft(p);
+  await p.getByRole("button", { name: "＋ テストを追加" }).click();
+  await p.getByText(/下書きを復元しました/).waitFor({ timeout: 10000 });
+  await p.waitForTimeout(600);
+  const t0 = await p.locator("body").innerText();
+  ok(t0.includes("設問 20 問") && t0.includes("合計 100 点") && t0.includes("未確認 3") && (await p.getByRole("button", { name: /\.png」を削除$/ }).count()) === 4,
+    `${vp.label}：以前の下書き（資料4件・20問・100点・要確認3問）を復元`);
+  ok(await p.locator("[data-testid=source-viewer]").isVisible() && await boxesApart(p), `${vp.label}：資料画像と設問欄が重ならない`);
+  await p.getByRole("button", { name: "資料1 の 1 ページ目を表示" }).click(); await p.waitForTimeout(300);
+  ok(await boxesApart(p) && await visibleOnTop(p.getByLabel("大問2-(5) の配点")) && await visibleOnTop(p.getByLabel("大問6-(3) を確認した")),
+    `${vp.label}：画像を表示したまま、配点と確認欄が隠れずに見える`);
+  // 一番下までスクロールしても重ならない
+  await p.getByLabel("大問7-(2) の配点").scrollIntoViewIfNeeded();
+  ok(await boxesApart(p) && await visibleOnTop(p.getByLabel("大問7-(2) の配点")), `${vp.label}：下までスクロールしても重ならない`);
+  // 画像を隠す → 設問欄が横幅いっぱい／もう一度表示 → 入力・確認状態はそのまま
+  await p.getByLabel("大問6-(3) を確認した").check();
+  const before = await p.getByLabel("大問4-(2) の正答").inputValue();
+  await p.getByRole("button", { name: /画像を隠す/ }).click(); await p.waitForTimeout(300);
+  const body = await p.locator("[data-testid=question-editor]").evaluate((el) => [el.getBoundingClientRect().width, el.parentElement.getBoundingClientRect().width]);
+  ok(await p.locator("[data-testid=source-viewer]").count() === 0 && body[0] >= body[1] - 2, `${vp.label}：画像を隠すと設問欄が横幅いっぱい`);
+  await p.getByRole("button", { name: /画像を表示/ }).click(); await p.waitForTimeout(300);
+  ok(await p.locator("[data-testid=source-viewer]").isVisible() && await p.getByLabel("大問6-(3) を確認した").isChecked()
+    && (await p.getByLabel("大問4-(2) の正答").inputValue()) === before && (await p.locator("body").innerText()).includes("設問 20 問"),
+    `${vp.label}：表示を切り替えても資料・入力・確認状態が残る`);
+  ok(errs.length === 0, `${vp.label}：画面のエラーなし ${errs.join(" / ")}`);
+  if (vp.label !== "PC（通常表示）") { await c.close(); continue; }
+
+  // 資料の削除：ファイル名を示して確認。やめれば消えない
+  let msg = "";
+  p.once("dialog", (d) => { msg = d.message(); d.dismiss(); });
+  await p.getByRole("button", { name: "「生徒答案.png」を削除" }).click(); await p.waitForTimeout(300);
+  ok(msg.includes("「生徒答案.png」") && (await p.getByRole("button", { name: /\.png」を削除$/ }).count()) === 4, "資料の削除：ファイル名を示して確認し、やめれば消えない");
+  p.once("dialog", (d) => d.accept());
+  await p.getByRole("button", { name: "「生徒答案.png」を削除" }).click(); await p.waitForTimeout(400);
+  ok((await p.getByRole("button", { name: /\.png」を削除$/ }).count()) === 3 && (await p.locator("body").innerText()).includes("設問 20 問"),
+    "資料を削除しても、入力済みの設問は消えない");
+  // 作図の模範図の参照元を削除するときは影響を示し、参照切れの設問を要確認に戻す
+  p.once("dialog", (d) => { msg = d.message(); d.accept(); });
+  await p.getByRole("button", { name: "「模範解答1.png」を削除" }).click(); await p.waitForTimeout(400);
+  const t1 = await p.locator("body").innerText();
+  ok(msg.includes("大問3 の模範図の参照元") && msg.includes("入力済みの設問は削除しません"), "使用中の資料の削除は、影響（模範図の参照元）を示して確認");
+  ok(t1.includes("設問 20 問") && t1.includes("模範図の参照元の資料「模範解答1.png」を削除しました") && t1.includes("未設定（元画像で模範図の場所を確認")
+    && !(await p.getByLabel("大問3 を確認した").isChecked()), "参照元を削除した作図の設問は、参照を外して要確認に戻す");
+  // 再読み込みしても、削除後の下書きが残る
+  await p.waitForTimeout(900);
+  await p.reload(); await p.waitForTimeout(800);
+  await p.getByRole("button", { name: "＋ テストを追加" }).click();
+  await p.getByText(/下書きを復元しました/).waitFor({ timeout: 10000 });
+  ok((await p.getByRole("button", { name: /\.png」を削除$/ }).count()) === 2 && (await p.locator("body").innerText()).includes("設問 20 問"), "削除後の内容も下書きに残る");
+  await c.close();
+}
+ok((await importReqs()).length === importBefore, "下書きの再開・表示切替・資料の削除では AI を呼ばない");
+// この確認用の下書きを片付ける
+await page.goto(BASE + "/tests"); await settle();
+await page.evaluate(() => new Promise((r) => { const q = indexedDB.deleteDatabase("saiten-drafts"); q.onsuccess = q.onerror = () => r(null); }));
+
+// 11f. 不要なテストの削除（答案が無いテストは削除、答案・成績があるテストはアーカイブ）
+await page.goto(BASE + "/tests"); await settle();
+await page.getByRole("button", { name: "＋ テストを追加" }).click(); await settle(600);
+await page.getByPlaceholder("例：1学期期末テスト").fill("誤登録テスト");
+await page.getByRole("button", { name: "登録する" }).click();
+await toastSeen(/「誤登録テスト」を登録しました/);
+await settle(800);
+await page.getByRole("button", { name: "「数学／誤登録テスト」を削除" }).click();
+await page.getByText("関連する答案：0 枚").waitFor({ timeout: 10000 });
+const dmsg = await page.locator('[aria-label="削除するテスト"]').innerText();
+ok(dmsg.includes("誤登録テスト") && dmsg.includes("1 問（満点 4 点）") && dmsg.includes("元に戻せません"), "削除前にテスト名・設問数・関連答案数を表示");
+await page.getByRole("button", { name: "削除する" }).click();
+await toastSeen(/「数学／誤登録テスト」を削除しました/);
+ok((await page.getByRole("button", { name: "「数学／誤登録テスト」を削除" }).count()) === 0, "答案の無いテストは削除できる");
+await page.goto(BASE + "/history"); await settle(1000);
+const histBeforeArchive = await page.locator("tbody tr").count();
+await page.goto(BASE + "/tests"); await settle();
+await page.getByRole("button", { name: "「数学／E2E 小テスト」を削除" }).click();
+await page.getByText(/関連する答案：\d+ 枚/).waitFor({ timeout: 10000 });
+const amsg = await page.locator('[aria-label="削除するテスト"]').innerText();
+ok(/関連する答案：[1-9]\d* 枚/.test(amsg) && amsg.includes("アーカイブします"), "答案があるテストは、削除せずアーカイブすると案内");
+await page.getByRole("button", { name: "アーカイブする（答案・成績は残す）" }).click();
+await toastSeen(/アーカイブしました（答案・成績は残しています）/);
+await settle(600);
+ok((await text()).includes("アーカイブしたテスト（1件）"), "アーカイブしたテストは一覧から外れ、別欄に出る");
+await page.goto(BASE + "/history"); await settle(1000);
+ok((await page.locator("tbody tr").count()) === histBeforeArchive, "アーカイブしても答案・成績は残る");
+await page.goto(BASE + "/tests"); await settle();
+await page.getByRole("button", { name: "元に戻す" }).click();
+await toastSeen(/アーカイブから戻しました/);
+ok((await page.getByRole("button", { name: "「数学／E2E 小テスト」を削除" }).count()) === 1, "アーカイブから元に戻せる");
+
 // 12. レポート3種
 await page.goto(BASE + "/reports"); await settle();
 for (const [v, label] of [["student", "個人成績票"], ["unit", "単元別到達度レポート"], ["class", "成績レポート"]]) {
@@ -529,6 +692,8 @@ ok(!(await page.locator("nav").innerText()).includes("モデル比較試験"), "
 await page.goto(BASE + "/compare"); await settle(800);
 ok((await text()).includes("管理者だけが使える画面です"), "教員がモデル比較試験を開いても使えない");
 ok((await page.request.get(BASE + "/api/compare")).status() === 403, "教員は比較試験の API を呼べない（HTTP 403）");
+await page.goto(BASE + "/tests"); await settle();
+ok((await page.getByRole("button", { name: /を削除$/ }).count()) === 0, "教員の画面にはテストの削除ボタンが出ない");
 
 // 14. 他校の教員には1件も見えない
 await page.getByRole("button", { name: "ログアウト" }).click();
@@ -541,6 +706,21 @@ await page.goto(subUrl); await settle(2500);
 ok((await text()).includes("答案が見つかりません"), "他校の答案URLを直接開いても表示されない");
 await page.goto(BASE + "/tests"); await settle();
 ok(!(await text()).includes("E2E 小テスト"), "他校のテストは見えない");
+// 他校の教員は、学校Aのテストを削除・アーカイブできない（DB の関数を直接呼んでも断られる）
+const restLogin = async (email, password) => (await (await fetch(`${process.env.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+  method: "POST", headers: { apikey: process.env.ANON, "content-type": "application/json" }, body: JSON.stringify({ email, password }),
+})).json()).access_token;
+const restApi = (token, path, init = {}) => fetch(`${process.env.SUPABASE_URL}/rest/v1/${path}`, {
+  ...init, headers: { apikey: process.env.ANON, authorization: `Bearer ${token}`, "content-type": "application/json", ...(init.headers ?? {}) },
+});
+const tokA = await restLogin("admin@a.example", "pass-A-123");
+const [testA] = await (await restApi(tokA, "tests?select=id,name&name=eq.E2E%20%E5%B0%8F%E3%83%86%E3%82%B9%E3%83%88")).json();
+const tokB = await restLogin("teacher@b.example", "pass-B-123");
+const rmB = await restApi(tokB, "rpc/remove_test", { method: "POST", body: JSON.stringify({ p_test_id: testA.id }) });
+const delB = await restApi(tokB, `tests?id=eq.${testA.id}`, { method: "DELETE", headers: { prefer: "return=representation" } });
+const stillA = await (await restApi(tokA, `tests?select=id,archived_at&id=eq.${testA.id}`)).json();
+ok(rmB.status >= 400 && (await delB.json()).length === 0 && stillA.length === 1 && stillA[0].archived_at === null,
+  `他校の教員は学校Aのテストを削除・アーカイブできない（HTTP ${rmB.status}）`);
 const markB = (await allReqs()).length;
 const crossGrade = await page.request.post(BASE + "/api/grade", { data: { submissionId: ids.s3, mode: "cascade", requestId: randomUUID() } });
 ok(crossGrade.status() === 404 && (await allReqs()).length === markB, `他校の答案は AI採点できず、モデルも呼ばない（HTTP ${crossGrade.status()}）`);

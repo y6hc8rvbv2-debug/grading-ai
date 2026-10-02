@@ -185,6 +185,20 @@ export function createDemoSource(): DataSource {
     },
     uploadImportFile: async () => { throw new Error("デモモードでは資料を保存できません。"); },
     removeImportFiles: async () => {},
+    testUsage: async (testId) => ({ submissions: subs.filter((s) => s.testId === testId).length }),
+    async removeTest(testId) {
+      const t = tests.find((x) => x.id === testId);
+      if (!t) throw new Error("テストが見つかりません。");
+      const n = subs.filter((s) => s.testId === testId).length;
+      if (n) { t.archivedAt = new Date().toISOString(); log("test.archived", "tests", testId, { submissions: n }); return "archived"; }
+      tests.splice(tests.indexOf(t), 1);
+      log("test.deleted", "tests", testId, {});
+      return "deleted";
+    },
+    async restoreTest(testId) {
+      const t = tests.find((x) => x.id === testId);
+      if (t) { t.archivedAt = null; log("test.restore", "tests", testId, {}); }
+    },
     linkImport: async () => {},
 
     signedImageUrl: async () => "",

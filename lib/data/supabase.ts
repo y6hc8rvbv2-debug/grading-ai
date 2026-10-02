@@ -133,6 +133,9 @@ export function createSupabaseSource(): DataSource {
       throw new Error("読み取りが終わりませんでした。時間をおいて、もう一度お試しください。");
     },
     removeImportFiles: (paths) => db.removeImportFiles(paths),
+    testUsage: (testId) => db.testUsage(testId),
+    removeTest: (testId) => db.removeTest(testId),
+    restoreTest: (testId) => db.restoreTest(testId),
     linkImport: (importId, testId) => db.linkImport(importId, testId),
 
     signedImageUrl: (path) => db.signedImageUrl(path),

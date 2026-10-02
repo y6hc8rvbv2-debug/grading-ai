@@ -33,7 +33,9 @@ export default function NewGrading() {
   const [stage, setStage] = useState<"select" | "run" | "done">("select");
   const [files, setFiles] = useState<Picked[]>([]);
   const [source, setSource] = useState<Source>("camera");
-  const [testId, setTestId] = useState(ws.tests[0]?.id ?? "");
+  // アーカイブしたテスト（0008）は採点の対象に出さない
+  const activeTests = useMemo(() => ws.tests.filter((t) => !t.archivedAt), [ws.tests]);
+  const [testId, setTestId] = useState(activeTests[0]?.id ?? "");
   const [classId, setClassId] = useState(ws.classes[0]?.id ?? "");
   const [drag, setDrag] = useState(false);
   const [demoBlank, setDemoBlank] = useState(false);
@@ -250,15 +252,15 @@ export default function NewGrading() {
   };
 
   /* ------------------------------------------------ 前提（テスト・クラス） */
-  if (!ws.tests.length || !ws.classes.length) {
+  if (!activeTests.length || !ws.classes.length) {
     return (
       <Card>
         <Empty icon="📝"
-          title={!ws.tests.length ? "採点するテストがまだありません" : "クラスがまだ登録されていません"}
-          hint={!ws.tests.length
+          title={!activeTests.length ? "採点するテストがまだありません" : "クラスがまだ登録されていません"}
+          hint={!activeTests.length
             ? "テスト管理でテストと設問（配点・単元・正答）を登録すると、答案を取り込めるようになります。"
             : "クラスと生徒の名簿は、学校の管理者が登録します（docs/SUPABASE-SETUP.md のステップ4）。"}
-          action={!ws.tests.length ? <Btn variant="primary" onClick={() => go("tests")}>テスト管理へ</Btn> : null} />
+          action={!activeTests.length ? <Btn variant="primary" onClick={() => go("tests")}>テスト管理へ</Btn> : null} />
       </Card>
     );
   }
@@ -510,7 +512,7 @@ export default function NewGrading() {
           <div style={grid(220, 14)}>
             <Field label="対象のテスト">
               <Select value={testId} onChange={setTestId}
-                options={ws.tests.map((t) => ({ value: t.id, label: `${t.subject}／${t.name}（${t.grade}年）` }))} />
+                options={activeTests.map((t) => ({ value: t.id, label: `${t.subject}／${t.name}（${t.grade}年）` }))} />
             </Field>
             <Field label="対象クラス" hint="答案は出席番号の順に割り当てます。違う場合は上の一覧で直せます。">
               <Select value={classId} onChange={setClassId}

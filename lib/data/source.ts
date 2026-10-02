@@ -59,6 +59,10 @@ export interface DataSource {
     requestId: string; files: { path: string; kind: "key" | "paper" | "student"; name: string }[]; force?: boolean;
   }): Promise<{ importId: string; result: ImportResult; cached: boolean }>;
   removeImportFiles(paths: string[]): Promise<void>;
+  /** テストの削除（答案が無いとき）／アーカイブ（答案・成績があるとき）。管理者だけ */
+  testUsage(testId: string): Promise<{ submissions: number }>;
+  removeTest(testId: string): Promise<"deleted" | "archived">;
+  restoreTest(testId: string): Promise<void>;
   linkImport(importId: string, testId: string): Promise<void>;
 
   signedImageUrl(path: string): Promise<string>;

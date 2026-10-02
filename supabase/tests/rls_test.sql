@@ -724,3 +724,74 @@ begin
   assert (select count(*) from public.test_imports) = 0, '他校の読み取りの記録は見えないこと';
 end $$;
 reset role;
+
+-- ============================================================================
+-- 0008 テストの削除・アーカイブ：答案・成績を連鎖削除しない・管理者だけ・他校は不可
+-- ============================================================================
+reset role;
+insert into public.tests (id, school_id, name, subject, grade, max_score) values
+  ('aaaaaaaa-0000-0000-0000-0000000000e9', 'aaaaaaaa-0000-0000-0000-000000000000', '誤って登録した模擬テスト', '数学', 2, 4);
+insert into public.questions (school_id, test_id, no, label, qtype, points) values
+  ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-0000000000e9', 1, '大問1-(1)', 'calc', 4);
+
+set role authenticated;
+-- 他校の管理者・教員は削除できない
+select pg_temp.login('bbbbbbbb-0000-0000-0000-00000000000b');
+do $$
+begin
+  begin
+    perform public.remove_test('aaaaaaaa-0000-0000-0000-0000000000e9');
+    raise exception 'FAIL: 他校の教員がテストを削除できてしまう';
+  exception when insufficient_privilege then null;
+  end;
+  delete from public.tests where id = 'aaaaaaaa-0000-0000-0000-0000000000e9';
+end $$;
+-- 同じ学校の教員も削除できない（管理者だけ）
+select pg_temp.login('aaaaaaaa-0000-0000-0000-00000000000b');
+do $$
+begin
+  begin
+    perform public.remove_test('aaaaaaaa-0000-0000-0000-0000000000e9');
+    raise exception 'FAIL: 教員がテストを削除できてしまう';
+  exception when insufficient_privilege then null;
+  end;
+  assert (select count(*) from public.tests where id = 'aaaaaaaa-0000-0000-0000-0000000000e9') = 1, '他校・教員の操作でテストが消えていないこと';
+end $$;
+
+select pg_temp.login('aaaaaaaa-0000-0000-0000-00000000000a');   -- 学校Aの管理者
+do $$
+declare
+  v_subs integer; v_items integer;
+begin
+  -- 他校のテストは見つからない
+  begin
+    perform public.remove_test('bbbbbbbb-0000-0000-0000-0000000000e1');
+    raise exception 'FAIL: 他校のテストを削除できてしまう';
+  exception when no_data_found then null;
+  end;
+  -- 答案の無いテストは削除する（設問も一緒に消える）
+  assert public.remove_test('aaaaaaaa-0000-0000-0000-0000000000e9') = 'deleted', '答案の無いテストは削除する';
+  assert (select count(*) from public.tests where id = 'aaaaaaaa-0000-0000-0000-0000000000e9') = 0, 'テストが消えること';
+  assert (select count(*) from public.questions where test_id = 'aaaaaaaa-0000-0000-0000-0000000000e9') = 0, '設問も消えること';
+
+  -- 答案があるテストはアーカイブにして、答案・成績を残す
+  select count(*) into v_subs from public.submissions where test_id = 'aaaaaaaa-0000-0000-0000-0000000000e1';
+  select count(*) into v_items from public.submission_items i join public.submissions s on s.id = i.submission_id
+   where s.test_id = 'aaaaaaaa-0000-0000-0000-0000000000e1';
+  assert v_subs > 0, '（前提）答案があるテスト';
+  assert public.remove_test('aaaaaaaa-0000-0000-0000-0000000000e1') = 'archived', '答案があるテストはアーカイブする';
+  assert (select archived_at is not null from public.tests where id = 'aaaaaaaa-0000-0000-0000-0000000000e1'), 'アーカイブの印が付くこと';
+  assert (select count(*) from public.submissions where test_id = 'aaaaaaaa-0000-0000-0000-0000000000e1') = v_subs, '答案は残ること';
+  assert (select count(*) from public.submission_items i join public.submissions s on s.id = i.submission_id
+           where s.test_id = 'aaaaaaaa-0000-0000-0000-0000000000e1') = v_items, '成績は残ること';
+  -- 直接 DELETE しても、答案があるテストは消せない
+  begin
+    delete from public.tests where id = 'aaaaaaaa-0000-0000-0000-0000000000e1';
+    raise exception 'FAIL: 答案があるテストを直接削除できてしまう';
+  exception when foreign_key_violation then null;
+  end;
+  perform public.restore_test('aaaaaaaa-0000-0000-0000-0000000000e1');
+  assert (select archived_at is null from public.tests where id = 'aaaaaaaa-0000-0000-0000-0000000000e1'), 'アーカイブから戻せること';
+  assert (select count(*) from public.audit_logs where action in ('test.deleted', 'test.archived', 'test.restore')) = 3, '削除・アーカイブ・復元を監査ログに残すこと';
+end $$;
+reset role;

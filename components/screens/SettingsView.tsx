@@ -237,6 +237,7 @@ function ReadinessCard() {
       { label: "AI採点の保存（0004_ai_grading.sql）", ok: h.migrations?.["0004"] ?? null, fix: "Supabase の SQL Editor で supabase/migrations/0004_ai_grading.sql を実行してください。" },
       { label: "採点方式と AI採点の記録（0006_grading_modes.sql）", ok: h.migrations?.["0006"] ?? null, fix: "Supabase の SQL Editor で supabase/migrations/0006_grading_modes.sql を実行してください。AI採点（Opus単独・3モデル併用とも）に必要です。" },
       { label: "模範解答からの自動入力（0007_test_import.sql）", ok: h.migrations?.["0007"] ?? null, fix: "テスト管理の「模範解答・配点表から自動入力」を使う場合に必要です。Supabase の SQL Editor で supabase/migrations/0007_test_import.sql を実行してください。" },
+      { label: "テストの削除・アーカイブ（0008_test_archive.sql）", ok: h.migrations?.["0008"] ?? null, fix: "テスト管理でテストを削除するときに必要です（答案・成績があるテストは削除せずアーカイブします）。Supabase の SQL Editor で 0008_test_archive.sql を実行してください。" },
       { label: "モデル比較試験の記録（0005_model_compare.sql）", ok: h.migrations?.["0005"] ?? null, fix: "管理者がモデル比較試験を使う場合だけ必要です。Supabase の SQL Editor で 0005_model_compare.sql を実行してください。" },
       { label: "iPhone の写真（HEIC）", ok: true, fix: "" },
     ] : [];

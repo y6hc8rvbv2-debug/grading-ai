@@ -5,10 +5,51 @@ import { download, fmtDate, toCSV } from "@/lib/util";
 import { useUI } from "@/components/ui-context";
 import { Badge, Btn, Card, Empty, Modal, Stat, Table, grid } from "@/components/ui";
 import NewTestForm from "@/components/screens/NewTestForm";
+import { friendlyError } from "@/lib/errors";
 import type { FigureRef, Question } from "@/lib/types";
 
 export default function TestsView() {
-  const { T, subs, toast, ws, testById } = useUI();
+  const { T, subs, toast, ws, testById, isAdmin, ds, refresh } = useUI();
+  const active = ws.tests.filter((t) => !t.archivedAt);
+  const archived = ws.tests.filter((t) => t.archivedAt);
+  const [removing, setRemoving] = useState<{ id: string; name: string; questions: number; maxScore: number; submissions: number | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const askRemove = async (id: string) => {
+    const t = testById(id);
+    if (!t) return;
+    setRemoving({ id, name: `${t.subject}／${t.name}`, questions: t.questions.length, maxScore: t.maxScore, submissions: null });
+    try {
+      const u = await ds.testUsage(id);
+      setRemoving((r) => (r && r.id === id ? { ...r, submissions: u.submissions } : r));
+    } catch (e) {
+      setRemoving(null);
+      toast(friendlyError(e, "テストの確認"), "ng");
+    }
+  };
+  const doRemove = async () => {
+    if (!removing) return;
+    setBusy(true);
+    try {
+      const r = await ds.removeTest(removing.id);
+      await refresh();
+      toast(r === "deleted" ? `「${removing.name}」を削除しました` : `「${removing.name}」をアーカイブしました（答案・成績は残しています）`);
+      setRemoving(null);
+    } catch (e) {
+      toast(friendlyError(e, "テストの削除"), "ng");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const doRestore = async (id: string) => {
+    try {
+      await ds.restoreTest(id);
+      await refresh();
+      toast("テストをアーカイブから戻しました");
+    } catch (e) {
+      toast(friendlyError(e, "テストの復元"), "ng");
+    }
+  };
   const [open, setOpen] = useState<string | null>(null);
   const [figure, setFigure] = useState<{ ref: FigureRef; title: string } | null>(null);
   const [creating, setCreating] = useState(false);
@@ -25,7 +66,7 @@ export default function TestsView() {
         </div>
       </Card>
 
-      {ws.tests.length === 0 && (
+      {active.length === 0 && (
         <Card><Empty icon="📝" title="テストがまだありません" hint="「テストを追加」から、最初のテストを登録してください。"
           action={<Btn variant="primary" onClick={() => setCreating(true)}>テストを追加</Btn>} /></Card>
       )}
@@ -33,11 +74,15 @@ export default function TestsView() {
       <NewTestForm open={creating} onClose={() => setCreating(false)} />
 
       <div style={grid(280, 13)}>
-        {ws.tests.map((t) => {
+        {active.map((t) => {
           const mine = subs.filter((s) => s.testId === t.id && !["processing", "uploaded", "blank"].includes(s.status));
           const avg = mine.length ? Math.round(mine.reduce((a, s) => a + s.result.total, 0) / mine.length) : 0;
           return (
-            <Card key={t.id} title={`${t.subject}／${t.name}`} sub={`${t.grade}年 ${t.term}${t.date ? `・実施 ${fmtDate(t.date)}` : ""}`}>
+            <Card key={t.id} title={`${t.subject}／${t.name}`} sub={`${t.grade}年 ${t.term}${t.date ? `・実施 ${fmtDate(t.date)}` : ""}`}
+              right={isAdmin ? (
+                <Btn size="sm" variant="ghost" onClick={() => askRemove(t.id)} title="このテストを削除"
+                  style={{ color: T.ng }}><span aria-hidden="true">🗑</span><span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>「{t.subject}／{t.name}」を削除</span></Btn>
+              ) : null}>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 11 }}>
                 {t.testNo && <Badge tone="accent">試験番号 {t.testNo}</Badge>}
                 <Badge tone="mute">{t.questions.length}問</Badge>
@@ -110,6 +155,41 @@ export default function TestsView() {
         )}
       </Modal>
       <FigureModal figure={figure} onClose={() => setFigure(null)} />
+
+      {archived.length > 0 && (
+        <Card title={`アーカイブしたテスト（${archived.length}件）`} sub="答案・成績があるため、削除せずに一覧と新規採点の選択肢から隠しています。採点履歴・成績・分析には残ります。" style={{ marginTop: 14 }}>
+          <div style={{ display: "grid", gap: 6 }}>
+            {archived.map((t) => (
+              <div key={t.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: 12.5 }}>
+                <span style={{ flex: 1, minWidth: 200 }}>{t.subject}／{t.name}（{t.questions.length}問・満点{t.maxScore}点）</span>
+                {isAdmin && <Btn size="sm" onClick={() => doRestore(t.id)}>元に戻す</Btn>}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Modal open={!!removing} onClose={() => { if (!busy) setRemoving(null); }} title="テストを削除しますか？" width={520}
+        footer={<>
+          <Btn onClick={() => setRemoving(null)} disabled={busy}>やめる</Btn>
+          <Btn variant={removing?.submissions ? "primary" : "danger"} onClick={doRemove} disabled={busy || removing?.submissions == null}>
+            {busy ? "処理しています…" : removing?.submissions ? "アーカイブする（答案・成績は残す）" : "削除する"}
+          </Btn>
+        </>}>
+        {removing && (
+          <div style={{ fontSize: 13, lineHeight: 1.9, color: T.text }} aria-label="削除するテスト">
+            <div><b>テスト名：</b>{removing.name}</div>
+            <div><b>設問数：</b>{removing.questions} 問（満点 {removing.maxScore} 点）</div>
+            <div><b>関連する答案：</b>{removing.submissions == null ? "確認しています…" : `${removing.submissions} 枚`}</div>
+            <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, background: removing.submissions ? T.infoSoft : T.ngSoft, color: removing.submissions ? T.info : T.ng, fontSize: 12.5 }}>
+              {removing.submissions == null ? "関連する答案を確認しています。"
+                : removing.submissions
+                  ? "このテストには答案・成績があるため、削除せずにアーカイブします。テスト一覧と新規採点の選択肢から隠れますが、答案・成績・分析はそのまま残り、あとで元に戻せます。"
+                  : "答案が1枚も無いため、テストと設問を削除します。元に戻せません。"}
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

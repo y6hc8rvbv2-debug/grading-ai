@@ -65,6 +65,8 @@ export type Test = {
   questions: Question[];
   /** 登録時に保存した模範解答・問題用紙・配点表（0007） */
   answerKeyPaths?: string[];
+  /** アーカイブした日時（0008）。答案・成績は残し、一覧と新規採点の選択肢から隠す */
+  archivedAt?: string | null;
 };
 
 export type Item = {

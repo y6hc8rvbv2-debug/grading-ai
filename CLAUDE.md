@@ -27,7 +27,8 @@
 
 ### 1. 本番で AI 採点を動かす ← ユーザー作業待ち
 
-- Supabase の SQL Editor で `0004_ai_grading.sql`・`0005_model_compare.sql`・`0006_grading_modes.sql`・`0007_test_import.sql` を実行する
+- Supabase の SQL Editor で `0004_ai_grading.sql`・`0005_model_compare.sql`・`0006_grading_modes.sql`・`0007_test_import.sql`・`0008_test_archive.sql` を実行する
+- Preview で誤登録の模擬テスト（1問・満点4点・採点済0枚）をごみ箱から削除する（ユーザー作業）
 - Preview で模範解答（20問・100点・5・5・1・3・1・3・2）から自動入力し、読み取り精度を確かめる
 - Preview で「3モデル併用」を試し、Sonnet・Opus に回った割合（目安 20%・5%）と実際の費用を「AI採点の記録」で確かめる
 - Preview で管理者がモデル比較試験（`/compare`）を実行し、結果を確認する
@@ -93,6 +94,11 @@
   - 元画像と入力欄を並べて表示（行を選ぶと該当箇所を枠で示す）。入力途中は IndexedDB（`lib/draft.ts`）に下書き（資料のファイルごと）。上書き前に確認
   - 重複実行の防止：requestId の再送は同じ読み取り、同じ資料（内容の sha256＋種類）は実行中なら断り、終わっていれば結果を再利用（`test_imports`）
   - 登録時：模範解答・問題用紙は `tests.answer_key_paths` に残し、生徒の答案は Storage から消す。テスト詳細から模範図を見られる
+  - 画面：元画像と設問欄は別の枠（広い幅は左右・画像の枠は内部スクロール、狭い幅は上下）。フッターの「画像を隠す／画像を表示」で切替（端末に記憶）。
+    設問の参照は資料の id（`Ref.sourceId`）。旧形式の下書き（v1、資料の番号で参照）は復元時に変換する
+  - 資料の削除：ファイル名と影響（作図の模範図の参照元・該当箇所の表示）を示して確認。設問は消さず、参照が外れた作図は要確認に戻す
+- **テストの削除（0008）**: テスト管理の各カードのごみ箱（管理者だけ）。`remove_test()` が答案0枚なら削除、答案があればアーカイブ（`tests.archived_at`）。
+  `tests_protect_delete` トリガーで答案があるテストの直接 DELETE も拒否（0001 の on delete cascade で成績が消えるのを防ぐ）。アーカイブは一覧・新規採点の選択肢から隠し、成績・分析には残す。`restore_test()` で戻す
 - 赤ペン: AI が返す `bbox`（解答欄の位置・ページ番号）に `components/RedPenOverlay.tsx` でマークを重ねる。答案詳細で原本のページを切り替えられる。「清書版」（`RedPenSheet`）にも切り替えられる
 
 まだ生成AIに置き換えていないもの（`// PROD-API:` コメントが残っている）:
@@ -175,7 +181,7 @@ Next.js 14 (App Router, TypeScript)
       └── supabase/{client,server}.ts
 
 Supabase
-  ├── PostgreSQL             17テーブル + RLS + トリガー + 分析ビュー + AI採点の保存関数（supabase/migrations/0001〜0007）
+  ├── PostgreSQL             17テーブル + RLS + トリガー + 分析ビュー + AI採点の保存関数（supabase/migrations/0001〜0008）
   ├── Storage                answer-sheets（非公開・署名付きURLのみ）。パスは {school_id}/{test_id}/{submission_id}/{page}.{ext}
   └── Auth                   教職員のみ。所属校と役割は app_metadata で付与（一般サインアップでは所属が付かない）
 ```
@@ -269,7 +275,7 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
 ## 未検証・未解決の事項
 
 1. **本物の Claude API での採点が未実行** — 代役サーバーでリクエストの形と保存までを検証済み。読み取り精度・bbox の精度・所要時間・費用は本番で確かめる
-2. **0004〜0007 が本番 Supabase に未適用**（「次にやること」1）
+2. **0004〜0008 が本番 Supabase に未適用**（「次にやること」1）
 16. **模範解答からの自動入力は代役 API でのみ検証** — 本物の模範解答での読み取り精度（特に配点表・作図・PDF の bbox）は Preview で確かめる。PDF の資料は該当箇所の枠を表示できない（ページを開くだけ）。作図の模範図は採点AIには送っていない（採点条件の文章だけ）
 15. **3モデル併用は代役 API でのみ検証** — 本物の Haiku / Sonnet での読み取り精度・振り分けの割合・費用は未確認。正答との照合（`normAnswer`）は表記ゆれで誤検知しうる（誤検知は上のモデル・要確認に回るので、精度側に倒れる）
 14. **モデル比較試験は未実行** — Preview で管理者が実行する準備まで完了（代役サーバーでの E2E のみ検証済み）

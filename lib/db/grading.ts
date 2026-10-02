@@ -122,6 +122,7 @@ export async function loadWorkspace(): Promise<Workspace> {
       bigCount: qs.reduce((a, q) => Math.max(a, q.big), 0),
       questions: qs,
       answerKeyPaths: t.answer_key_paths ?? [],
+      archivedAt: t.archived_at ?? null,
     };
   });
 
@@ -449,6 +450,33 @@ export async function uploadImportFile(schoolId: string, requestId: string, inde
 export async function removeImportFiles(paths: string[]) {
   if (!paths.length) return;
   await createClient().storage.from("answer-sheets").remove(paths);
+}
+
+/* --------------------------------------------------------- テストの削除・アーカイブ（0008） */
+
+/** 削除の確認に出す、テストに関係する答案の数（論理削除済みも含む） */
+export async function testUsage(testId: string) {
+  const { count, error } = await createClient().from("submissions")
+    .select("id", { count: "exact", head: true }).eq("test_id", testId);
+  if (error) throw error;
+  return { submissions: count ?? 0 };
+}
+
+/** 答案が無ければ削除、あればアーカイブ（DB の remove_test が決める） */
+export async function removeTest(testId: string): Promise<"deleted" | "archived"> {
+  const { data, error } = await createClient().rpc("remove_test", { p_test_id: testId });
+  if (error) {
+    if (error.code === "PGRST202" || /remove_test/.test(error.message)) {
+      throw new Error("テストの削除機能がまだ使えません。管理者が Supabase で 0008_test_archive.sql を実行してください。");
+    }
+    throw error;
+  }
+  return data as "deleted" | "archived";
+}
+
+export async function restoreTest(testId: string) {
+  const { error } = await createClient().rpc("restore_test", { p_test_id: testId });
+  if (error) throw error;
 }
 
 /** 読み取りの記録に、登録したテストを紐づける */
