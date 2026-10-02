@@ -36,11 +36,13 @@ export async function GET() {
   const { error: e7 } = await supabase.from("test_imports").select("id", { head: true, count: "exact" }).limit(1);
   // 0008：テストの削除・アーカイブ（存在しないIDで呼ぶと「見つからない」か「管理者だけ」で止まる。何も変更しない）
   const { error: e8 } = await supabase.rpc("remove_test", { p_test_id: ZERO });
+  // 0009：原本の赤ペンの位置（先生が動かした位置）
+  const { error: e9 } = await supabase.from("mark_positions").select("id", { head: true, count: "exact" }).limit(1);
 
   return NextResponse.json({
     supabase: true,
     ai: aiConfig().enabled,
-    migrations: { "0004": !missing(e4), "0005": !missing(e5), "0006": !missing(e6), "0007": !missing(e7), "0008": !missing(e8) },
+    migrations: { "0004": !missing(e4), "0005": !missing(e5), "0006": !missing(e6), "0007": !missing(e7), "0008": !missing(e8), "0009": !missing(e9) },
     env: process.env.VERCEL_ENV ?? "local",
   });
 }

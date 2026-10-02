@@ -8,11 +8,16 @@ import { SOURCES, analyze, buildFeedback, buildModelAnswers } from "@/lib/gradin
 import { useUI } from "@/components/ui-context";
 import { Badge, Bar, Btn, Card, Empty, Tabs, grid, inputStyle } from "@/components/ui";
 import { RedPenSheet } from "@/components/RedPenSheet";
-import { RedPenOverlay, type ItemBox } from "@/components/RedPenOverlay";
+import { RedPenOverlay } from "@/components/RedPenOverlay";
+import { RedPenPanel } from "@/components/RedPenPanel";
+import { layoutMarks, type PageLayout, type Placed } from "@/lib/redpen/layout";
+import { analyzePage, displayableUrl, type AnalyzedPage } from "@/lib/redpen/analyze";
+import { printImages, saveBlob, svgToPng, toDataUrl } from "@/lib/redpen/export";
+import { friendlyError } from "@/lib/errors";
 import { GradingLogCard } from "@/components/GradingLogCard";
 import { GradingModeSelect } from "@/components/GradingModePicker";
 import { MODE_LABEL, STAGE_LABEL } from "@/lib/grading/cost";
-import type { Item, Submission } from "@/lib/types";
+import type { Item, MarkPos, Submission } from "@/lib/types";
 
 /** 得点の入力欄。入力中は保存せず、確定（フォーカスが外れる・Enter）したときに保存する。 */
 function EarnedInput({ item, onCommit }: { item: Item; onCommit: (v: number) => void }) {
@@ -49,6 +54,16 @@ export default function GradingDetail({ subId }: { subId: string }) {
   const [showComments, setShowComments] = useState(true);
   const [editing, setEditing] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  // 原本の赤ペン：各ページの縦横比と罫線、先生が動かした位置、選んでいる設問
+  const [pagesInfo, setPagesInfo] = useState<{ key: string; pages: AnalyzedPage[] } | null>(null);
+  const [saved, setSaved] = useState<MarkPos[]>([]);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [wide, setWide] = useState(true);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const saveTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  // 画像の保存・印刷：画面と同じ部品で、原本を埋め込んだ SVG を画面の外に描いてから画像にする
+  const [exportJob, setExportJob] = useState<{ kind: "png" | "print"; pages: number[]; hrefs: string[] } | null>(null);
+  const exportRefs = useRef<(SVGSVGElement | null)[]>([]);
 
   const test = sub ? testById(sub.testId) : undefined;
   const st = sub ? studentById(sub.studentId) : undefined;
@@ -72,12 +87,80 @@ export default function GradingDetail({ subId }: { subId: string }) {
     const paths = pathKey ? pathKey.split("|") : [];
     if (!paths.length) { setImageUrls([]); return; }
     let alive = true;
-    Promise.all(paths.map((p) => ds.signedImageUrl(p).catch(() => null)))
+    // HEIC のまま保存された以前の答案は、ブラウザで表示できる JPEG にしてから使う
+    Promise.all(paths.map((p) => ds.signedImageUrl(p).then((u) => (u ? displayableUrl(p, u) : null)).catch(() => null)))
       .then((urls) => { if (alive) setImageUrls(urls.map((u) => u || null)); });
     return () => { alive = false; };
   }, [ds, pathKey]);
   const imageUrl = imageUrls[origPage] ?? null;
   const origPages = imageUrls.length;
+
+  // 各ページの原本を調べる（縦横比・解答欄の罫線）。手元の計算だけで、採点AIは呼ばない
+  const urlKey = imageUrls.map((u) => u ?? "").join("|");
+  useEffect(() => {
+    const urls = urlKey ? urlKey.split("|") : [];
+    if (!urls.length) { setPagesInfo(null); return; }
+    let alive = true;
+    Promise.all(urls.map((u) => (u ? analyzePage(u) : Promise.resolve({ aspect: 1.414, frames: null, analyzed: false }))))
+      .then((pages) => { if (alive) setPagesInfo({ key: urlKey, pages }); });
+    return () => { alive = false; };
+  }, [urlKey]);
+
+  // 先生が動かした赤ペンの位置
+  useEffect(() => {
+    let alive = true;
+    ds.loadMarkPositions(subId).then((p) => { if (alive) setSaved(p); }).catch(() => {});
+    return () => { alive = false; };
+  }, [ds, subId]);
+
+  // 広い画面は原本の右にコメント欄、狭い画面は下に並べる
+  useEffect(() => {
+    const el = sheetRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => setWide((entries[0]?.contentRect.width ?? 0) >= 860));
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+
+  // 赤ペンの置き場所（全ページ）。画面・画像の保存・印刷で同じものを使う
+  const layouts: PageLayout[] | null = useMemo(() => {
+    if (!sub || !test || !pagesInfo || pagesInfo.key !== urlKey) return null;
+    const qByNo = new Map(test.questions.map((q) => [q.no, q]));
+    return layoutMarks(sub.result.items.map((i) => ({
+      qno: i.qno, big: qByNo.get(i.qno)?.big ?? i.qno, graph: i.type === "graph", bbox: i.bbox ?? null,
+    })), pagesInfo.pages, saved);
+  }, [sub, test, pagesInfo, urlKey, saved]);
+
+  // 画面の外に描いた SVG を画像にして、保存または印刷する
+  useEffect(() => {
+    if (!exportJob) return;
+    let alive = true;
+    const run = async () => {
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      try {
+        const blobs: Blob[] = [];
+        for (let i = 0; i < exportJob.pages.length; i++) {
+          const node = exportRefs.current[i];
+          if (!node) throw new Error("赤ペン画像を作れませんでした");
+          blobs.push(await svgToPng(node));
+        }
+        if (!alive) return;
+        const name = `redpen_${test?.subject ?? ""}_${sub ? who(sub.studentId) : ""}`.replace(/[\\/:*?"<>|\s]+/g, "_");
+        if (exportJob.kind === "png") {
+          saveBlob(`${name}_p${exportJob.pages[0]}.png`, blobs[0]);
+          toast("赤ペンを重ねた原本を画像で保存しました");
+        } else {
+          await printImages(blobs, name);
+        }
+      } catch (e) {
+        toast(friendlyError(e, "赤ペン画像の作成"), "ng");
+      } finally {
+        if (alive) setExportJob(null);
+      }
+    };
+    run();
+    return () => { alive = false; };
+  }, [exportJob, sub, test, who, toast]);
 
   if (!sub || !test || !st || !kl || !ana || !fb) {
     if (!sub && lookup !== "missing") {
@@ -90,11 +173,48 @@ export default function GradingDetail({ subId }: { subId: string }) {
   const pages = Math.ceil(sub.result.items.length / 7);
   const whoName = who(sub.studentId);
   const pending = sub.status === "uploaded" || sub.status === "processing";
-  // 採点AIが返した解答の位置（各ページの原本に赤ペンを重ねるのに使う）
-  const boxes: ItemBox[] = sub.result.items
-    .filter((i) => i.bbox)
-    .map((i) => ({ qno: i.qno, ...i.bbox! }));
-  const canOverlay = !!imageUrl && boxes.length > 0;
+  // 原本に赤ペンを重ねられるのは、採点AIが位置を返した答案（または先生が位置を決めた答案）
+  const canOverlay = !!imageUrl && (sub.result.items.some((i) => i.bbox) || saved.length > 0);
+  const overlayOn = canOverlay && sheetMode === "overlay" && showMarks;
+  const pageLayout = layouts?.[origPage] ?? null;
+  const aspect = pagesInfo?.key === urlKey ? pagesInfo.pages[origPage]?.aspect ?? 1.414 : 1.414;
+  const analyzed = !!pagesInfo?.pages.every((p) => p.analyzed);
+
+  // 赤ペンを動かす：画面はすぐ動かし、保存は少し待ってから（矢印キーで続けて動かしても1回にまとめる）
+  const moveMark = (qno: number, page: number, x: number, y: number) => {
+    const pos: MarkPos = { qno, page, x: Math.round(x * 10000) / 10000, y: Math.round(y * 10000) / 10000 };
+    setSaved((prev) => [...prev.filter((p) => p.qno !== qno), pos]);
+    clearTimeout(saveTimers.current.get(qno));
+    saveTimers.current.set(qno, setTimeout(() => {
+      ds.saveMarkPosition(sub.id, pos).catch((e) => {
+        toast(friendlyError(e, "赤ペンの位置の保存"), "ng");
+        ds.loadMarkPositions(sub.id).then(setSaved).catch(() => {});
+      });
+    }, 350));
+  };
+  const confirmMark = (p: Placed) => { moveMark(p.qno, p.page, p.cx, p.cy); toast("この位置で確定しました"); };
+  const resetMark = async (qno: number) => {
+    clearTimeout(saveTimers.current.get(qno));
+    try {
+      await ds.resetMarkPosition(sub.id, qno);
+      setSaved((prev) => prev.filter((p) => p.qno !== qno));
+      toast("赤ペンの位置を元に戻しました");
+    } catch (e) {
+      toast(friendlyError(e, "赤ペンの位置を元に戻す処理"), "ng");
+    }
+  };
+  const selectMark = (qno: number, page: number) => { setSelected(qno); setOrigPage(page - 1); };
+
+  const startExport = async (kind: "png" | "print") => {
+    if (!layouts) { toast("原本を調べています。少し待ってからもう一度押してください", "warn"); return; }
+    const pages = kind === "png" ? [origPage + 1] : imageUrls.map((_, i) => i + 1);
+    try {
+      const hrefs = await Promise.all(pages.map((p) => toDataUrl(imageUrls[p - 1] ?? "")));
+      setExportJob({ kind, pages, hrefs });
+    } catch (e) {
+      toast(friendlyError(e, "原本の読み込み"), "ng");
+    }
+  };
   const canAi = ai.enabled && sub.imagePaths.length > 0;
 
   const runAi = async (regrade: boolean) => {
@@ -107,6 +227,7 @@ export default function GradingDetail({ subId }: { subId: string }) {
   const applyEdit = (it: Item, patch: Parameters<typeof editItem>[2]) => editItem(sub.id, it, patch);
 
   const exportSVG = () => {
+    if (overlayOn) { startExport("png"); return; }
     const node = svgRef.current;
     if (!node) { toast("赤ペン画像タブを開いてから書き出してください", "warn"); return; }
     const xml = new XMLSerializer().serializeToString(node);
@@ -160,7 +281,10 @@ export default function GradingDetail({ subId }: { subId: string }) {
           <Btn size="sm" disabled={aiBusy} onClick={() => runAi(true)}>{aiBusy ? "AIが採点しています…" : "AIで採点し直す"}</Btn>
         )}
         <Btn size="sm" onClick={exportRow}>CSV</Btn>
-        <Btn size="sm" variant="soft" onClick={exportSVG}>赤ペン画像を保存</Btn>
+        <Btn size="sm" variant="soft" onClick={exportSVG} disabled={!!exportJob}>{exportJob?.kind === "png" ? "画像を作っています…" : "赤ペン画像を保存"}</Btn>
+        {canOverlay && tab === "sheet" && overlayOn && (
+          <Btn size="sm" onClick={() => startExport("print")} disabled={!!exportJob}>{exportJob?.kind === "print" ? "印刷の準備をしています…" : "印刷"}</Btn>
+        )}
       </div>
 
       {pending ? (
@@ -219,26 +343,56 @@ export default function GradingDetail({ subId }: { subId: string }) {
             <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: T.textSub, cursor: "pointer" }}>
               <input type="checkbox" checked={showMarks} onChange={(e) => setShowMarks(e.target.checked)} />赤ペンを重ねる
             </label>
-            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: T.textSub, cursor: "pointer" }}>
-              <input type="checkbox" checked={showComments} onChange={(e) => setShowComments(e.target.checked)} />コメントを表示
-            </label>
+            {!overlayOn && (
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: T.textSub, cursor: "pointer" }}>
+                <input type="checkbox" checked={showComments} onChange={(e) => setShowComments(e.target.checked)} />コメントを表示
+              </label>
+            )}
           </div>
-          <div style={{ padding: 14, background: T.bgAlt }}>
-            {!showMarks && imageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={imageUrl} alt={`${whoName} の答案（原本）`} style={{ width: "100%", maxHeight: "72vh", objectFit: "contain", borderRadius: 8 }} />
-            ) : canOverlay && sheetMode === "overlay" ? (
-              <RedPenOverlay imageUrl={imageUrl!} sub={sub} test={test} boxes={boxes} page={origPage + 1} showComments={showComments} svgRef={svgRef} />
-            ) : (
-              <RedPenSheet test={test} sub={sub} page={page} showMarks={showMarks} showComments={showComments} svgRef={svgRef} />
+          <div ref={sheetRef} data-layout={overlayOn ? (wide ? "side" : "stack") : "full"} style={{
+            padding: 14, background: T.bgAlt, display: "grid", gap: 14, alignItems: "start",
+            gridTemplateColumns: overlayOn && wide ? "minmax(0, 1fr) minmax(260px, 340px)" : "minmax(0, 1fr)",
+          }}>
+            <div style={{ minWidth: 0 }}>
+              {!showMarks && imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={imageUrl} alt={`${whoName} の答案（原本）`} style={{ width: "100%", maxHeight: "72vh", objectFit: "contain", borderRadius: 8 }} />
+              ) : overlayOn ? (
+                pageLayout ? (
+                  <RedPenOverlay imageUrl={imageUrl!} sub={sub} test={test} page={origPage + 1} aspect={aspect} layout={pageLayout}
+                    editable selected={selected} onSelect={(q) => setSelected(q)}
+                    onMove={(q, x, y) => moveMark(q, origPage + 1, x, y)} svgRef={svgRef} />
+                ) : (
+                  <div style={{ padding: 40, textAlign: "center", color: T.textSub, fontSize: 13 }}>原本を読み込んで、解答欄の位置を調べています…</div>
+                )
+              ) : (
+                <RedPenSheet test={test} sub={sub} page={page} showMarks={showMarks} showComments={showComments} svgRef={svgRef} />
+              )}
+            </div>
+            {overlayOn && layouts && (
+              <div style={wide ? { maxHeight: "80vh", overflow: "auto", paddingInlineEnd: 2 } : undefined}>
+                <RedPenPanel sub={sub} layouts={layouts} selected={selected} onSelect={selectMark}
+                  onConfirm={confirmMark} onReset={resetMark} analyzed={analyzed} currentPage={origPage + 1}
+                  onMoveHere={(q) => { moveMark(q, origPage + 1, 0.5, 0.5); setSelected(q); toast(`${origPage + 1} ページ目の中央へ移しました。ドラッグで解答欄の右へ動かしてください`); }} />
+              </div>
             )}
           </div>
           <div style={{ padding: "10px 14px", borderTop: `1px solid ${T.line}`, fontSize: 11.5, color: T.textFaint, lineHeight: 1.7 }}>
-            {canOverlay && sheetMode === "overlay"
-              ? "赤ペンの位置は AI が読み取った解答欄の位置です。ずれている場合は「清書版」で確認してください。"
+            {overlayOn
+              ? "赤ペンは、原本の解答欄の枠（見つからないときは AI が読み取った位置）の右側に置いています。位置を動かしても採点AIは呼びません。"
               : "チェックを外すと元の答案（原本）だけを表示します。"}
             原本画像は保存期間のあいだ削除されません。
           </div>
+          {/* 画像の保存・印刷用（画面の外に描く。原本を埋め込み、操作用の印は描かない） */}
+          {exportJob && layouts && (
+            <div aria-hidden style={{ position: "fixed", left: -20000, top: 0, width: 1000, pointerEvents: "none" }}>
+              {exportJob.pages.map((pg, i) => layouts[pg - 1] && (
+                <RedPenOverlay key={pg} imageUrl={exportJob.hrefs[i]} sub={sub} test={test} page={pg}
+                  aspect={pagesInfo?.pages[pg - 1]?.aspect ?? 1.414} layout={layouts[pg - 1]} forExport
+                  svgRef={(el) => { exportRefs.current[i] = el; }} />
+              ))}
+            </div>
+          )}
         </Card>
       )}
 

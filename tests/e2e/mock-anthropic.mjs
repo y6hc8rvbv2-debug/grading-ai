@@ -174,8 +174,10 @@ const server = http.createServer((req, res) => {
     }
     const bad = problems(req, body);
     const qs = questionsFrom(body);
+    // 台本は文字列（モード）か、{ mode, bboxes }（設問ごとの位置を指定する。赤ペンの位置の確認用）
     const scripted = scripts[body.model]?.shift();
-    const mode = nextMode || scripted || "clean"; nextMode = "";
+    const customBoxes = typeof scripted === "object" && scripted ? scripted.bboxes : null;
+    const mode = nextMode || (typeof scripted === "object" && scripted ? scripted.mode : scripted) || "clean"; nextMode = "";
     requests.push({ url: req.url, kind: "grade", beta: req.headers["anthropic-beta"], model: body.model, mode, problems: bad, questions: qs,
       rubric: body.messages[0].content.find((c) => c.type === "text")?.text.split("採点基準:\n")[1] ?? "",
       imageType: body.messages[0].content[0]?.source?.media_type ?? body.messages[0].content[0]?.type,
@@ -202,7 +204,7 @@ const server = http.createServer((req, res) => {
       reason: "",
       comment: "よくできました",
       // 2ページの答案では、2問目を2ページ目に置く（ページ別の赤ペン表示の確認用）
-      bbox: { page: i === 1 && pageCount > 1 ? 2 : 1, x: 0.12, y: 0.18 + i * 0.12, w: 0.45, h: 0.08 },
+      bbox: customBoxes?.[i] ?? { page: i === 1 && pageCount > 1 ? 2 : 1, x: 0.12, y: 0.18 + i * 0.12, w: 0.45, h: 0.08 },
     }));
     const keyed = items.findIndex((_, i) => qs[i].correct);
     if (mode === "missing") items.pop();

@@ -8,9 +8,11 @@ import { createHash, randomUUID } from "crypto";
 const BASE = process.env.BASE_URL || "http://localhost:3200";
 const MOCK = process.env.MOCK_URL || "http://127.0.0.1:4010";
 const OUT = new URL("./.out/", import.meta.url).pathname;
-const browser = await chromium.launch(
-  process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}
-);
+// 保存するファイル名（日本語）がそのまま付くよう、ブラウザは UTF-8 の環境で動かす
+const browser = await chromium.launch({
+  ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+  env: { ...process.env, LANG: "C.UTF-8", LC_ALL: "C.UTF-8" },
+});
 
 // 答案画像の代わりに使う PNG を作る
 await mkdir(OUT, { recursive: true });
@@ -140,9 +142,9 @@ await settle(800);
 ok((await text()).includes("この答案はまだ採点されていません"), "AI採点に失敗したら、答案は採点待ちのまま（元の状態に戻る）");
 await page.getByRole("button", { name: "AIで採点する" }).click();
 await toastSeen(/AI採点が終わりました（\d+点・Opus単独）/);
-await page.locator('svg[aria-label="原本に赤ペンを重ねた採点画像"]').waitFor({ timeout: 15000 });
+await page.locator('svg[data-testid="redpen-overlay"]').waitFor({ timeout: 15000 });
 ok(true, "採点後は原本の上に赤ペンが重なる");
-ok(await page.locator('svg[aria-label="原本に赤ペンを重ねた採点画像"] image').count() === 1, "赤ペン画像の下地は原本画像");
+ok(await page.locator('svg[data-testid="redpen-overlay"] image').count() === 1, "赤ペン画像の下地は原本画像");
 await page.getByRole("button", { name: "清書版" }).click();
 await page.locator('svg[aria-label="赤ペン採点画像"]').waitFor();
 ok(true, "清書版に切り替えられる");
@@ -379,9 +381,9 @@ r = await gradeApi(ids.s1, "cascade");
 calls = (await allReqs()).slice(mark);
 ok(r.done && calls.length === 2 && calls.every((c) => c.images === 2), `2ページの答案は Haiku・Sonnet とも2枚の画像を送る（${calls.map((c) => c.images).join(",")}）`);
 await page.goto(BASE + "/history/" + ids.s1); await settle(1500);
-await page.locator('svg[aria-label="原本に赤ペンを重ねた採点画像"]').waitFor({ timeout: 15000 });
+await page.locator('svg[data-testid="redpen-overlay"]').waitFor({ timeout: 15000 });
 await page.getByRole("button", { name: "▶" }).first().click(); await settle(1000);
-ok((await text()).includes("原本 2 / 2 ページ") && await page.locator('svg[aria-label="原本に赤ペンを重ねた採点画像"] path').count() > 0,
+ok((await text()).includes("原本 2 / 2 ページ") && await page.locator('svg[data-testid="redpen-overlay"][data-page="2"] path').count() > 0,
   "2ページ目の原本にも赤ペンを重ねる");
 
 // (6) 二重実行の防止：連打（同じ requestId の同時送信）と再送では、同じモデルを二重に呼ばない
@@ -746,6 +748,258 @@ await page.getByRole("button", { name: "元に戻す" }).click();
 await toastSeen(/アーカイブから戻しました/);
 ok((await page.getByRole("button", { name: "「数学／E2E 小テスト」を削除" }).count()) === 1, "アーカイブから元に戻せる");
 
+// 11h. 原本に重ねる赤ペンの位置（2ページ・20問の答案。解答欄の表は 5・5・1・3・1・3・2 行）
+//      AI の位置は「1行ずれ」「返さない」「ページ違い」「答案に無いページ」を混ぜ、表示・調整・保存・印刷では採点AIを呼ばないことを確かめる。
+//      答案は実物と同じ配置の合成画像（REDPEN_REAL_DIR に p1.jpg・p2.jpg を置けば実物の写真を使う。リポジトリには入れない）
+const SHEET = {
+  1: [
+    { big: 1, x0: 902, x1: 1080, label: 945, top: 117, rows: 5, rowH: 44.5 },
+    { big: 2, x0: 911, x1: 1090, label: 955, top: 415, rows: 5, rowH: 44.75 },
+    { big: 3, x0: 885, x1: 1099, label: 885, top: 825, rows: 1, rowH: 45, text: "図に作図すること" },
+    { big: 4, x0: 920, x1: 1102, label: 963, top: 1010, rows: 3, rowH: 45 },
+  ],
+  2: [
+    { big: 5, x0: 873, x1: 1078, label: 873, top: 42, rows: 1, rowH: 43 },
+    { big: 6, x0: 898, x1: 1077, label: 941, top: 465, rows: 3, rowH: 44.5 },
+    { big: 7, x0: 893, x1: 1069, label: 936, top: 971, rows: 2, rowH: 44.5 },
+  ],
+};
+const sheetHtml = (pg) => `<body style="margin:0;width:1200px;height:1600px;background:#f4f3ef;position:relative;font:22px serif;overflow:hidden">
+${Array.from({ length: 26 }, (_, i) => `<div style="position:absolute;left:80px;top:${80 + i * 56}px;width:700px">${pg}-${i + 1}. 次の計算をしなさい。 (${i % 5 + 1}) 3x+2y=${i}</div>`).join("")}
+${pg === 1 ? `<svg style="position:absolute;left:640px;top:790px" width="200" height="180"><path d="M10 170 L120 10 L190 170 Z" fill="none" stroke="#222" stroke-width="2"/><path d="M30 120 L170 60" stroke="#555" stroke-width="1.5"/></svg>` : ""}
+${SHEET[pg].map((t) => Array.from({ length: t.rows }, (_, r) => `
+<div style="position:absolute;left:${t.x0}px;top:${t.top + r * t.rowH}px;width:${t.x1 - t.x0}px;height:${t.rowH}px;border:2px solid #222;box-sizing:border-box"></div>
+${t.label > t.x0 ? `<div style="position:absolute;left:${t.label}px;top:${t.top + r * t.rowH}px;width:0;height:${t.rowH}px;border-left:2px solid #222"></div>
+<div style="position:absolute;left:${t.x0 + 8}px;top:${t.top + r * t.rowH + 10}px">(${r + 1})</div>` : ""}
+<div style="position:absolute;left:${t.label + 20}px;top:${t.top + r * t.rowH + 8}px;font:24px cursive;color:#333">${t.text ?? `${t.big}${r + 1}x+${r}`}</div>
+<div style="position:absolute;left:${t.x1 - 40}px;top:${t.top + r * t.rowH + 22}px;font:12px serif">4点</div>`).join("")).join("")}
+</body>`;
+const REAL = process.env.REDPEN_REAL_DIR;
+const sheetFile = async (pg) => {
+  if (REAL) return `${REAL}/p${pg}.jpg`;
+  const p = await browser.newPage({ viewport: { width: 1200, height: 1600 } });
+  await p.setContent(sheetHtml(pg));
+  await p.screenshot({ path: `${OUT}sheet${pg}.png` });
+  await p.close();
+  return `${OUT}sheet${pg}.png`;
+};
+const sheets = [await sheetFile(1), await sheetFile(2)];
+
+// 2ページを1人分として保存（画像だけ。AI採点は下で台本付きで行う）
+await page.goto(BASE + "/new"); await settle(1200);
+const testSel = page.locator("select").filter({ has: page.locator('option:text-matches("第1回 高校入試模擬テスト")') });
+await testSel.selectOption(await testSel.locator("option", { hasText: "第1回 高校入試模擬テスト" }).first().getAttribute("value"));
+await page.locator("#pages-per").selectOption("2");
+await page.locator('input[type=file]:not([capture])').setInputFiles(sheets);
+await page.getByText("2 / 80 枚").waitFor({ timeout: 30000 });
+await page.getByLabel(/画像の保存だけ行い/).check();
+await page.getByRole("button", { name: "答案を保存する" }).click();
+await toastSeen(/1 枚の答案を保存しました/);
+const rpTok = (await (await fetch(`${process.env.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+  method: "POST", headers: { apikey: process.env.ANON, "content-type": "application/json" }, body: JSON.stringify({ email: "admin@a.example", password: "pass-A-123" }),
+})).json()).access_token;
+const rp = async (path, init = {}) => (await fetch(`${process.env.SUPABASE_URL}/rest/v1/${path}`, {
+  ...init, headers: { apikey: process.env.ANON, authorization: `Bearer ${rpTok}`, "content-type": "application/json", ...(init.headers ?? {}) },
+})).json();
+const [mockTest] = await rp(`tests?select=id&name=eq.${encodeURIComponent("第1回 高校入試模擬テスト")}`);
+const [rpSub] = await rp(`submissions?select=id,image_paths&test_id=eq.${mockTest.id}&order=uploaded_at.desc&limit=1`);
+ok(rpSub && rpSub.image_paths.length === 2, "2ページの答案を1人分として保存");
+
+// AI の位置（手書きの範囲・ページに対する割合）。大問1は1行下にずれ、大問4-(1)は位置なし、大問6-(2)はページ違い、大問5は答案に無い3ページ目
+const hand = (pg, t, r, shift = 0) => ({ page: pg, x: (t.label + 12) / 1200, y: (t.top + t.rowH * (r + shift) + 8) / 1600, w: 120 / 1200, h: 28 / 1600 });
+const boxesFor = [];
+SHEET[1][0] && [0, 1, 2, 3, 4].forEach((r) => boxesFor.push(hand(1, SHEET[1][0], r, 1)));
+[0, 1, 2, 3, 4].forEach((r) => boxesFor.push(hand(1, SHEET[1][1], r)));
+boxesFor.push({ page: 1, x: 640 / 1200, y: 790 / 1600, w: 200 / 1200, h: 180 / 1600 });          // 作図は描いた範囲
+boxesFor.push({ page: 1, x: 0, y: 0, w: 0, h: 0 }, hand(1, SHEET[1][3], 1), hand(1, SHEET[1][3], 2));
+boxesFor.push({ ...hand(2, SHEET[2][0], 0), page: 3 });
+boxesFor.push(hand(2, SHEET[2][1], 0), { ...hand(2, SHEET[2][1], 1), page: 1 }, hand(2, SHEET[2][1], 2));
+boxesFor.push(hand(2, SHEET[2][2], 0), hand(2, SHEET[2][2], 1));
+await script({ "claude-haiku-4-5": [{ mode: "clean", bboxes: boxesFor }] });
+const rpGraded = await gradeApi(rpSub.id, "cascade");
+ok(rpGraded.done, "（前提）台本の位置で AI 採点（代役）");
+const itemsBefore = JSON.stringify(await rp(`submission_items?select=qno,mark,earned,need_review,comment&submission_id=eq.${rpSub.id}&order=qno`));
+const subBefore = JSON.stringify(await rp(`submissions?select=total_score,status,edited,reviewed_by&id=eq.${rpSub.id}`));
+
+// ここから先（表示・位置の調整・保存・印刷）では採点AIを呼ばない
+const gradeCallsBefore = (await allReqs()).length;
+const gradePosts = [];
+// 画面を開くときの「採点AIが使えるか」の確認（GET）は採点ではないので数えない
+page.on("request", (q) => { if (q.url().includes("/api/grade") && q.method() === "POST") gradePosts.push(q.url()); });
+
+const overlay = page.locator('svg[data-testid="redpen-overlay"]');
+const markInfo = async (q, p = page) => {
+  const g = p.locator(`svg[data-testid="redpen-overlay"] g[data-qno="${q}"]`);
+  if (!(await g.count())) return null;
+  return { source: await g.getAttribute("data-source"), cx: Number(await g.getAttribute("data-cx")), cy: Number(await g.getAttribute("data-cy")) };
+};
+const U = 1000 / 1200;   // 画像 1200px → 描画の座標 1000
+const rowY = (t, r) => (t.top + t.rowH * (r + 0.5)) * U;
+const openDetail = async (p = page) => {
+  await p.goto(BASE + "/history/" + rpSub.id);
+  await p.locator('svg[data-testid="redpen-overlay"] g[data-qno]').first().waitFor({ timeout: 20000 });
+  await p.waitForTimeout(400);
+};
+await openDetail();
+
+// (1) 表の行に、小問の順番どおりに置く（AI の位置が1行ずれていても）。右側・上下中央
+let bad = [];
+for (let r = 0; r < 5; r++) {
+  const m = await markInfo(1 + r);
+  if (m?.source !== "table" || Math.abs(m.cy - rowY(SHEET[1][0], r)) > 4 || m.cx <= SHEET[1][0].x1 * U) bad.push(`q${1 + r}:${JSON.stringify(m)}`);
+}
+ok(!bad.length, `大問1：AI の位置が1行ずれていても、(1)〜(5) を表の1〜5行目の右側・上下中央に置く ${bad.join(" ")}`);
+const m12 = await markInfo(12);
+ok(m12?.source === "table" && Math.abs(m12.cy - rowY(SHEET[1][3], 0)) < 4, "大問4-(1)：AI が位置を返さなくても、表の1行目に置く");
+const m11 = await markInfo(11);
+ok(m11?.source === "bbox" && Math.abs(m11.cy - (790 + 90) * U) < 4 && m11.cx > 840 * U, "大問3（作図）：解答欄ではなく作図の範囲の右側に置く");
+const xs1 = await Promise.all([1, 2, 3, 4, 5].map(async (q) => (await markInfo(q)).cx));
+ok(new Set(xs1.map((x) => x.toFixed(1))).size === 1, "同じ表のマークは横位置がそろう");
+const commentsOnImage = await overlay.locator("text", { hasText: "よくできました" }).count();
+const panelText = await page.locator('[data-testid="redpen-panel"]').innerText();
+ok(commentsOnImage === 0 && panelText.includes("よくできました") && panelText.includes("大問1-(1)"), "コメントは原本に書かず、設問ごとの欄に出す");
+const flagged = page.locator('[data-testid="panel-row"][data-pos-review="1"]');
+ok(await flagged.count() === 1 && (await flagged.innerText()).includes("大問5") && (await flagged.innerText()).includes("3 ページ目"),
+  "解答欄を確かめられない設問（答案に無いページを指す大問5）は「位置の要確認」");
+ok(await overlay.locator('[data-testid="pos-review"]').count() === 1, "原本の上でも位置の要確認の印を出す");
+
+// (2) 2ページ目：AI がページを取り違えた大問6-(2)も、2ページ目の表の2行目に置く
+await page.getByRole("button", { name: "▶" }).first().click(); await settle(600);
+await overlay.locator('g[data-qno="16"]').waitFor();
+bad = [];
+for (let r = 0; r < 3; r++) { const m = await markInfo(16 + r); if (m?.source !== "table" || Math.abs(m.cy - rowY(SHEET[2][1], r)) > 4) bad.push(`q${16 + r}:${JSON.stringify(m)}`); }
+for (let r = 0; r < 2; r++) { const m = await markInfo(19 + r); if (m?.source !== "table" || Math.abs(m.cy - rowY(SHEET[2][2], r)) > 4) bad.push(`q${19 + r}:${JSON.stringify(m)}`); }
+ok(!bad.length && (await overlay.getAttribute("data-page")) === "2", `2ページ目：大問6・7を表の各行に置く（ページ違いも直す） ${bad.join(" ")}`);
+await page.getByRole("button", { name: "◀" }).first().click(); await settle(600);
+await overlay.locator('g[data-qno="1"]').waitFor();
+
+// (3) 画面の大きさ・拡大率を変えても、原本に対する位置は変わらない
+const relPos = async (p, q) => p.evaluate((qq) => {
+  const svg = document.querySelector('svg[data-testid="redpen-overlay"]');
+  const im = svg.querySelector("image").getBoundingClientRect();
+  const g = svg.querySelector(`g[data-qno="${qq}"] path`).getBoundingClientRect();
+  return [((g.left + g.right) / 2 - im.left) / im.width, ((g.top + g.bottom) / 2 - im.top) / im.height];
+}, q);
+const r1280 = await relPos(page, 3);
+await page.setViewportSize({ width: 900, height: 800 }); await settle(500);
+const r900 = await relPos(page, 3);
+await page.setViewportSize({ width: 1600, height: 1000 }); await settle(500);
+const r1600 = await relPos(page, 3);
+await page.setViewportSize({ width: 1280, height: 900 }); await settle(500);
+const near = (a, b) => Math.abs(a[0] - b[0]) < 0.004 && Math.abs(a[1] - b[1]) < 0.004;
+ok(near(r1280, r900) && near(r1280, r1600), `画面の幅を変えても原本に対する位置は同じ（${r1280.map((v) => v.toFixed(3))} / ${r900.map((v) => v.toFixed(3))} / ${r1600.map((v) => v.toFixed(3))}）`);
+const mob = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+const mp = await mob.newPage();
+await mp.goto(BASE + "/login");
+await mp.getByLabel("メールアドレス").fill("admin@a.example");
+await mp.getByLabel("パスワード").fill("pass-A-123");
+await mp.getByRole("button", { name: "ログイン" }).click();
+await mp.waitForURL(BASE + "/");
+await openDetail(mp);
+const rMob = await relPos(mp, 3);
+const stack = await mp.locator('[data-layout="stack"]').count();
+const mobWide = await mp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+ok(near(r1280, rMob) && stack === 1 && mobWide, `スマホ（幅390・拡大率3）でも同じ位置。コメント欄は原本の下（${rMob.map((v) => v.toFixed(3))}）`);
+const z2 = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 });
+const zp = await z2.newPage();
+await zp.goto(BASE + "/login");
+await zp.getByLabel("メールアドレス").fill("admin@a.example");
+await zp.getByLabel("パスワード").fill("pass-A-123");
+await zp.getByRole("button", { name: "ログイン" }).click();
+await zp.waitForURL(BASE + "/");
+await openDetail(zp);
+ok(near(r1280, await relPos(zp, 3)), "拡大率2（高解像度の画面）でも同じ位置");
+await z2.close();
+
+// (4) ドラッグで動かす → 再読み込みしても残る。判定・得点・コメント・要確認・合計点は変わらない
+const handle = overlay.locator('g[data-qno="1"] [data-testid="mark-handle"]');
+const hb = await handle.boundingBox();
+await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+await page.mouse.down();
+await page.mouse.move(hb.x + hb.width / 2 - 60, hb.y + hb.height / 2 + 12, { steps: 8 });
+await page.mouse.up();
+await settle(300);
+const dragged = await markInfo(1);
+await settle(900);
+await openDetail();
+const afterReload = await markInfo(1);
+ok(afterReload.source === "saved" && Math.abs(afterReload.cx - dragged.cx) < 1 && Math.abs(afterReload.cy - dragged.cy) < 1 && dragged.cx < xs1[0] - 20,
+  `ドラッグで動かした位置を保存し、再読み込みしても同じ位置（${dragged.cx.toFixed(1)},${dragged.cy.toFixed(1)}）`);
+ok((await page.locator('[data-testid="panel-row"][data-qno="1"]').innerText()).includes("位置を調整済み"), "調整した設問は「位置を調整済み」");
+// 矢印キーでも動かせる
+await overlay.locator('g[data-qno="2"] [data-testid="mark-handle"]').focus();
+const k0 = await markInfo(2);
+for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowDown");
+await settle(900);
+const k1 = await markInfo(2);
+ok(k1.source === "saved" && Math.abs(k1.cy - k0.cy - 6) < 0.6, "矢印キーでも位置を動かせる");
+// 位置の要確認 → 「この位置でよい」
+await page.locator('[data-testid="panel-row"][data-qno="15"]').getByRole("button", { name: "この位置でよい" }).click();
+await toastSeen(/この位置で確定しました/);
+await settle(900);
+await openDetail();
+ok(await page.locator('[data-testid="panel-row"][data-pos-review="1"]').count() === 0 && (await markInfo(15)).source === "saved", "「この位置でよい」で位置の要確認を外す（再読み込み後も）");
+const itemsAfter = JSON.stringify(await rp(`submission_items?select=qno,mark,earned,need_review,comment&submission_id=eq.${rpSub.id}&order=qno`));
+const subAfter = JSON.stringify(await rp(`submissions?select=total_score,status,edited,reviewed_by&id=eq.${rpSub.id}`));
+const saved = await rp(`mark_positions?select=qno,page,x,y&submission_id=eq.${rpSub.id}&order=qno`);
+ok(itemsBefore === itemsAfter && subBefore === subAfter && saved.map((s) => s.qno).join(",") === "1,2,15",
+  "位置を動かしても判定・得点・コメント・要確認・合計点・状態は変わらない（位置だけを答案・設問ごとに保存）");
+
+// (5) 画像の保存：画面と同じ位置で、原本の上に赤ペンを描いた PNG
+const [pngDl] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "赤ペン画像を保存" }).click()]);
+ok(/_p1\.png$/.test(pngDl.suggestedFilename()), `画像は PNG で保存（${pngDl.suggestedFilename()}）`);
+await pngDl.saveAs(`${OUT}redpen_p1.png`);
+const pngB64 = (await fs.readFile(`${OUT}redpen_p1.png`)).toString("base64");
+const q3 = await markInfo(3), q1s = await markInfo(1);
+const pix = await page.evaluate(async ({ b64, pts }) => {
+  const im = new Image();
+  im.src = "data:image/png;base64," + b64;
+  await im.decode();
+  const c = document.createElement("canvas"); c.width = im.width; c.height = im.height;
+  const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(im, 0, 0);
+  const s = im.width / Number(document.querySelector('svg[data-testid="redpen-overlay"]').viewBox.baseVal.width);
+  const band = -document.querySelector('svg[data-testid="redpen-overlay"]').viewBox.baseVal.y;
+  const red = (cx, cy, r) => {
+    const d = x.getImageData(Math.round((cx - r) * s), Math.round((cy + band - r) * s), Math.round(2 * r * s), Math.round(2 * r * s)).data;
+    let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] > 150 && d[i + 1] < 110 && d[i + 2] < 110) n++;
+    return n;
+  };
+  const dark = (() => { const d = x.getImageData(0, Math.round(band * s), Math.round(1000 * s), Math.round(300 * s)).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] < 90) n++; return n; })();
+  return { w: im.width, marks: pts.map((p) => red(p.cx, p.cy, 16)), away: red(pts[0].cx - 120, pts[0].cy, 16), dark };
+}, { b64: pngB64, pts: [q3, q1s] });
+ok(pix.marks.every((n) => n > 30) && pix.away < 5 && pix.dark > 1000,
+  `保存した画像の赤ペンは画面と同じ位置（調整した位置を含む）。原本も写っている（赤 ${pix.marks.join(",")} / 離れた所 ${pix.away}）`);
+
+// (6) 印刷：全ページを、画面と同じ部品で画像にして印刷する
+await page.getByRole("button", { name: "印刷" }).click();
+const pf = page.locator('iframe[data-testid="print-frame"]');
+await pf.waitFor({ state: "attached", timeout: 20000 });
+await settle(800);
+const printImgs = await pf.evaluate((f) => [...f.contentDocument.images].map((i) => i.naturalWidth));
+ok(printImgs.length === 2 && printImgs.every((w) => w > 1000), `印刷は2ページ分（${printImgs.join(",")}px）`);
+
+// (6b) 別のページに置かれた設問（大問5）を、表示中の2ページ目へ移す（ページをまたいでドラッグできないため）
+await page.getByRole("button", { name: "▶" }).first().click(); await settle(600);
+await page.locator('[data-testid="panel-row"][data-qno="15"]').getByRole("button", { name: "表示中の 2 ページ目へ移す" }).click();
+await settle(900);
+await openDetail();
+const moved15 = await rp(`mark_positions?select=page&submission_id=eq.${rpSub.id}&qno=eq.15`);
+ok(moved15[0]?.page === 2 && (await page.locator('[data-testid="panel-row"][data-qno="15"]').innerText()).includes("2ページ目"), "別のページの赤ペンを、表示中のページへ移せる");
+
+// (7) 位置を元に戻す
+await page.locator('[data-testid="panel-row"][data-qno="1"]').getByRole("button", { name: "位置を元に戻す" }).click();
+await toastSeen(/赤ペンの位置を元に戻しました/);
+await openDetail();
+const back = await markInfo(1);
+ok(back.source === "table" && Math.abs(back.cy - rowY(SHEET[1][0], 0)) < 4, "「位置を元に戻す」で自動で決めた位置に戻る（再読み込み後も）");
+
+// (8) 清書版は従来どおり
+await page.getByRole("button", { name: "清書版" }).click();
+await page.locator('svg[aria-label="赤ペン採点画像"]').waitFor();
+ok(true, "清書版に切り替えられる");
+await mp.close(); await mob.close();
+ok((await allReqs()).length === gradeCallsBefore && gradePosts.length === 0, "表示・位置の調整・保存・印刷では採点AIを呼ばない（/api/grade への送信 0 件）");
+
 // 12. レポート3種
 await page.goto(BASE + "/reports"); await settle();
 for (const [v, label] of [["student", "個人成績票"], ["unit", "単元別到達度レポート"], ["class", "成績レポート"]]) {
@@ -762,7 +1016,7 @@ await page.locator("select").filter({ has: page.locator('option:text("30日で�
 await toastSeen(/管理者だけです/);
 ok(true, "教員は保存期間を変更できず、日本語で案内");
 await page.goto(BASE + "/history"); await settle(1000);
-ok((await page.locator("tbody tr").count()) === 9, "同じ学校の教員は9件見える");
+ok((await page.locator("tbody tr").count()) === 10, "同じ学校の教員は10件見える（11h の2ページ答案を含む）");
 ok(!(await page.locator("nav").innerText()).includes("モデル比較試験"), "教員のメニューにはモデル比較試験が出ない");
 await page.goto(BASE + "/compare"); await settle(800);
 ok((await text()).includes("管理者だけが使える画面です"), "教員がモデル比較試験を開いても使えない");

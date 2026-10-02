@@ -795,3 +795,75 @@ begin
   assert (select count(*) from public.audit_logs where action in ('test.deleted', 'test.archived', 'test.restore')) = 3, '削除・アーカイブ・復元を監査ログに残すこと';
 end $$;
 reset role;
+
+-- ============================================================================
+-- 0009 赤ペンの位置：判定・得点・状態を変えない・他校の答案には付けられない・元に戻せる
+-- ============================================================================
+reset role;
+set role authenticated;
+select pg_temp.login('aaaaaaaa-0000-0000-0000-00000000000b');   -- 学校Aの教員
+do $$
+declare
+  v_before text; v_after text; v_sub_before text; v_sub_after text;
+begin
+  select string_agg(concat_ws('|', qno, mark, earned, need_review, comment, reason), ',' order by qno) into v_before
+    from public.submission_items where submission_id = 'aaaaaaaa-0000-0000-0000-0000000000a1';
+  select concat_ws('|', total_score, status, edited, reviewed_by) into v_sub_before
+    from public.submissions where id = 'aaaaaaaa-0000-0000-0000-0000000000a1';
+
+  -- 学校は答案から決まる（指定しなくてよい）
+  insert into public.mark_positions (submission_id, qno, page, x, y)
+    values ('aaaaaaaa-0000-0000-0000-0000000000a1', 1, 1, 0.92, 0.10);
+  assert (select school_id from public.mark_positions where submission_id = 'aaaaaaaa-0000-0000-0000-0000000000a1' and qno = 1)
+         = 'aaaaaaaa-0000-0000-0000-000000000000', '学校は答案から決まること';
+  assert (select updated_by from public.mark_positions where qno = 1) = 'aaaaaaaa-0000-0000-0000-00000000000b', '動かした先生を記録すること';
+  -- 同じ設問は上書き（upsert）。右の余白（x > 1）にも置ける
+  insert into public.mark_positions (submission_id, qno, page, x, y)
+    values ('aaaaaaaa-0000-0000-0000-0000000000a1', 1, 1, 1.05, 0.12)
+    on conflict (submission_id, qno) do update set page = excluded.page, x = excluded.x, y = excluded.y;
+  assert (select count(*) from public.mark_positions where submission_id = 'aaaaaaaa-0000-0000-0000-0000000000a1') = 1, '設問ごとに1つだけ保存すること';
+  assert (select x from public.mark_positions where qno = 1) = 1.05::real, '上書きできること';
+  -- 範囲外は保存しない
+  begin
+    insert into public.mark_positions (submission_id, qno, page, x, y) values ('aaaaaaaa-0000-0000-0000-0000000000a1', 2, 1, 3, 0.5);
+    raise exception 'FAIL: 範囲外の位置を保存できてしまう';
+  exception when check_violation then null;
+  end;
+
+  -- 判定・得点・コメント・要確認・合計点・状態は変わらない
+  select string_agg(concat_ws('|', qno, mark, earned, need_review, comment, reason), ',' order by qno) into v_after
+    from public.submission_items where submission_id = 'aaaaaaaa-0000-0000-0000-0000000000a1';
+  select concat_ws('|', total_score, status, edited, reviewed_by) into v_sub_after
+    from public.submissions where id = 'aaaaaaaa-0000-0000-0000-0000000000a1';
+  assert v_before = v_after, '位置を動かしても採点結果は変わらないこと';
+  assert v_sub_before = v_sub_after, '位置を動かしても合計点・状態・修正の印は変わらないこと';
+end $$;
+
+-- 他校の先生は見えず、付けられず、消せない
+select pg_temp.login('bbbbbbbb-0000-0000-0000-00000000000b');
+do $$
+begin
+  assert (select count(*) from public.mark_positions) = 0, '他校の赤ペンの位置は見えないこと';
+  begin
+    insert into public.mark_positions (school_id, submission_id, qno, page, x, y)
+      values ('aaaaaaaa-0000-0000-0000-000000000000', 'aaaaaaaa-0000-0000-0000-0000000000a1', 2, 1, 0.5, 0.5);
+    raise exception 'FAIL: 他校の答案に位置を保存できてしまう';
+  exception when no_data_found then null;
+  end;
+  delete from public.mark_positions;
+end $$;
+
+-- 位置を元に戻す（教員も行える）。答案を取り込み直したら消える
+select pg_temp.login('aaaaaaaa-0000-0000-0000-00000000000b');
+do $$
+begin
+  assert (select count(*) from public.mark_positions) = 1, '他校の操作で消えていないこと';
+  delete from public.mark_positions where submission_id = 'aaaaaaaa-0000-0000-0000-0000000000a1' and qno = 1;
+  assert (select count(*) from public.mark_positions) = 0, '位置を元に戻せること';
+  insert into public.mark_positions (submission_id, qno, page, x, y) values ('aaaaaaaa-0000-0000-0000-0000000000a1', 1, 1, 0.9, 0.1);
+  update public.submissions set progress = progress where id = 'aaaaaaaa-0000-0000-0000-0000000000a1';
+  assert (select count(*) from public.mark_positions) = 1, '取り込み直し以外の更新では消えないこと';
+  update public.submissions set uploaded_at = now() + interval '1 minute' where id = 'aaaaaaaa-0000-0000-0000-0000000000a1';
+  assert (select count(*) from public.mark_positions) = 0, '答案を取り込み直したら、動かした位置を消すこと';
+end $$;
+reset role;

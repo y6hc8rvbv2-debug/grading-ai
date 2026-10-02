@@ -7,6 +7,7 @@ import { DEFAULT_RUBRIC, typeLabelOf } from "@/lib/grading/engine";
 import { pct } from "@/lib/util";
 import type { DataSource, SessionInfo } from "@/lib/data/source";
 import type {
+  MarkPos,
   AuditRow, Item, QuestionStat, RateRow, Retention, Rubric, Submission, Test,
 } from "@/lib/types";
 
@@ -34,6 +35,7 @@ function recalc(s: Submission): Submission {
 export function createDemoSource(): DataSource {
   let subs: Submission[] = buildDemoSubmissions();
   const tests: Test[] = clone(DEMO_TESTS);
+  const markPos = new Map<string, Map<number, MarkPos>>();
   let rubric: Rubric = { ...DEFAULT_RUBRIC };
   let retention: Retention = "year";
   const audit: AuditRow[] = [];
@@ -199,6 +201,14 @@ export function createDemoSource(): DataSource {
       const t = tests.find((x) => x.id === testId);
       if (t) { t.archivedAt = null; log("test.restore", "tests", testId, {}); }
     },
+    // 赤ペンの位置（デモはメモリ上だけ。再読み込みで消える）
+    loadMarkPositions: async (id) => [...(markPos.get(id)?.values() ?? [])].map((p) => ({ ...p })),
+    async saveMarkPosition(id, pos) {
+      const m = markPos.get(id) ?? new Map();
+      m.set(pos.qno, { ...pos });
+      markPos.set(id, m);
+    },
+    async resetMarkPosition(id, qno) { markPos.get(id)?.delete(qno); },
     linkImport: async () => {},
     listOpenImports: async () => [],
     downloadImportFile: async () => { throw new Error("デモモードでは資料を読み込めません。"); },

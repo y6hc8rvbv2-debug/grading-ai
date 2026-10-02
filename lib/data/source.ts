@@ -4,7 +4,7 @@
 //   - demo    : Supabase 未設定時。メモリ上のデモデータで動き、再読み込みで元に戻る（lib/data/demo.ts）
 import type {
   AiGradeSummary, AiStatus, AuditRow, GradingInput, GradingLog, ImportResult, ItemPatch, NewTestInput, Profile, QuestionStat, RateRow,
-  Retention, ReviewEntry, Rubric, School, Submission, Workspace,
+  MarkPos, Retention, ReviewEntry, Rubric, School, Submission, Workspace,
 } from "@/lib/types";
 import type { GradingMode, GradingStage } from "@/lib/grading/cost";
 
@@ -67,6 +67,12 @@ export interface DataSource {
   /** まだ登録していない自分の読み取り結果（別の URL・端末で再開するため。AI は呼ばない） */
   listOpenImports(): Promise<{ id: string; requestId: string; createdAt: string; files: { path: string; kind: "key" | "paper" | "student"; name: string }[]; result: ImportResult }[]>;
   downloadImportFile(path: string): Promise<Blob>;
+
+  /** 原本に重ねる赤ペンの位置（先生が動かしたものだけ。判定・得点・コメント・要確認は変えない。0009） */
+  loadMarkPositions(submissionId: string): Promise<MarkPos[]>;
+  saveMarkPosition(submissionId: string, pos: MarkPos): Promise<void>;
+  /** 「位置を元に戻す」（自動で決めた位置に戻す） */
+  resetMarkPosition(submissionId: string, qno: number): Promise<void>;
 
   signedImageUrl(path: string): Promise<string>;
   loadAudit(): Promise<AuditRow[]>;

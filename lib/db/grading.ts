@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import { typeLabelOf } from "@/lib/grading/engine";
 import { rubricFromRow } from "@/lib/db/rubric";
 import type {
+  MarkPos,
   AuditRow, ClassRoom, GradingInput, GradingLog, ImportResult, Item, ItemPatch, Mark, NewTestInput, Profile,
   QType, Quality, QuestionStat, RateRow, Retention, ReviewEntry, Rubric, School,
   Student, Submission, Test, Workspace,
@@ -477,6 +478,30 @@ export async function removeTest(testId: string): Promise<"deleted" | "archived"
 export async function restoreTest(testId: string) {
   const { error } = await createClient().rpc("restore_test", { p_test_id: testId });
   if (error) throw error;
+}
+
+/* ---------------------------------------------------------------- 赤ペンの位置（0009） */
+
+const MARK_POS_MISSING = "赤ペンの位置を保存する準備ができていません。管理者が Supabase で 0009_mark_positions.sql を実行してください。";
+const markPosMissing = (e: { code?: string; message?: string }) =>
+  e.code === "42P01" || e.code === "PGRST205" || /mark_positions/.test(e.message ?? "");
+
+/** 先生が動かした赤ペンの位置。0009 を実行する前の DB では空にする（自動で決めた位置で表示する） */
+export async function loadMarkPositions(submissionId: string): Promise<MarkPos[]> {
+  const { data, error } = await createClient().from("mark_positions").select("qno, page, x, y").eq("submission_id", submissionId);
+  if (error) return [];
+  return (data ?? []).map((r) => ({ qno: r.qno, page: r.page, x: Number(r.x), y: Number(r.y) }));
+}
+
+export async function saveMarkPosition(submissionId: string, p: MarkPos) {
+  const { error } = await createClient().from("mark_positions")
+    .upsert({ submission_id: submissionId, qno: p.qno, page: p.page, x: p.x, y: p.y }, { onConflict: "submission_id,qno" });
+  if (error) throw markPosMissing(error) ? new Error(MARK_POS_MISSING) : error;
+}
+
+export async function resetMarkPosition(submissionId: string, qno: number) {
+  const { error } = await createClient().from("mark_positions").delete().eq("submission_id", submissionId).eq("qno", qno);
+  if (error) throw markPosMissing(error) ? new Error(MARK_POS_MISSING) : error;
 }
 
 /** まだテストに登録していない、自分の AI 読み取りの結果（新しい順）。別の URL・端末で作業を再開するのに使う */

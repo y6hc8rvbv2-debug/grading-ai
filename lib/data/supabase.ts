@@ -140,6 +140,10 @@ export function createSupabaseSource(): DataSource {
     listOpenImports: () => db.listOpenImports(),
     downloadImportFile: (path) => db.downloadImportFile(path),
 
+    loadMarkPositions: (id) => db.loadMarkPositions(id),
+    saveMarkPosition: (id, pos) => db.saveMarkPosition(id, pos),
+    resetMarkPosition: (id, qno) => db.resetMarkPosition(id, qno),
+
     signedImageUrl: (path) => db.signedImageUrl(path),
     loadAudit: () => db.loadAudit(),
     verifyAudit: () => db.verifyAuditChain(schoolId()),

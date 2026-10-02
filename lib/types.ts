@@ -89,6 +89,9 @@ export type Item = {
   bbox?: { page: number; x: number; y: number; w: number; h: number } | null;
 };
 
+/** 先生が動かした赤ペン（○×△）の位置。マークの中心の、ページに対する割合（右の余白では x が 1 を超える）。0009 */
+export type MarkPos = { qno: number; page: number; x: number; y: number };
+
 export type Quality = {
   scores: Record<string, number>;
   issues: { k: string; msg: string }[];
