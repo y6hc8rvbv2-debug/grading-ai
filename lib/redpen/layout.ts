@@ -175,6 +175,15 @@ export function resolveAnchors(items: LayoutInput[], pages: PageInput[]): Work[]
       const gi = info.find(g => g.big === expected[i][0]);
       used.add(c); // A graph's answer cell must not be assigned to another question.
       if (gi) gi.col = c;
+      // 作図も、用紙全体の並びが一意に一致したときは印刷された解答欄のページへ。
+      // コメント一覧のページ判定も同じ anchor を使うため、AIの誤ったページ番号で隠れなくなる。
+      for (const it of expected[i][1].filter(it => it.graph)) {
+        const w = work.find(w => w.it.qno === it.qno)!;
+        w.page = c.page;
+        w.anchor = cellToBox(c.f, c.rows[expected[i][1].indexOf(it)]);
+        w.source = "table";
+        w.issues = [];
+      }
     });
   }
   // 近い組から順に決める（取り合いになっても、より近い大問が先に取る）
