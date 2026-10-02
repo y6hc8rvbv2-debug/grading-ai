@@ -218,3 +218,34 @@ export function inkRatio(f: Frames, x0: number, y0: number, x1: number, y1: numb
   for (let y = c; y < d; y++) for (let x = a; x < b; x++) n += f.ink[y * f.width + x];
   return n / ((b - a) * (d - c));
 }
+
+/**
+ * ページの中の、縦に並ぶマスの列（解答欄の表）をすべて集める。
+ * AI の位置に頼らずに探すので、AI の位置が表の外（数行下など）にずれていても表を見つけられる。
+ * 同じ行の並びで左右に分かれた列（設問番号の欄と解答の欄）は、幅の広いほう（解答の欄）だけを残す。
+ */
+export function allColumns(f: Frames): Cell[][] {
+  const step = Math.max(8, Math.round(f.width / 120));
+  const cols: Cell[][] = [];
+  const seen = new Set<string>();
+  for (let y = step; y < f.height; y += step) {
+    for (let x = step; x < f.width; x += step) {
+      const c = cellAt(f, x, y);
+      if (!c) continue;
+      const key = `${Math.round(c.l / 4)}|${Math.round(c.t / 4)}|${Math.round(c.r / 4)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const rows = columnOf(f, c);
+      const same = cols.findIndex((o) => Math.abs(o[0].l - rows[0].l) < 6 && Math.abs(o[0].r - rows[0].r) < 6 && Math.abs(o[0].t - rows[0].t) < 6);
+      if (same < 0) cols.push(rows);
+      else if (rows.length > cols[same].length) cols[same] = rows;
+    }
+  }
+  // 同じ行の並び（上端・下端・行数が同じ）で左右に並ぶ列は、幅の広いほうだけ
+  const wide = (c: Cell[]) => c[0].r - c[0].l;
+  const out = cols.filter((c) => wide(c) >= f.width * 0.06).filter((c, _, all) => !all.some((o) => o !== c && o.length === c.length
+    && Math.abs(o[0].t - c[0].t) < 8 && Math.abs(o[o.length - 1].b - c[c.length - 1].b) < 8
+    && (wide(o) > wide(c) || (wide(o) === wide(c) && o[0].l < c[0].l))
+    && Math.min(o[0].r, c[0].r) - Math.max(o[0].l, c[0].l) > -f.width * 0.02));
+  return out.sort((a, b) => a[0].t - b[0].t || a[0].l - b[0].l);
+}

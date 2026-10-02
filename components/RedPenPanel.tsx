@@ -9,7 +9,7 @@ import { Badge, Btn } from "@/components/ui";
 import { SOURCE_LABEL, type PageLayout, type Placed } from "@/lib/redpen/layout";
 import type { Submission } from "@/lib/types";
 
-export function RedPenPanel({ sub, layouts, selected, onSelect, onConfirm, onReset, onMoveHere, currentPage, analyzed }: {
+export function RedPenPanel({ sub, layouts, selected, onSelect, onConfirm, onReset, onMoveTo, currentPage, analyzed }: {
   sub: Submission;
   layouts: PageLayout[];
   selected: number | null;
@@ -18,8 +18,9 @@ export function RedPenPanel({ sub, layouts, selected, onSelect, onConfirm, onRes
   onConfirm: (p: Placed) => void;
   /** 位置を元に戻す（先生が動かした位置を消す） */
   onReset: (qno: number) => void;
-  /** 表示中のページへ移す（ページをまたいでドラッグできないため） */
-  onMoveHere: (qno: number) => void;
+  /** 別のページへ移す（ページをまたいでドラッグできないため） */
+  onMoveTo: (qno: number, page: number) => void;
+  /** 表示中の原本のページ（このページの設問だけを並べる） */
   currentPage: number;
   /** 原本の罫線を調べられたか（調べられなければ AI の位置をそのまま使っている） */
   analyzed: boolean;
@@ -27,19 +28,32 @@ export function RedPenPanel({ sub, layouts, selected, onSelect, onConfirm, onRes
   const { T } = useUI();
   const byQno = new Map<number, Placed>();
   layouts.forEach((l) => l.placed.forEach((p) => byQno.set(p.qno, p)));
-  const needPos = [...byQno.values()].filter((p) => p.issues.length > 0).length;
+  const pageCount = layouts.length;
+  // 表示中のページの設問と、位置が分からない設問（どのページにも置けていない）だけを並べる
+  const shown = sub.result.items.filter((it) => {
+    const p = byQno.get(it.qno);
+    return !p || p.page === currentPage || p.source === "none";
+  });
+  const needPos = shown.filter((it) => (byQno.get(it.qno)?.issues.length ?? 0) > 0).length;
+  const needOther = [...byQno.values()].filter((p) => p.issues.length > 0 && p.page !== currentPage && p.source !== "none").length;
 
   return (
     <div data-testid="redpen-panel" style={{ display: "grid", gap: 8, alignContent: "start" }}>
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ font: `700 13px ${FONT_UI}`, color: T.text }}>設問ごとのコメント・赤ペンの位置</span>
+        <span style={{ font: `700 13px ${FONT_UI}`, color: T.text }}>
+          {pageCount > 1 ? `${currentPage} ページ目の設問` : "設問ごとのコメント・赤ペンの位置"}
+        </span>
         {needPos > 0 && <Badge tone="warn">位置の要確認 {needPos} 問</Badge>}
       </div>
+      {needOther > 0 && (
+        <div data-testid="other-page-review" style={{ fontSize: 11.5, color: T.warn }}>ほかのページに、位置の要確認が {needOther} 問あります（◀ ▶ でページを切り替えてください）。</div>
+      )}
+      {shown.length === 0 && <div style={{ fontSize: 12, color: T.textFaint }}>このページに置いた赤ペンはありません。</div>}
       <div style={{ fontSize: 11.5, color: T.textSub, lineHeight: 1.7 }}>
         ○×△ はドラッグ（または選んで矢印キー）で動かせます。動かしても判定・得点・コメント・要確認は変わりません。
         {!analyzed && " 原本の罫線を調べられなかったため、AI が返した位置を基準にしています。"}
       </div>
-      {sub.result.items.map((it) => {
+      {shown.map((it) => {
         const p = byQno.get(it.qno);
         const sel = selected === it.qno;
         return (
@@ -68,10 +82,12 @@ export function RedPenPanel({ sub, layouts, selected, onSelect, onConfirm, onRes
             {p && sel && (
               <div style={{ marginTop: 4, fontSize: 11, color: T.textFaint }}>位置の基準：{SOURCE_LABEL[p.source]}</div>
             )}
-            {p && (p.issues.length > 0 || p.source === "saved") && (
+            {p && (p.issues.length > 0 || p.source === "saved" || (sel && pageCount > 1)) && (
               <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
                 {p.issues.length > 0 && <Btn size="sm" onClick={() => onConfirm(p)}>この位置でよい</Btn>}
-                {p.page !== currentPage && <Btn size="sm" onClick={() => onMoveHere(it.qno)}>表示中の {currentPage} ページ目へ移す</Btn>}
+                {Array.from({ length: pageCount }, (_, i) => i + 1).filter((n) => n !== p.page || p.source === "none").map((n) => (
+                  <Btn key={n} size="sm" variant="ghost" onClick={() => onMoveTo(it.qno, n)}>{n} ページ目へ移す</Btn>
+                ))}
                 {p.source === "saved" && <Btn size="sm" variant="ghost" onClick={() => onReset(it.qno)}>位置を元に戻す</Btn>}
               </div>
             )}

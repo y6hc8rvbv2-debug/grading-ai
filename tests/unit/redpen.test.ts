@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import jpeg from "jpeg-js";
-import { cellAt, columnOf, detectFrames, toGray, type Gray } from "../../lib/redpen/frames";
+import { allColumns, cellAt, columnOf, detectFrames, toGray, type Gray } from "../../lib/redpen/frames";
 import { layoutMarks, resolveAnchors, type LayoutInput, type PageInput } from "../../lib/redpen/layout";
 
 const W = 1200, H = 1600;
@@ -173,4 +173,67 @@ test("実際の答案の表（REDPEN_REAL_DIR があるときだけ）", { skip:
   });
   assert.deepEqual(counts(pages[0], [[0.82, 0.12], [0.82, 0.3], [0.85, 0.53], [0.85, 0.69]]), [5, 5, 1, 3]);
   assert.deepEqual(counts(pages[1], [[0.8, 0.03], [0.8, 0.31], [0.8, 0.63]]), [1, 3, 2]);
+});
+
+test("AI の位置が表の外（3行下）にずれていても、行数が同じで近い表に割り当てる（2ページ目の実例）", () => {
+  const T6 = { x0: 860, x1: 1040, label: 905, top: 700, rows: 3, rowH: 45 };
+  const T7 = { x0: 860, x1: 1040, label: 905, top: 1300, rows: 2, rowH: 45 };
+  const T5 = { x0: 860, x1: 1100, label: 860, top: 80, rows: 1, rowH: 45 };
+  const pg: PageInput = { aspect: H / W, frames: detectFrames(sheet([T5, T6, T7])) };
+  const items: LayoutInput[] = [
+    { qno: 15, big: 5, graph: false, bbox: ai(T5, 0, 1.2) },
+    ...[0, 1, 2].map((i) => ({ qno: 16 + i, big: 6, graph: false, bbox: ai(T6, i, 3.4) })),
+    ...[0, 1].map((i) => ({ qno: 19 + i, big: 7, graph: false, bbox: ai(T7, i, 1.6) })),
+  ];
+  const [p] = layoutMarks(items, [pg]);
+  const at = (q: number) => p.placed.find((m) => m.qno === q)!;
+  assert.ok(Math.abs(at(15).cy - rowCenter(T5, 0)) < 0.003, "大問5");
+  [0, 1, 2].forEach((i) => assert.ok(Math.abs(at(16 + i).cy - rowCenter(T6, i)) < 0.003, `大問6-(${i + 1})`));
+  [0, 1].forEach((i) => assert.ok(Math.abs(at(19 + i).cy - rowCenter(T7, i)) < 0.003, `大問7-(${i + 1})`));
+  assert.ok(p.placed.every((m) => m.source === "table" && m.issues.length === 0));
+});
+
+test("同じ行数の表が2つあっても、AI の位置に近いほうを選ぶ", () => {
+  const A = { x0: 860, x1: 1040, label: 905, top: 150, rows: 3, rowH: 45 };
+  const B = { x0: 860, x1: 1040, label: 905, top: 900, rows: 3, rowH: 45 };
+  const pg: PageInput = { aspect: H / W, frames: detectFrames(sheet([A, B])) };
+  const items: LayoutInput[] = [
+    ...[0, 1, 2].map((i) => ({ qno: 1 + i, big: 1, graph: false, bbox: ai(A, i, 2) })),
+    ...[0, 1, 2].map((i) => ({ qno: 4 + i, big: 2, graph: false, bbox: ai(B, i, -1) })),
+  ];
+  const [p] = layoutMarks(items, [pg]);
+  assert.ok(Math.abs(p.placed[0].cy - rowCenter(A, 0)) < 0.003);
+  assert.ok(Math.abs(p.placed[3].cy - rowCenter(B, 0)) < 0.003);
+});
+
+test("AI の位置が無い大問は、前後の表のあいだに1つだけある表へ推定で置き、位置の要確認にする", () => {
+  const T1 = { x0: 860, x1: 1040, label: 905, top: 150, rows: 2, rowH: 45 };
+  const T2 = { x0: 860, x1: 1100, label: 860, top: 600, rows: 1, rowH: 45 };
+  const T3 = { x0: 860, x1: 1040, label: 905, top: 1100, rows: 2, rowH: 45 };
+  const pg: PageInput = { aspect: H / W, frames: detectFrames(sheet([T1, T2, T3])) };
+  const items: LayoutInput[] = [
+    ...[0, 1].map((i) => ({ qno: 1 + i, big: 1, graph: false, bbox: ai(T1, i) })),
+    { qno: 3, big: 2, graph: false, bbox: null },
+    ...[0, 1].map((i) => ({ qno: 4 + i, big: 3, graph: false, bbox: ai(T3, i) })),
+  ];
+  const [p] = layoutMarks(items, [pg]);
+  const q3 = p.placed.find((m) => m.qno === 3)!;
+  assert.equal(q3.source, "table");
+  assert.ok(Math.abs(q3.cy - rowCenter(T2, 0)) < 0.003);
+  assert.match(q3.issues.join(""), /並び順から推定/);
+});
+
+test("小問の数と表の行数が合わないときは、枠に吸着しても位置の要確認にする", () => {
+  const T = { x0: 860, x1: 1040, label: 905, top: 300, rows: 4, rowH: 45 };
+  const pg: PageInput = { aspect: H / W, frames: detectFrames(sheet([T])) };
+  const [p] = layoutMarks([0, 1, 2].map((i) => ({ qno: 1 + i, big: 1, graph: false, bbox: ai(T, i) })), [pg]);
+  assert.ok(p.placed.every((m) => m.source === "cell" && /行数が合いません/.test(m.issues.join(""))));
+});
+
+// 2ページ目の実例（添付のスクリーンショットから切り出した原本。REDPEN_REAL_DIR/ss-p2.jpg があるときだけ）
+test("実例の2ページ目：解答欄の表を AI の位置に頼らずに見つける", { skip: !REAL || !existsSync(`${REAL}/ss-p2.jpg`) }, () => {
+  const img = jpeg.decode(readFileSync(`${REAL}/ss-p2.jpg`), { useTArray: true });
+  const f = detectFrames(toGray(img, 1200));
+  const cols = allColumns(f).filter((c) => c[0].l > f.width * 0.6);
+  assert.deepEqual(cols.map((c) => c.length), [1, 3, 2], "大問5・6・7 の表（1・3・2行）");
 });

@@ -805,7 +805,8 @@ const [mockTest] = await rp(`tests?select=id&name=eq.${encodeURIComponent("第1�
 const [rpSub] = await rp(`submissions?select=id,image_paths&test_id=eq.${mockTest.id}&order=uploaded_at.desc&limit=1`);
 ok(rpSub && rpSub.image_paths.length === 2, "2ページの答案を1人分として保存");
 
-// AI の位置（手書きの範囲・ページに対する割合）。大問1は1行下にずれ、大問4-(1)は位置なし、大問6-(2)はページ違い、大問5は答案に無い3ページ目
+// AI の位置（手書きの範囲・ページに対する割合）。大問1は1行下にずれ、大問4-(1)は位置なし、大問5は答案に無い3ページ目、
+// 大問6は表の外（3行あまり下）で 6-(2) はページ違い、大問7は1行半下（実際の答案の2ページ目で起きたずれ方）
 const hand = (pg, t, r, shift = 0) => ({ page: pg, x: (t.label + 12) / 1200, y: (t.top + t.rowH * (r + shift) + 8) / 1600, w: 120 / 1200, h: 28 / 1600 });
 const boxesFor = [];
 SHEET[1][0] && [0, 1, 2, 3, 4].forEach((r) => boxesFor.push(hand(1, SHEET[1][0], r, 1)));
@@ -813,8 +814,8 @@ SHEET[1][0] && [0, 1, 2, 3, 4].forEach((r) => boxesFor.push(hand(1, SHEET[1][0],
 boxesFor.push({ page: 1, x: 640 / 1200, y: 790 / 1600, w: 200 / 1200, h: 180 / 1600 });          // 作図は描いた範囲
 boxesFor.push({ page: 1, x: 0, y: 0, w: 0, h: 0 }, hand(1, SHEET[1][3], 1), hand(1, SHEET[1][3], 2));
 boxesFor.push({ ...hand(2, SHEET[2][0], 0), page: 3 });
-boxesFor.push(hand(2, SHEET[2][1], 0), { ...hand(2, SHEET[2][1], 1), page: 1 }, hand(2, SHEET[2][1], 2));
-boxesFor.push(hand(2, SHEET[2][2], 0), hand(2, SHEET[2][2], 1));
+boxesFor.push(hand(2, SHEET[2][1], 0, 3.4), { ...hand(2, SHEET[2][1], 1, 3.4), page: 1 }, hand(2, SHEET[2][1], 2, 3.4));
+boxesFor.push(hand(2, SHEET[2][2], 0, 1.6), hand(2, SHEET[2][2], 1, 1.6));
 await script({ "claude-haiku-4-5": [{ mode: "clean", bboxes: boxesFor }] });
 const rpGraded = await gradeApi(rpSub.id, "cascade");
 ok(rpGraded.done, "（前提）台本の位置で AI 採点（代役）");
@@ -858,10 +859,11 @@ ok(new Set(xs1.map((x) => x.toFixed(1))).size === 1, "同じ表のマークは�
 const commentsOnImage = await overlay.locator("text", { hasText: "よくできました" }).count();
 const panelText = await page.locator('[data-testid="redpen-panel"]').innerText();
 ok(commentsOnImage === 0 && panelText.includes("よくできました") && panelText.includes("大問1-(1)"), "コメントは原本に書かず、設問ごとの欄に出す");
-const flagged = page.locator('[data-testid="panel-row"][data-pos-review="1"]');
-ok(await flagged.count() === 1 && (await flagged.innerText()).includes("大問5") && (await flagged.innerText()).includes("3 ページ目"),
-  "解答欄を確かめられない設問（答案に無いページを指す大問5）は「位置の要確認」");
-ok(await overlay.locator('[data-testid="pos-review"]').count() === 1, "原本の上でも位置の要確認の印を出す");
+const rowQnos = async () => (await page.locator('[data-testid="panel-row"]').evaluateAll((els) => els.map((e) => Number(e.dataset.qno)))).join(",");
+ok(await rowQnos() === "1,2,3,4,5,6,7,8,9,10,11,12,13,14" && (await page.locator('[data-testid="redpen-panel"]').innerText()).includes("1 ページ目の設問"),
+  "コメント欄は表示中の1ページ目の設問（大問1〜4）だけを並べる");
+ok(await page.locator('[data-testid="panel-row"][data-pos-review="1"]').count() === 0 && await overlay.locator('[data-testid="pos-review"]').count() === 0
+  && await page.locator('[data-testid="other-page-review"]').count() === 1, "1ページ目は位置の要確認なし。ほかのページの要確認は件数で知らせる");
 
 // (2) 2ページ目：AI がページを取り違えた大問6-(2)も、2ページ目の表の2行目に置く
 await page.getByRole("button", { name: "▶" }).first().click(); await settle(600);
@@ -869,7 +871,15 @@ await overlay.locator('g[data-qno="16"]').waitFor();
 bad = [];
 for (let r = 0; r < 3; r++) { const m = await markInfo(16 + r); if (m?.source !== "table" || Math.abs(m.cy - rowY(SHEET[2][1], r)) > 4) bad.push(`q${16 + r}:${JSON.stringify(m)}`); }
 for (let r = 0; r < 2; r++) { const m = await markInfo(19 + r); if (m?.source !== "table" || Math.abs(m.cy - rowY(SHEET[2][2], r)) > 4) bad.push(`q${19 + r}:${JSON.stringify(m)}`); }
-ok(!bad.length && (await overlay.getAttribute("data-page")) === "2", `2ページ目：大問6・7を表の各行に置く（ページ違いも直す） ${bad.join(" ")}`);
+ok(!bad.length && (await overlay.getAttribute("data-page")) === "2", `2ページ目：AI の位置が表の外にずれていても、大問6・7を表の各行の上下中央に置く（ページ違いも直す） ${bad.join(" ")}`);
+const m15 = await markInfo(15);
+const flagged = page.locator('[data-testid="panel-row"][data-pos-review="1"]');
+ok(m15?.source === "table" && Math.abs(m15.cy - rowY(SHEET[2][0], 0)) < 4 && await flagged.count() === 1
+  && (await flagged.innerText()).includes("大問5") && (await flagged.innerText()).includes("並び順から推定"),
+  "AI の位置が無い大問5は、大問4と大問6の表のあいだの1行の欄に推定で置き、「位置の要確認」と明示");
+ok(await overlay.locator('[data-testid="pos-review"]').count() === 1, "原本の上でも位置の要確認の印を出す");
+ok(await rowQnos() === "15,16,17,18,19,20" && (await page.locator('[data-testid="redpen-panel"]').innerText()).includes("2 ページ目の設問"),
+  "2ページ目に切り替えると、コメント欄も2ページ目の設問（大問5〜7）に切り替わる");
 await page.getByRole("button", { name: "◀" }).first().click(); await settle(600);
 await overlay.locator('g[data-qno="1"]').waitFor();
 
@@ -933,12 +943,16 @@ for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowDown");
 await settle(900);
 const k1 = await markInfo(2);
 ok(k1.source === "saved" && Math.abs(k1.cy - k0.cy - 6) < 0.6, "矢印キーでも位置を動かせる");
-// 位置の要確認 → 「この位置でよい」
+// 位置の要確認 → 「この位置でよい」（2ページ目）
+await page.getByRole("button", { name: "▶" }).first().click(); await settle(600);
 await page.locator('[data-testid="panel-row"][data-qno="15"]').getByRole("button", { name: "この位置でよい" }).click();
 await toastSeen(/この位置で確定しました/);
 await settle(900);
 await openDetail();
+await page.getByRole("button", { name: "▶" }).first().click(); await settle(600);
+await overlay.locator('g[data-qno="15"]').waitFor();
 ok(await page.locator('[data-testid="panel-row"][data-pos-review="1"]').count() === 0 && (await markInfo(15)).source === "saved", "「この位置でよい」で位置の要確認を外す（再読み込み後も）");
+await page.getByRole("button", { name: "◀" }).first().click(); await settle(600);
 const itemsAfter = JSON.stringify(await rp(`submission_items?select=qno,mark,earned,need_review,comment&submission_id=eq.${rpSub.id}&order=qno`));
 const subAfter = JSON.stringify(await rp(`submissions?select=total_score,status,edited,reviewed_by&id=eq.${rpSub.id}`));
 const saved = await rp(`mark_positions?select=qno,page,x,y&submission_id=eq.${rpSub.id}&order=qno`);
@@ -978,15 +992,15 @@ await settle(800);
 const printImgs = await pf.evaluate((f) => [...f.contentDocument.images].map((i) => i.naturalWidth));
 ok(printImgs.length === 2 && printImgs.every((w) => w > 1000), `印刷は2ページ分（${printImgs.join(",")}px）`);
 
-// (6b) 別のページに置かれた設問（大問5）を、表示中の2ページ目へ移す（ページをまたいでドラッグできないため）
-await page.getByRole("button", { name: "▶" }).first().click(); await settle(600);
-await page.locator('[data-testid="panel-row"][data-qno="15"]').getByRole("button", { name: "表示中の 2 ページ目へ移す" }).click();
-await settle(900);
-await openDetail();
-const moved15 = await rp(`mark_positions?select=page&submission_id=eq.${rpSub.id}&qno=eq.15`);
-ok(moved15[0]?.page === 2 && (await page.locator('[data-testid="panel-row"][data-qno="15"]').innerText()).includes("2ページ目"), "別のページの赤ペンを、表示中のページへ移せる");
+// (6b) 赤ペンを別のページへ移す（ページをまたいでドラッグできないため）。1ページ目の大問1-(1)を2ページ目へ
+await page.locator('[data-testid="panel-row"][data-qno="1"]').click(); await settle(300);
+await page.locator('[data-testid="panel-row"][data-qno="1"]').getByRole("button", { name: "2 ページ目へ移す" }).click();
+await settle(1000);
+const moved1 = await rp(`mark_positions?select=page&submission_id=eq.${rpSub.id}&qno=eq.1`);
+ok(moved1[0]?.page === 2 && (await overlay.getAttribute("data-page")) === "2" && (await markInfo(1))?.source === "saved"
+  && (await rowQnos()).split(",").includes("1"), "赤ペンを別のページへ移せる（表示とコメント欄も移した先のページに切り替わる）");
 
-// (7) 位置を元に戻す
+// (7) 位置を元に戻す（2ページ目に移した大問1-(1)を、1ページ目の表の1行目へ）
 await page.locator('[data-testid="panel-row"][data-qno="1"]').getByRole("button", { name: "位置を元に戻す" }).click();
 await toastSeen(/赤ペンの位置を元に戻しました/);
 await openDetail();

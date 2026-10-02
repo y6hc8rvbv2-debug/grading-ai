@@ -15,7 +15,15 @@
 //   位置が分からない / ページ番号が答案の枚数と合わない / ほかの設問と同じ欄を指している /
 //   設問の順番と欄の並びが合わない / 枠が見つからない / 位置の大きさが不自然
 // ============================================================================
-import { cellAt, columnOf, inkRatio, type Cell, type Frames } from "@/lib/redpen/frames";
+import { allColumns, cellAt, inkRatio, type Cell, type Frames } from "@/lib/redpen/frames";
+
+// 表の検出は重いので、同じページの結果を使い回す（先生が位置を動かすたびに数え直さない）
+const columnCache = new WeakMap<Frames, Cell[][]>();
+const columnsOf = (f: Frames) => {
+  let c = columnCache.get(f);
+  if (!c) { c = allColumns(f); columnCache.set(f, c); }
+  return c;
+};
 
 export type Box = { x: number; y: number; w: number; h: number };
 export type LayoutInput = {
@@ -112,53 +120,100 @@ export function resolveAnchors(items: LayoutInput[], pages: PageInput[]): Work[]
     g.push(w);
     groups.set(w.it.big, g);
   }
-  const pagesWithCells = new Set<number>();
-  for (const [, g0] of groups) {
-    const g = [...g0].sort((a, b) => a.it.qno - b.it.qno);
-    // 大問のページ＝AI の位置が多いページ
+  // ページごとの解答欄の表（AI の位置に頼らずに全部集める）
+  type Col = { page: number; f: Frames; rows: Cell[]; cx: number; cy: number };
+  const cols: Col[] = [];
+  pages.forEach((p, i) => {
+    if (!p.frames) return;
+    for (const rows of columnsOf(p.frames)) {
+      const f = p.frames;
+      cols.push({ page: i + 1, f, rows, cx: (rows[0].l + rows[0].r) / 2 / f.width, cy: (rows[0].t + rows[rows.length - 1].b) / 2 / f.height });
+    }
+  });
+  const pagesWithCells = new Set(cols.map((c) => c.page));
+
+  // 大問ごとに、小問の数と行数が同じ表を探す。AI の位置（大問の中心）に近い表を選ぶ。
+  // AI の位置が表の外（数行下など）にずれていても、行数が同じで一番近い表なら割り当てられる
+  const order = [...groups.keys()].sort((a, b) => a - b);
+  const info = order.map((big) => {
+    const g = [...groups.get(big)!].sort((a, b) => a.it.qno - b.it.qno);
+    const anchored = g.filter((w) => w.anchor);
     const count = new Map<number, number>();
-    g.filter((w) => w.anchor).forEach((w) => count.set(w.page, (count.get(w.page) ?? 0) + 1));
-    const page = [...count.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0];
-    const f = page ? pages[page - 1]?.frames : null;
-    if (!page || !f) continue;
+    anchored.forEach((w) => count.set(w.page, (count.get(w.page) ?? 0) + 1));
+    const page = [...count.entries()].sort((x, y) => y[1] - x[1] || x[0] - y[0])[0]?.[0] ?? null;
+    const on = anchored.filter((w) => w.page === page);
+    const mid = on.length ? {
+      x: on.reduce((t, w) => t + center(w.anchor!).x, 0) / on.length,
+      y: on.reduce((t, w) => t + center(w.anchor!).y, 0) / on.length,
+    } : null;
+    return { big, g, page, mid, col: null as Col | null };
+  });
+  const score = (gi: (typeof info)[number], c: Col) =>
+    gi.page == null || !gi.mid ? Infinity : (c.page !== gi.page ? 1 : 0) + Math.abs(c.cy - gi.mid.y) + 0.5 * Math.abs(c.cx - gi.mid.x);
+  const MAX_SCORE = 0.3;     // 同じページで、ページの高さの3割より遠い表には割り当てない
+  const used = new Set<Col>();
+  // 近い組から順に決める（取り合いになっても、より近い大問が先に取る）
+  const pairs: { gi: (typeof info)[number]; c: Col; s: number }[] = [];
+  for (const gi of info) for (const c of cols) if (c.rows.length === gi.g.length) {
+    const sc = score(gi, c);
+    if (sc <= MAX_SCORE) pairs.push({ gi, c, s: sc });
+  }
+  pairs.sort((x, y) => x.s - y.s);
+  for (const { gi, c } of pairs) if (!gi.col && !used.has(c)) { gi.col = c; used.add(c); }
 
-    const cells = new Map<Work, Cell>();
-    for (const w of g) {
-      if (!w.anchor || w.page !== page) continue;
-      const c = center(w.anchor);
-      const cell = cellAt(f, c.x * f.width, c.y * f.height);
-      if (cell) cells.set(w, cell);
+  // 表の並び（ページ→上から下）と大問の順番が逆になったものは、取り違えの恐れがあるので外す
+  const pos = (c: Col) => c.page * 10 + c.cy;
+  const done = info.filter((gi) => gi.col);
+  for (let i = 0; i + 1 < done.length; i++) {
+    if (pos(done[i].col!) > pos(done[i + 1].col!)) {
+      used.delete(done[i].col!); used.delete(done[i + 1].col!);
+      done[i].col = null; done[i + 1].col = null;
     }
-    if (cells.size) pagesWithCells.add(page);
+  }
+  // AI の位置が1つも無い大問：前後の大問の表のあいだに、行数が同じ表が1つだけなら、並び順から推定する（要確認）
+  info.forEach((gi, i) => {
+    if (gi.col || gi.mid) return;
+    const prev = info.slice(0, i).reverse().find((x) => x.col)?.col;
+    const next = info.slice(i + 1).find((x) => x.col)?.col;
+    // 前後の大問の表と縦に並ぶ（左右が重なる）欄だけを候補にする（問題文の中の表・枠を除く）
+    const span = (c: Col) => [c.rows[0].l / c.f.width, c.rows[0].r / c.f.width];
+    const inLine = (c: Col) => [prev, next].some((o) => {
+      if (!o) return false;
+      const [a0, a1] = span(o), [b0, b1] = span(c);
+      return Math.min(a1, b1) - Math.max(a0, b0) > 0.5 * Math.min(a1 - a0, b1 - b0);
+    });
+    const cand = cols.filter((c) => !used.has(c) && c.rows.length === gi.g.length && inLine(c)
+      && (!prev || pos(c) > pos(prev)) && (!next || pos(c) < pos(next)));
+    if (cand.length === 1) { gi.col = cand[0]; used.add(cand[0]); (gi as { guessed?: boolean }).guessed = true; }
+  });
 
-    // 同じ列（表）に入っている数を数え、小問の数と表の行数が同じ表を探す
-    const columns: { rows: Cell[]; members: number }[] = [];
-    for (const cell of cells.values()) {
-      const rows = columnOf(f, cell);
-      const same = columns.find((c) => Math.abs(c.rows[0].l - rows[0].l) < 6 && Math.abs(c.rows[0].r - rows[0].r) < 6 && Math.abs(c.rows[0].t - rows[0].t) < 6);
-      if (same) same.members++;
-      else columns.push({ rows, members: 1 });
-    }
-    const best = columns.sort((a, b) => b.members - a.members)[0];
-    if (best && best.rows.length === g.length && best.members >= Math.ceil(g.length / 2)) {
-      g.forEach((w, i) => {
-        w.page = page;
-        w.anchor = cellToBox(f, best.rows[i]);
+  for (const gi of info) {
+    const c = gi.col;
+    if (c) {
+      const guessed = (gi as { guessed?: boolean }).guessed;
+      gi.g.forEach((w, i) => {
+        w.page = c.page;
+        w.anchor = cellToBox(c.f, c.rows[i]);
         w.source = "table";
         // 表に割り当てられたので、位置が分からなかった・ページが合わなかった理由は解消する
-        w.issues = [];
+        w.issues = guessed ? ["AI が位置を返さなかったため、解答欄の並び順から推定しました"] : [];
       });
       continue;
     }
-    for (const [w, cell] of cells) {
-      w.anchor = cellToBox(f, cell);
-      w.source = "cell";
+    // 表に割り当てられない大問：AI の位置を囲む枠があればそれを使う
+    for (const w of gi.g) {
+      const f = w.anchor ? pages[w.page - 1]?.frames : null;
+      if (!f || !w.anchor) continue;
+      const m = center(w.anchor);
+      const cell = cellAt(f, m.x * f.width, m.y * f.height);
+      if (cell) { w.anchor = cellToBox(f, cell); w.source = "cell"; }
     }
   }
 
   // 枠のあるページで枠が見つからなかった設問（作図を除く）
   for (const w of work) {
-    if (w.source === "bbox" && !w.it.graph && pagesWithCells.has(w.page)) w.issues.push("AI の位置に解答欄の枠が見つかりません");
+    if (w.source === "bbox" && !w.it.graph && pagesWithCells.has(w.page)) w.issues.push("解答欄の枠と対応づけられません（AI の位置をそのまま使っています）");
+    if (w.source === "cell" && !w.it.graph) w.issues.push("大問の小問の数と解答欄の表の行数が合いません");
   }
 
   // ほかの設問と同じ欄を指している
