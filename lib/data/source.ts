@@ -64,6 +64,9 @@ export interface DataSource {
   removeTest(testId: string): Promise<"deleted" | "archived">;
   restoreTest(testId: string): Promise<void>;
   linkImport(importId: string, testId: string): Promise<void>;
+  /** まだ登録していない自分の読み取り結果（別の URL・端末で再開するため。AI は呼ばない） */
+  listOpenImports(): Promise<{ id: string; requestId: string; createdAt: string; files: { path: string; kind: "key" | "paper" | "student"; name: string }[]; result: ImportResult }[]>;
+  downloadImportFile(path: string): Promise<Blob>;
 
   signedImageUrl(path: string): Promise<string>;
   loadAudit(): Promise<AuditRow[]>;

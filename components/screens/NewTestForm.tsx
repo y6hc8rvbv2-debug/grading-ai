@@ -12,6 +12,7 @@ import { QTYPES } from "@/lib/grading/engine";
 import { friendlyError } from "@/lib/errors";
 import { prepareImage, isHeic } from "@/lib/image";
 import { deleteDraft, loadDraft, saveDraft } from "@/lib/draft";
+import { draftToFile, fileToDraft } from "@/lib/draft-file";
 import { useUI } from "@/components/ui-context";
 import { Badge, Btn, Field, Input, Modal, Select, grid, inputStyle } from "@/components/ui";
 import type { FigureRef, ImportBox, ImportResult, NewTestInput, QType } from "@/lib/types";
@@ -137,27 +138,80 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
     if (!open || restored.current) return;
     restored.current = true;
     loadDraft<Draft>(DRAFT_KEY).then((d) => {
-      if (!d || (d.v !== 1 && d.v !== 2)) return;
-      setName(d.name); setSubject(d.subject); setGrade(d.grade); setTerm(d.term); setDate(d.date);
-      setTestNo(d.testNo); setUnitsText(d.unitsText);
-      const srcs = d.sources ?? [];
-      // 以前の下書き（v1）は資料を「何番目か」で指していたので、資料の id に置き換える（AI は呼ばない）
-      const fromLegacy = (b: unknown): Ref => {
-        if (!b || typeof b !== "object") return null;
-        const o = b as Record<string, number | string>;
-        if ("sourceId" in o) return o as unknown as Ref;
-        const src = srcs[Number(o.file) - 1];
-        return src ? { sourceId: src.id, page: Number(o.page) || 1, x: Number(o.x), y: Number(o.y), w: Number(o.w), h: Number(o.h) } : null;
-      };
-      if (d.rows?.length) {
-        setRows(d.rows.map((r) => ({ ...r, key: ++rowKey, answerBox: fromLegacy(r.answerBox), figure: fromLegacy(r.figure) })));
-      }
-      setSources(srcs);
-      setImported(d.imported ?? null);
-      if ((d.sources ?? []).length) setImportOpen(true);
-      setDraftNote(`下書きを復元しました（${new Date(d.savedAt).toLocaleString("ja-JP")} に自動保存）`);
+      if (d && (d.v === 1 || d.v === 2)) applyDraft(d, `下書きを復元しました（${new Date(d.savedAt).toLocaleString("ja-JP")} に自動保存）`);
     });
-  }, [open]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** 下書きを入力欄に戻す（端末の自動保存・ファイルの読み込みで共通。AI は呼ばない） */
+  function applyDraft(d: Draft, note: string) {
+    setName(d.name ?? ""); setSubject(d.subject ?? "数学"); setGrade(d.grade ?? "2"); setTerm(d.term ?? ""); setDate(d.date ?? "");
+    setTestNo(d.testNo ?? ""); setUnitsText(d.unitsText ?? "");
+    const srcs = d.sources ?? [];
+    // 以前の下書き（v1）は資料を「何番目か」で指していたので、資料の id に置き換える
+    const fromLegacy = (b: unknown): Ref => {
+      if (!b || typeof b !== "object") return null;
+      const o = b as Record<string, number | string>;
+      if ("sourceId" in o) return srcs.some((x) => x.id === o.sourceId) ? (o as unknown as Ref) : null;
+      const src = srcs[Number(o.file) - 1];
+      return src ? { sourceId: src.id, page: Number(o.page) || 1, x: Number(o.x), y: Number(o.y), w: Number(o.w), h: Number(o.h) } : null;
+    };
+    setRows(d.rows?.length
+      ? d.rows.map((r) => ({ ...r, key: ++rowKey, answerBox: fromLegacy(r.answerBox), figure: fromLegacy(r.figure) }))
+      : [blankRow()]);
+    setSources(srcs);
+    setImported(d.imported ?? null);
+    setImportOpen(srcs.length > 0);
+    setView(null); setSelected(null); setError("");
+    setDraftNote(note);
+  }
+
+  /* ---------------------------------------------------- 下書きの書き出し・読み込み（別の URL・端末へ移す） */
+  const [moving, setMoving] = useState(false);
+  const [openImports, setOpenImports] = useState<Awaited<ReturnType<typeof ds.listOpenImports>> | null>(null);
+  const exportDraft = async () => {
+    const blob = await draftToFile(snapshot() as unknown as Parameters<typeof draftToFile>[0]);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `test-draft-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast(`下書きを書き出しました（資料 ${sources.length} 件・設問 ${rows.length} 問）。生徒の答案の画像を含む場合があるので、読み込んだ後は削除してください`);
+  };
+  const importDraftFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const d = fileToDraft(await file.text()) as unknown as Draft;
+      const n = (d.rows ?? []).length;
+      if (dirty && !window.confirm(`いま入力中の内容を、ファイルの下書き（資料 ${d.sources.length} 件・設問 ${n} 問）で置き換えますか？`)) return;
+      applyDraft(d, `ファイルから下書きを読み込みました（資料 ${d.sources.length} 件・設問 ${n} 問。AI は呼んでいません）`);
+      await saveDraft(DRAFT_KEY, { ...d, v: 2, savedAt: new Date().toISOString() });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "下書きのファイルを読み込めませんでした。");
+    }
+  };
+  // 予備：端末の下書きが無くても、サーバーに残っている AI の読み取り結果（未登録のもの）から再開できる。AI は呼ばない
+  const showOpenImports = async () => setOpenImports(await ds.listOpenImports());
+  const resumeImport = async (imp: NonNullable<typeof openImports>[number]) => {
+    if (dirty && !window.confirm("いま入力中の内容を、この読み取り結果で置き換えますか？（読み取り後に手で直した内容は含まれません）")) return;
+    setMoving(true);
+    try {
+      const placed: Source[] = [];
+      for (const f of imp.files) {
+        const blob = await ds.downloadImportFile(f.path);
+        const type = blob.type || (f.path.endsWith(".pdf") ? "application/pdf" : f.path.endsWith(".png") ? "image/png" : "image/jpeg");
+        placed.push({ id: uid(), name: f.name, kind: f.kind, type, blob, path: f.path, requestId: imp.requestId });
+      }
+      setSources(placed);
+      setImportOpen(true);
+      applyImport(imp.result, { importId: imp.id, requestId: imp.requestId }, placed);
+      setDraftNote(`以前のAI読み取り結果から再開しました（${new Date(imp.createdAt).toLocaleString("ja-JP")}・資料 ${placed.length} 件。AI は呼んでいません）。読み取り後に手で直した内容は含まれないので、確認してください`);
+      setOpenImports(null);
+    } catch (e) {
+      setError(friendlyError(e, "読み取り結果の読み込み"));
+    } finally {
+      setMoving(false);
+    }
+  };
 
   const snapshot = useCallback((): Draft => ({
     v: 2, savedAt: new Date().toISOString(), name, subject, grade, term, date, testNo, unitsText, rows, sources, imported,
@@ -400,6 +454,34 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
         <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 11px", borderRadius: 9, background: T.infoSoft, color: T.info, fontSize: 12.5, marginBottom: 10 }}>
           <span style={{ flex: 1 }}>{draftNote}</span>
           <Btn size="sm" variant="ghost" onClick={discardDraft}>下書きを破棄</Btn>
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10, fontSize: 12, color: T.textSub }}>
+        <span>下書き：</span>
+        <Btn size="sm" onClick={exportDraft} disabled={!dirty || !!importing}>下書きを書き出す（ファイル）</Btn>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+          <span style={{ border: `1px solid ${T.line}`, borderRadius: 8, padding: "4px 10px", background: T.panel, color: T.text }}>下書きを読み込む（ファイル）</span>
+          <input type="file" accept="application/json,.json" aria-label="下書きを読み込む" style={{ display: "none" }}
+            onChange={(e) => { importDraftFile(e.target.files?.[0]); e.target.value = ""; }} />
+        </label>
+        {ds.mode === "supabase" && <Btn size="sm" variant="ghost" onClick={showOpenImports} disabled={moving}>以前のAI読み取り結果から再開</Btn>}
+        <span style={{ fontSize: 11, color: T.textFaint }}>別の URL・端末へ移すときに使います（AI は呼びません）</span>
+      </div>
+      {openImports && (
+        <div style={{ border: `1px solid ${T.line}`, borderRadius: 9, padding: 10, marginBottom: 10, background: T.panelAlt, fontSize: 12.5 }}>
+          {openImports.length === 0 ? (
+            <div>まだテストに登録していない読み取り結果はありません。</div>
+          ) : openImports.map((imp) => (
+            <div key={imp.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "4px 0" }}>
+              <span style={{ flex: 1, minWidth: 220 }}>
+                {new Date(imp.createdAt).toLocaleString("ja-JP")}　資料 {imp.files.length} 件・設問 {imp.result?.questions?.length ?? 0} 問
+                {imp.result?.title ? `（${imp.result.title}）` : ""}
+              </span>
+              <Btn size="sm" onClick={() => resumeImport(imp)} disabled={moving}>{moving ? "読み込んでいます…" : "この結果で再開"}</Btn>
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: T.textFaint, marginTop: 4 }}>読み取り後に手で直した配点・確認済みの印などは含まれません。手で直した内容も移すときは「下書きを書き出す／読み込む」を使ってください。</div>
+          <Btn size="sm" variant="ghost" onClick={() => setOpenImports(null)}>閉じる</Btn>
         </div>
       )}
       <div style={grid(200, 12)}>

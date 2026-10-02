@@ -11,7 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import { typeLabelOf } from "@/lib/grading/engine";
 import { rubricFromRow } from "@/lib/db/rubric";
 import type {
-  AuditRow, ClassRoom, GradingInput, GradingLog, Item, ItemPatch, Mark, NewTestInput, Profile,
+  AuditRow, ClassRoom, GradingInput, GradingLog, ImportResult, Item, ItemPatch, Mark, NewTestInput, Profile,
   QType, Quality, QuestionStat, RateRow, Retention, ReviewEntry, Rubric, School,
   Student, Submission, Test, Workspace,
 } from "@/lib/types";
@@ -477,6 +477,29 @@ export async function removeTest(testId: string): Promise<"deleted" | "archived"
 export async function restoreTest(testId: string) {
   const { error } = await createClient().rpc("restore_test", { p_test_id: testId });
   if (error) throw error;
+}
+
+/** まだテストに登録していない、自分の AI 読み取りの結果（新しい順）。別の URL・端末で作業を再開するのに使う */
+export async function listOpenImports() {
+  const sb = createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  const { data, error } = await sb.from("test_imports")
+    .select("id, request_id, created_at, files, result")
+    .eq("status", "done").is("test_id", null).eq("created_by", user?.id ?? "")
+    .order("created_at", { ascending: false }).limit(5);
+  if (error) return [];
+  return (data ?? []).map((r: any) => ({
+    id: r.id as string, requestId: r.request_id as string, createdAt: r.created_at as string,
+    files: (r.files ?? []) as { path: string; kind: "key" | "paper" | "student"; name: string }[],
+    result: r.result as ImportResult,
+  }));
+}
+
+/** 保存済みの資料を読み込む（読み取り結果から再開するとき） */
+export async function downloadImportFile(path: string) {
+  const { data, error } = await createClient().storage.from("answer-sheets").download(path);
+  if (error || !data) throw error ?? new Error("資料を読み込めませんでした。");
+  return data;
 }
 
 /** 読み取りの記録に、登録したテストを紐づける */

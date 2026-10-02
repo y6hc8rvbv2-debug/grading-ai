@@ -137,6 +137,8 @@ export function createSupabaseSource(): DataSource {
     removeTest: (testId) => db.removeTest(testId),
     restoreTest: (testId) => db.restoreTest(testId),
     linkImport: (importId, testId) => db.linkImport(importId, testId),
+    listOpenImports: () => db.listOpenImports(),
+    downloadImportFile: (path) => db.downloadImportFile(path),
 
     signedImageUrl: (path) => db.signedImageUrl(path),
     loadAudit: () => db.loadAudit(),

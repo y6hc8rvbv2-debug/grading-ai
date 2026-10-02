@@ -639,6 +639,81 @@ ok((await importReqs()).length === importBefore, "下書きの再開・表示切
 await page.goto(BASE + "/tests"); await settle();
 await page.evaluate(() => new Promise((r) => { const q = indexedDB.deleteDatabase("saiten-drafts"); q.onsuccess = q.onerror = () => r(null); }));
 
+// 11g. 下書きを別の URL へ移す（URL ごとに下書きが分かれるため）。どの方法でも AI は呼ばない
+const moveBefore = (await importReqs()).length;
+const freshPage = async () => {
+  const c = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: true });
+  const p = await c.newPage();
+  await p.goto(BASE + "/login");
+  await p.getByLabel("メールアドレス").fill("admin@a.example");
+  await p.getByLabel("パスワード").fill("pass-A-123");
+  await p.getByRole("button", { name: "ログイン" }).click();
+  await p.waitForURL(BASE + "/");
+  await p.goto(BASE + "/tests"); await p.waitForTimeout(800);
+  return { c, p };
+};
+const summaryOk = async (p) => {
+  const t = await p.locator("body").innerText();
+  return t.includes("設問 20 問") && t.includes("合計 100 点") && t.includes("未確認 3") && (await p.getByRole("button", { name: /\.png」を削除$/ }).count()) === 4;
+};
+// (1) 書き出しボタンが無い以前の版：開発者ツールに docs/draft-export-snippet.js を貼って書き出す（旧形式 v1 の下書き）
+const oldSite = await freshPage();
+await seedDraft(oldSite.p);
+const snippet = await fs.readFile(new URL("../../docs/draft-export-snippet.js", import.meta.url), "utf8");
+let alertMsg = "";
+oldSite.p.once("dialog", (d) => { alertMsg = d.message(); d.accept(); });
+const [dlOld] = await Promise.all([oldSite.p.waitForEvent("download"), oldSite.p.evaluate(snippet)]);
+const oldFile = `${OUT}draft-old.json`;
+await dlOld.saveAs(oldFile);   // 画面を閉じるとダウンロードが消えるので保存しておく
+ok(alertMsg.includes("資料 4 件・設問 20 問") && JSON.parse(await fs.readFile(oldFile, "utf8")).files.length === 4,
+  "以前の版の画面から、コンソールのコードで下書き（資料4件・20問）を書き出せる");
+await oldSite.c.close();
+// (2) 新しい URL（下書きが空のブラウザ）で読み込む
+const newSite = await freshPage();
+await newSite.p.getByRole("button", { name: "＋ テストを追加" }).click(); await newSite.p.waitForTimeout(500);
+ok(!(await newSite.p.locator("body").innerText()).includes("下書きを復元しました"), "新しい URL では、もとの下書きは見えない（URL ごとに別）");
+await newSite.p.getByLabel("下書きを読み込む").setInputFiles(oldFile);
+await newSite.p.getByText(/ファイルから下書きを読み込みました（資料 4 件・設問 20 問/).waitFor({ timeout: 10000 });
+ok(await summaryOk(newSite.p), "読み込んだ下書き：資料4件・20問・合計100点・要確認3問（未確認3）");
+await newSite.p.getByRole("button", { name: "資料1 の 1 ページ目を表示" }).click(); await newSite.p.waitForTimeout(300);
+ok(await newSite.p.locator('[aria-label="該当箇所"]').count() === 1 && await newSite.p.locator('img[alt^="元の資料"]').count() === 1,
+  "読み込んだ下書きでも、元画像と模範図の位置を表示できる");
+await newSite.p.waitForTimeout(900);
+await newSite.p.reload(); await newSite.p.waitForTimeout(800);
+await newSite.p.getByRole("button", { name: "＋ テストを追加" }).click();
+await newSite.p.getByText(/下書きを復元しました/).waitFor({ timeout: 10000 });
+ok(await summaryOk(newSite.p), "読み込んだ下書きは、新しい URL の端末にも保存される");
+// (3) 新しい版どうし：「下書きを書き出す」→ 別の端末で「下書きを読み込む」
+const [dlNew] = await Promise.all([newSite.p.waitForEvent("download"), newSite.p.getByRole("button", { name: "下書きを書き出す（ファイル）" }).click()]);
+const newFile = `${OUT}draft-new.json`;
+await dlNew.saveAs(newFile);
+await newSite.c.close();
+const third = await freshPage();
+await third.p.getByRole("button", { name: "＋ テストを追加" }).click(); await third.p.waitForTimeout(500);
+await third.p.getByLabel("下書きを読み込む").setInputFiles(newFile);
+await third.p.getByText(/ファイルから下書きを読み込みました/).waitFor({ timeout: 10000 });
+ok(await summaryOk(third.p), "「下書きを書き出す／読み込む」で別の端末へ移せる（資料・設問・確認状態）");
+// (4) 予備：サーバーに残っている未登録の読み取り結果から再開（読み取り後に手で直した内容は含まない）
+third.p.once("dialog", (d) => d.accept());
+await third.p.getByRole("button", { name: "下書きを破棄" }).click(); await third.p.waitForTimeout(400);
+await third.p.getByRole("button", { name: "模範解答・配点表から自動入力" }).click();
+await third.p.locator("#import-key").setInputFiles([img(5)]);
+await third.p.getByText("資料1").first().waitFor();
+await third.p.getByRole("button", { name: "AIで読み取って入力する" }).click();
+await third.p.getByText(/20 問を読み取りました/).waitFor({ timeout: 30000 });
+await third.c.close();
+const resume = await freshPage();
+await resume.p.getByRole("button", { name: "＋ テストを追加" }).click(); await resume.p.waitForTimeout(500);
+await resume.p.getByRole("button", { name: "以前のAI読み取り結果から再開" }).click();
+await resume.p.getByText(/資料 1 件・設問 20 問/).waitFor({ timeout: 10000 });
+await resume.p.getByRole("button", { name: "この結果で再開" }).first().click();
+await resume.p.getByText(/以前のAI読み取り結果から再開しました/).waitFor({ timeout: 15000 });
+const rt = await resume.p.locator("body").innerText();
+ok(rt.includes("設問 20 問") && rt.includes("大問1=5・大問2=5・大問3=1・大問4=3・大問5=1・大問6=3・大問7=2") && (await resume.p.getByRole("button", { name: /」を削除$/ }).count()) >= 1,
+  "予備：未登録の読み取り結果（資料と設問）から再開できる");
+await resume.c.close();
+ok((await importReqs()).length === moveBefore + 1, `下書きの移動・再開では AI を呼ばない（呼んだのは (4) の準備の1回だけ：${(await importReqs()).length - moveBefore}回）`);
+
 // 11f. 不要なテストの削除（答案が無いテストは削除、答案・成績があるテストはアーカイブ）
 await page.goto(BASE + "/tests"); await settle();
 await page.getByRole("button", { name: "＋ テストを追加" }).click(); await settle(600);

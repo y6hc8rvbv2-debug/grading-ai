@@ -200,6 +200,8 @@ export function createDemoSource(): DataSource {
       if (t) { t.archivedAt = null; log("test.restore", "tests", testId, {}); }
     },
     linkImport: async () => {},
+    listOpenImports: async () => [],
+    downloadImportFile: async () => { throw new Error("デモモードでは資料を読み込めません。"); },
 
     signedImageUrl: async () => "",
     loadAudit: async () => clone(audit),
