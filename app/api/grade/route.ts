@@ -19,6 +19,7 @@
 // service_role は使わないので、読み書きできるのは RLS が許す自校の答案だけ。
 // サーバーに置くのは ANTHROPIC_API_KEY だけ（ブラウザ・応答・ログには出さない）。
 // ============================================================================
+import { targetedTest, mergeTargeted } from "@/lib/ai/targeted";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { rubricFromRow } from "@/lib/db/rubric";
@@ -229,17 +230,21 @@ export async function POST(request: Request) {
 
   const t0 = Date.now();
   try {
-    const { parsed, model, usage, stopReason } = await callClaude({ pages: inputs.pages, test: inputs.gradeTest, rubric: inputs.rubric }, opts);
+    const previous = [...rows].reverse().find(r=>r.status === "done" && r.items);
+    const selectedTest = targetedTest(inputs.gradeTest, previous?.items ?? null, previous?.quality?.ok === true);
+    const { parsed, model, usage, stopReason } = await callClaude({ pages: inputs.pages, test: selectedTest, rubric: inputs.rubric }, opts);
     const tokens = {
       input: usage.input_tokens ?? 0, output: usage.output_tokens ?? 0,
       cacheWrite: usage.cache_creation_input_tokens ?? 0, cacheRead: usage.cache_read_input_tokens ?? 0,
     };
-    const { items, quality } = normalizeResult(parsed, inputs.gradeTest, inputs.rubric);
-    addChecks(items, inputs.gradeTest);
+    const normalized = normalizeResult(parsed, selectedTest, inputs.rubric);
+    const quality = normalized.quality;
+    addChecks(normalized.items, selectedTest);
+    const items = mergeTargeted(inputs.gradeTest, normalized.items, previous?.items ?? null);
     // 前の段階と判定が分かれた設問（最後の段階でだけ、要確認の理由にする）
     const prevDone = [...rows].reverse().find((r) => r.status === "done" && r.items);
     const isLast = nextIndex === plan.length - 1;
-    if (isLast && prevDone) markDisagreement(items, prevDone.items);
+    if (isLast && prevDone) markDisagreement(normalized.items, prevDone.items);
     const reasons = escalationReasons(items);
     if (!quality.ok) reasons.push({ code: "quality", msg: `答案全体：${FLAG_MESSAGE.quality}（${quality.issues.map((i) => i.k).join("・")}）` });
     const escalate = !isLast && reasons.length > 0;

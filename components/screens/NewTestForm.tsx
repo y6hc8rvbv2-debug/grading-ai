@@ -271,9 +271,10 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
   };
 
   /* ---------------------------------------------------- AI で読み取る */
+  const [generateKey, setGenerateKey] = useState(false);
   const runImport = async () => {
     if (lock.current) return;
-    if (!sources.some((s) => s.kind === "key")) { toast("模範解答の画像またはPDFを選んでください", "warn"); return; }
+    if (!generateKey && !sources.some((s) => s.kind === "key")) { toast("模範解答の画像またはPDFを選んでください", "warn"); return; }
     const hasContent = rows.some((r) => r.correct || r.model) || rows.length > 1;
     if (hasContent && !window.confirm("入力済みの設問を、AIの読み取り結果で置き換えます。よろしいですか？（いまの内容は下書きから消えます）")) return;
     lock.current = true;
@@ -281,8 +282,7 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
     try {
       // 資料を学校専用の保管場所に置く（同じ資料・同じ読み取りなら置き直さない）
       setImporting("upload");
-      const reuse = !force && sources.every((s) => s.path && s.requestId === sources[0].requestId) ? sources[0].requestId : null;
-      const requestId = reuse ?? crypto.randomUUID();
+      const requestId = crypto.randomUUID();
       const placed: Source[] = [];
       for (let i = 0; i < sources.length; i++) {
         const s = sources[i];
@@ -294,7 +294,7 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
       setSources(placed);
       setImporting("read");
       const r = await ds.importTestKey({
-        requestId, force, files: placed.map((s) => ({ path: s.path!, kind: s.kind, name: s.name })),
+        requestId, force, generate: generateKey, files: placed.map((s) => ({ path: s.path!, kind: s.kind, name: s.name })),
       });
       applyImport(r.result, { importId: r.importId, requestId }, placed);
       setForce(false);
@@ -514,9 +514,10 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
         )}
         {importOpen && (
           <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+            <label><input type="checkbox" checked={generateKey} disabled={!!importing} onChange={e => setGenerateKey(e.target.checked)} /> 模範解答がない：問題用紙・生徒答案の印刷された問題から解答案を作る（登録前に教師が確認）</label>
             <div style={grid(260, 10)}>
               <label style={{ fontSize: 12, color: T.text }}>
-                <b>1. 模範解答（必須）</b>
+                <b>1. 模範解答（なしの場合は下のチェック）</b>
                 <div style={{ fontSize: 11, color: T.textSub, margin: "2px 0 6px" }}>画像・PDF・iPhone の写真（HEIC）。複数ページは複数選べます</div>
                 <input id="import-key" type="file" multiple accept="image/*,.heic,.heif,application/pdf" disabled={!!importing}
                   onChange={(e) => { addSources(e.target.files, "key"); e.target.value = ""; }} />
@@ -548,12 +549,12 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
                   </div>
                 ))}
                 <div style={{ fontSize: 11, color: T.textFaint, lineHeight: 1.7 }}>
-                  正答は「模範解答」からだけ取り込みます。「生徒の答案」は印刷された配点・設問番号だけを読み、手書きの答えは使いません（登録後に保管場所から削除します）。
+                  模範解答なしモードでは印刷された問題文から解答案を作ります。生徒の手書きは正答の根拠に使いません。問題文がない場合は問題用紙を追加してください。
                 </div>
               </div>
             )}
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <Btn variant="primary" onClick={runImport} disabled={!!importing || !sources.some((s) => s.kind === "key")}>
+              <Btn variant="primary" onClick={runImport} disabled={!!importing || !sources.length || (!generateKey && !sources.some((s) => s.kind === "key"))}>
                 {importing === "upload" ? "資料を保存しています…" : importing === "read" ? "AIが読み取っています…（1〜3分）" : "AIで読み取って入力する"}
               </Btn>
               <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11.5, color: T.textSub }}>

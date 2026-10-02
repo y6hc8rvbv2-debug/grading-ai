@@ -11,7 +11,7 @@ import type {
 
 export type View =
   | "dashboard" | "new" | "history" | "processing" | "tests" | "model" | "rubric"
-  | "students" | "classes" | "scores" | "weakness" | "reports" | "review" | "settings" | "detail" | "compare";
+  | "students" | "classes" | "scores" | "weakness" | "reports" | "review" | "settings" | "detail" | "compare" | "batch-review";
 
 export type DisplayMode = "class" | "exam" | "initials" | "anon";
 

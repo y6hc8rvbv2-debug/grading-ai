@@ -218,7 +218,7 @@ export type NewTestInput = {
 export type ImportBox = { file: number; page: number; x: number; y: number; w: number; h: number } | null;
 export type ImportedQuestion = {
   big: number; bigLabel: string; sub: string; type: QType; correct: string;
-  points: number | null; pointsHint: number | null; model: string;
+  points: number | null; pointsHint: number | null; pointsOrigin?: string; model: string;
   answerBox: ImportBox; figure: ImportBox; flags: string[];
 };
 export type ImportResult = { title: string; subject: string; maxScore: number | null; questions: ImportedQuestion[]; warnings: string[] };

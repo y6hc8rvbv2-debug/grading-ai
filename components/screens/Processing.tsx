@@ -44,6 +44,7 @@ export default function Processing() {
   return (
     <div style={{ display: "grid", gap: 11 }}>
       <Card>
+        <p><a href="/batch-review" target="_blank" rel="noreferrer">終わった答案を別タブで確認する</a></p>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: T.textSub, lineHeight: 1.8 }}>
             {ds.mode === "demo"

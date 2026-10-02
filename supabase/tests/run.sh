@@ -24,4 +24,5 @@ done
 
 echo "== supabase/tests/rls_test.sql"
 "${PSQL_APP[@]}" -f supabase/tests/rls_test.sql
+"${PSQL_APP[@]}" -f supabase/tests/workflow_test.sql
 echo "OK: すべてのテストが通りました"

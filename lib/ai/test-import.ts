@@ -53,10 +53,10 @@ export const IMPORT_SCHEMA = {
           sub: { type: "string" },
           type: { type: "string", enum: QTYPE_KEYS },
           correct: { type: "string" },
-          correct_status: { type: "string", enum: ["read", "unreadable", "not_in_key"] },
+          correct_status: { type: "string", enum: ["read", "unreadable", "not_in_key", "generated"] },
           correct_file: { type: "integer" },
           points: { type: "integer" },
-          points_status: { type: "string", enum: ["printed", "unknown"] },
+          points_status: { type: "string", enum: ["printed", "unknown", "absent", "unreadable"] },
           points_file: { type: "integer" },
           explanation: { type: "string" },
           criteria: { type: "string" },
@@ -81,7 +81,7 @@ export const IMPORT_SYSTEM = `あなたは学校のテストを登録する教�
 - 設問は原本の順番どおりに、小問1つを1件として返します。大問の番号（big）は原本の大問番号（1, 2, 3…）、big_label は原本の表記（例: "1", "Ⅰ", "第1問"）、sub は原本の小問表記（例: "(1)", "①", "問1"）。小問が無い大問は sub を空文字にします。大問・小問を振り直したり、まとめたり、分けたりしません。
 - type は calc（計算）・choice（選択）・fill（穴埋め・語句）・short（短い記述）・long（長い記述・証明）・graph（作図・グラフ）のいずれかです。
 - correct は模範解答に書かれた正答をそのまま書き写します。correct_status は、読めたら "read"、かすれ・見切れなどで読めなければ "unreadable"（correct は空文字）、模範解答に載っていなければ "not_in_key"（correct は空文字）。correct_file はその正答を読んだ資料の番号です。
-- points は資料に印刷された配点です。配点が印刷されていない・読めないときは points を 0、points_status を "unknown" にします。満点を設問数で割るなどして配点を推測しないでください。points_file は配点を読んだ資料の番号（不明なら 0）。
+- points は資料に印刷された配点です。配点が印刷されていない・読めないときは points を 0、配点の記載がなければ points_status を "absent"、印刷があるが読めなければ "unreadable" にします。満点を設問数で割るなどして配点を推測しないでください。points_file は配点を読んだ資料の番号（不明なら 0）。
 - explanation は採点の要点・解き方の要点を短く書きます（模範解答に解説があればそれを要約）。
 - 作図・グラフ（graph）の問題は、「右図」「図参照」などを correct に書かず空文字にし、figure_box に模範図がある位置を示し、criteria に採点の条件（例: 角の二等分線の作図の跡が残っている、交点を P と記している）を書きます。
 - answer_box は模範解答の中でその設問の正答が書かれている位置、figure_box は模範図の位置です。file は資料の番号（1から）、page はその資料の中のページ番号（1から）、x・y・w・h はページの幅・高さに対する割合（0〜1）。分からなければすべて 0 にします。
@@ -126,7 +126,7 @@ function box(v: unknown, kinds: SourceKind[], allowed: SourceKind[]): ImportBox 
 const FIGURE_ONLY = /^(右|左|下|上|別)?(図|ず)(参照|のとおり|の通り|のように)?$|^図[を]?参照$/;
 
 /** AI の読み取り結果を、教員が確認できる入力欄の形にする（推測で確定しない） */
-export function normalizeImport(raw: unknown, kinds: SourceKind[]): ImportResult {
+export function normalizeImport(raw: unknown, kinds: SourceKind[], generate = false): ImportResult {
   const r = (raw ?? {}) as Record<string, unknown>;
   const list = Array.isArray(r.questions) ? r.questions : [];
   const seen = new Set<string>();
@@ -147,6 +147,8 @@ export function normalizeImport(raw: unknown, kinds: SourceKind[]): ImportResult
     if (type === "graph") {
       if (correct && !FIGURE_ONLY.test(correct.replace(/\s/g, ""))) flags.push(`正答の欄に「${correct}」とあります。作図の採点条件として確認してください`);
       correct = "";
+    } else if (generate && str(q.correct_status) === "generated" && cKind && ["paper", "student"].includes(cKind) && correct) {
+      flags.push("AIが問題文から作成した模範解答案です。正答・条件・解説を確認してください");
     } else if (str(q.correct_status) !== "read") {
       correct = "";
       if (type !== "long" && type !== "short") flags.push(str(q.correct_status) === "not_in_key" ? "模範解答に正答が見当たりません" : "正答を読み取れませんでした");
@@ -174,6 +176,7 @@ export function normalizeImport(raw: unknown, kinds: SourceKind[]): ImportResult
       if (!figure) flags.push("模範図の位置が分かりません。元画像で模範図を確認してください");
       flags.push("作図の採点条件を確認してください");
     }
+    if (generate) flags.push("問題文・図がそろっているか、生成解答と採点条件を教師が確認してください");
     const note = str(q.note);
     if (note) flags.push(`AIからの注意：${note.slice(0, 200)}`);
 
@@ -184,6 +187,7 @@ export function normalizeImport(raw: unknown, kinds: SourceKind[]): ImportResult
       type,
       correct,
       points,
+      pointsOrigin: str(q.points_status),
       pointsHint: !pOk && p >= 1 && p <= 100 ? p : null,
       model: type === "graph" ? [criteria && `採点条件：${criteria}`, explanation].filter(Boolean).join("\n") : explanation,
       answerBox: box(q.answer_box, kinds, ["key"]),
@@ -202,4 +206,21 @@ export function normalizeImport(raw: unknown, kinds: SourceKind[]): ImportResult
     questions,
     warnings,
   };
+}
+
+/** 模範解答がない場合だけ使用。手書きの解答を正答の根拠にしない。 */
+export const GENERATE_KEY_SYSTEM = IMPORT_SYSTEM + `
+今回は模範解答なしモードです。上の「正答の出どころは模範解答だけ」という制限に代えて、問題用紙または生徒の答案の印刷された問題文・図・条件だけから独立に問題を解いてください。
+生徒の手書きの回答・丸・得点・多数決は正答の根拠にしません。問題文が欠ける・図が読めない・解答用紙のみの場合は正答を空欄にし、問題用紙の追加を求めます。
+解けた問題は correct_status="generated"、correct_file=問題文の資料番号、explanation=解き方と検算の要点にします。生成した解答は教師確認前の案です。
+配点は印刷されたものだけを printed として返します。配点の記載のない問題は absent、印刷が読めない問題は unreadable と返します。`;
+
+/** 印刷配点を保持。全問配点なしのときのみ100点を小問に均等配分する。 */
+export function proposePoints(result: ImportResult): ImportResult {
+  const n = result.questions.length;
+  if (!n || result.questions.some(q => q.points !== null || q.pointsOrigin !== "absent")) return result;
+  if (n > 100) return { ...result, warnings: [...result.warnings, "100問を超えるため整数の均等配点を作れません。配点を指定してください"] };
+  return { ...result, maxScore: 100, warnings: [...result.warnings, "配点がないため100点の均等配点案を作成しました。端数は先の設問から1点ずつ配分しています"],
+    questions: result.questions.map((q, i) => ({ ...q, points: Math.floor(100 / n) + (i < 100 % n ? 1 : 0),
+      flags: [...q.flags.filter(f => !f.startsWith("配点が原本")), "自動配点案を確認してください"] })) };
 }

@@ -36,12 +36,14 @@ const NAV: { k: View; i: string; tk: string; admin?: boolean }[] = [
   { k: "weakness", i: "🔬", tk: "nav_weakness" },
   { k: "reports", i: "📄", tk: "nav_reports" },
   { k: "review", i: "🔍", tk: "nav_review" },
+  { k: "batch-review", i: "📬", tk: "nav_batch_review" },
   { k: "settings", i: "⚙️", tk: "nav_settings" },
   // 管理者だけに表示する（API 側でも管理者本人かを確かめる）
   { k: "compare", i: "🧪", tk: "nav_compare", admin: true },
 ];
 
 const TITLES: Record<View, [string, string]> = {
+  "batch-review": ["nav_batch_review", "問題別に確認し、本人専用ページへ返却します"],
   dashboard: ["nav_dashboard", "採点の状況・お知らせ・利用状況をまとめて確認できます"],
   new: ["nav_new", "答案画像を取り込むと、5つのステップで自動採点します"],
   history: ["nav_history", "採点済みの答案を検索・書き出しできます"],

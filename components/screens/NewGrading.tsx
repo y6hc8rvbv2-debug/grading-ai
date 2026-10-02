@@ -18,7 +18,11 @@ import { useUI } from "@/components/ui-context";
 import { Badge, Bar, Btn, Card, Empty, Field, Modal, PseudoQR, Section, Select, Table, grid } from "@/components/ui";
 import type { GradingInput, Quality, Source, Submission } from "@/lib/types";
 
-type Picked = { id: string; name: string; kb: number; src: Source; file?: File; studentId: string };
+import { assignPages, type PageInfo } from "@/lib/workflow/intake";
+import FileThumbnail from "@/components/FileThumbnail";
+import { preflight } from "@/lib/workflow/preflight";
+
+type Picked = { id: string; name: string; kb: number; src: Source; file?: File; studentId: string; warnings?: string[]; hash?: string };
 
 const MAX_FILES = 80;
 // 1人分の答案のページ数の上限（app/api/grade/route.ts の MAX_PAGES と同じ）
@@ -46,6 +50,9 @@ export default function NewGrading() {
   const [pagesPer, setPagesPer] = useState(1);
   const [aiProgress, setAiProgress] = useState<{ done: number; total: number } | null>(null);
   const [preparing, setPreparing] = useState(false);
+  const [checked, setChecked] = useState(false);
+  const [autoAssign, setAutoAssign] = useState(false);
+  const [scanBusy, setScanBusy] = useState(false);
   const [step, setStep] = useState(-1);
   const [log, setLog] = useState<{ t: string; m: string }[]>([]);
   const [createdIds, setCreatedIds] = useState<string[]>([]);
@@ -73,6 +80,7 @@ export default function NewGrading() {
   // クラスを変えたら、取り込んだ答案を出席番号順に割り当て直す
   // （1人分が複数枚なら、pagesPer 枚ずつ同じ生徒にする）
   useEffect(() => {
+    setChecked(false);
     setFiles((prev) => prev.map((f, i) => ({ ...f, studentId: roster[Math.floor(i / pagesPer)]?.id ?? "" })));
   }, [roster, pagesPer]);
 
@@ -95,6 +103,26 @@ export default function NewGrading() {
     })));
   };
 
+  const scanPages = async () => {
+    setScanBusy(true); setChecked(false);
+    try {
+      const pages: PageInfo[] = [];
+      for (const f of files) {
+        if (!f.file) throw new Error("実際の画像を選んでください");
+        const body = new FormData(); body.set("file", f.file);
+        const res = await fetch("/api/intake", { method: "POST", body }); const value = await res.json();
+        if (!res.ok) throw new Error(value.error);
+        pages.push(value);
+      }
+      const assigned = assignPages(pages, roster);
+      const counts = new Map<string, number>();
+      assigned.forEach(x => { if(x.studentId) counts.set(x.studentId,(counts.get(x.studentId)||0)+1); });
+      setFiles(prev => prev.map((f,i) => ({...f,studentId:assigned[i].studentId,warnings:[...(f.warnings||[]),...assigned[i].issues,
+        ...(pages[i].totalPages>0 && counts.get(assigned[i].studentId)!==pages[i].totalPages ? ["ページ数が印刷の総枚数と一致しません"] : [])]})));
+      setAutoAssign(true); toast("振り分け案を作成しました。生徒・順序・全ページを確認してください");
+    } catch(e) { toast(e instanceof Error ? e.message : "読み取り失敗", "ng"); }
+    finally { setScanBusy(false); }
+  };
   const onPickFiles = async (fileList: FileList | null, src: Source = "file") => {
     const picked = Array.from(fileList || []);
     if (!picked.length) return;
@@ -111,7 +139,13 @@ export default function NewGrading() {
     if (tooBig.length) toast(`${tooBig.length} 件は20MBを超えているため外しました。解像度を下げて撮り直してください`, "warn");
     if (!ok.length) return;
     setSource(src);
-    addPicked(ok.map((f) => ({ name: f.name, kb: Math.max(1, Math.round(f.size / 1024)), src, file: f })));
+    const prepared: Omit<Picked,"studentId"|"id">[] = [];
+    for(const f of ok) {
+      const hash=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await f.arrayBuffer()))).map(x=>x.toString(16).padStart(2,"0")).join("");
+      if(files.some(x=>x.hash===hash) || prepared.some(x=>x.hash===hash)) {toast(`${f.name} は同じ画像のため追加しません`,"warn");continue;}
+      prepared.push({name:f.name,kb:Math.max(1,Math.round(f.size/1024)),src,file:f,hash,warnings:await preflight(f).catch(()=>["画質を確認してください"])});
+    }
+    setChecked(false);addPicked(prepared);
     toast(`${ok.length} 件のファイルを追加しました`);
   };
 
@@ -156,6 +190,7 @@ export default function NewGrading() {
     if (!test || !klass) { toast("先にテストとクラスを選んでください", "warn"); return; }
     if (!files.length) { toast("答案画像を追加してください", "warn"); return; }
     if (files.some((f) => !f.studentId)) { toast("生徒が割り当てられていない答案があります。一覧で生徒を選んでください", "warn"); return; }
+    if (!demo && !checked) {toast("生徒・ページ順・画質を確認し、確認済みにチェックしてください", "warn");return;}
     if (tooManyPages) { toast(`1人分の答案は${MAX_PAGES}枚までです。一覧で生徒の割り当てを直してください`, "warn"); return; }
 
     setStage("run"); setStep(0); setLog([]); setCreatedIds([]); setFailed(0);
@@ -327,6 +362,7 @@ export default function NewGrading() {
           )}
         </Section>
 
+        <p><a href="/batch-review" target="_blank" rel="noopener noreferrer">採点が終わった答案を別タブで確認する（この採点画面は開いたままにしてください）</a></p>
         <Card title="処理ログ" style={{ marginBottom: 16 }}>
           <div style={{ font: `12px ${FONT_MONO}`, color: T.textSub, lineHeight: 1.9, maxHeight: 220, overflowY: "auto" }}>
             {log.length === 0 && <div style={{ color: T.textFaint }}>ログを待機しています…</div>}
@@ -464,6 +500,7 @@ export default function NewGrading() {
       <Section title={`2. 取り込んだ答案（${files.length} / ${MAX_FILES} 枚）`}
         right={files.length ? <Btn size="sm" variant="ghost" onClick={() => setFiles([])}>すべて外す</Btn> : null}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+          {!demo && <Btn disabled={scanBusy || preparing || !files.length} onClick={scanPages}>{scanBusy ? "読み取り中…" : "問題番号・受験番号から自動振り分け（AI使用）"}</Btn>}
           <label htmlFor="pages-per" style={{ fontSize: 12, fontWeight: 700, color: T.textSub }}>1人分の答案の枚数</label>
           <select id="pages-per" value={pagesPer} onChange={(e) => setPagesPer(Number(e.target.value))}
             style={{ padding: "5px 8px", borderRadius: 8, border: `1px solid ${T.line}`, background: T.panel, color: T.text, font: "inherit", fontSize: 12.5 }}>
@@ -487,18 +524,20 @@ export default function NewGrading() {
             <div style={grid(170, 9)}>
               {files.map((f) => (
                 <div key={f.id} style={{ border: `1px solid ${f.studentId ? T.line : T.warn}`, borderRadius: 10, padding: 9, background: T.panelAlt, position: "relative" }}>
-                  <div style={{ height: 52, borderRadius: 7, background: T.bgAlt, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19, marginBottom: 7 }}>
-                    {SOURCES[f.src] ? SOURCES[f.src].icon : "🖼"}
+                  <div style={{ height: 114, borderRadius: 7, background: T.bgAlt, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19, marginBottom: 7 }}>
+                    <FileThumbnail file={f.file} />
                   </div>
                   <div style={{ fontSize: 11, color: T.text, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
                   <div style={{ fontSize: 10.5, color: T.textFaint, marginTop: 2, marginBottom: 6, display: "flex", gap: 6, alignItems: "center" }}>
                     {f.kb.toLocaleString()} KB
                     {pageOf(f) && <Badge tone="info">{pageOf(f)!.n} / {pageOf(f)!.of} ページ</Badge>}
                   </div>
+                  {f.warnings?.map((w,i)=><div key={i} style={{color:T.warn,fontSize:12}}>{w}</div>)}
+                  <div><Btn size="sm" disabled={files.indexOf(f)===0} onClick={()=>{setChecked(false);setFiles(p=>{const a=[...p],i=a.findIndex(x=>x.id===f.id);[a[i-1],a[i]]=[a[i],a[i-1]];return a})}}>前へ</Btn><Btn size="sm" disabled={files.indexOf(f)===files.length-1} onClick={()=>{setChecked(false);setFiles(p=>{const a=[...p],i=a.findIndex(x=>x.id===f.id);[a[i+1],a[i]]=[a[i],a[i+1]];return a})}}>後へ</Btn></div>
                   <Select value={f.studentId} style={{ padding: "5px 7px", fontSize: 11.5 }}
-                    onChange={(v: string) => setFiles((p) => p.map((x) => (x.id === f.id ? { ...x, studentId: v } : x)))}
+                    onChange={(v: string) => {setChecked(false);setFiles((p) => p.map((x) => (x.id === f.id ? { ...x, studentId: v } : x)));}}
                     options={[{ value: "", label: "生徒を選ぶ" }, ...roster.map((s) => ({ value: s.id, label: who(s.id) }))]} />
-                  <button onClick={() => setFiles((p) => p.filter((x) => x.id !== f.id))} aria-label="この答案を外す"
+                  <button onClick={() => {setChecked(false);setFiles((p) => p.filter((x) => x.id !== f.id));}} aria-label="この答案を外す"
                     style={{ position: "absolute", top: 5, insetInlineEnd: 5, border: "none", background: "transparent", color: T.textFaint, cursor: "pointer", fontSize: 13 }}>✕</button>
                 </div>
               ))}
@@ -507,6 +546,11 @@ export default function NewGrading() {
         )}
       </Section>
 
+      {files.length>0 && <Card>
+        <p>名簿照合：未割当 {files.filter(f=>!f.studentId).length}枚 ／ 今回の取り込みにない生徒 {roster.filter(s=>!files.some(f=>f.studentId===s.id)).map(s=>s.number+"番").join("・") || "なし"}</p>
+        <p>{autoAssign ? "自動振り分けは候補です。" : ""}画像の四隅・解答欄・薄い作図線、生徒の割り当てとページ順を確認してください。</p>
+        <label><input type="checkbox" checked={checked} onChange={e=>setChecked(e.target.checked)} /> 生徒・ページ順・不足や見切れがないことを確認しました</label>
+      </Card>}
       <Section title="3. 採点の対象と条件">
         <Card>
           <div style={grid(220, 14)}>

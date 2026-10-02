@@ -19,7 +19,7 @@ import { createClient } from "@/lib/supabase/server";
 import { aiConfig, readGradingResponse, toGradingError, GradingError } from "@/lib/ai/grade";
 import { heicToJpeg, looksLikeHeic } from "@/lib/ai/heic";
 import {
-  IMPORT_SCHEMA, IMPORT_SYSTEM, buildImportContent, normalizeImport, type ImportSource, type SourceKind,
+  GENERATE_KEY_SYSTEM, proposePoints, IMPORT_SCHEMA, IMPORT_SYSTEM, buildImportContent, normalizeImport, type ImportSource, type SourceKind,
 } from "@/lib/ai/test-import";
 import { costOfStage } from "@/lib/grading/cost";
 
@@ -39,9 +39,10 @@ const fail = (message: string, status: number, extra: Record<string, unknown> = 
 type FileIn = { path: string; kind: SourceKind; name: string };
 
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => null) as { requestId?: unknown; files?: unknown; force?: unknown } | null;
+  const body = await request.json().catch(() => null) as { requestId?: unknown; files?: unknown; force?: unknown; generate?: unknown } | null;
   const requestId = typeof body?.requestId === "string" ? body.requestId : "";
   const force = body?.force === true;
+  const generate = body?.generate === true;
   const files: FileIn[] = Array.isArray(body?.files)
     ? (body!.files as Record<string, unknown>[]).map((f) => ({
         path: String(f?.path ?? ""), kind: String(f?.kind ?? "") as SourceKind, name: String(f?.name ?? "").slice(0, 120),
@@ -50,15 +51,15 @@ export async function POST(request: Request) {
   if (!UUID.test(requestId)) return fail("画面の情報が古くなっています。画面を再読み込みしてください。", 400);
   if (!files.length || files.length > MAX_FILES) return fail(`資料は1〜${MAX_FILES}ファイルにしてください。`, 400);
   if (files.some((f) => !KINDS.includes(f.kind))) return fail("資料の種類を選び直してください。", 400);
-  if (!files.some((f) => f.kind === "key")) return fail("模範解答の画像またはPDFを1つ以上選んでください。", 400);
+  if (!generate && !files.some((f) => f.kind === "key")) return fail("模範解答の画像またはPDFを1つ以上選んでください。", 400);
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return fail("ログインしていません。もう一度ログインしてください。", 401);
   const cfg = aiConfig();
   if (!cfg.enabled) return fail("採点AIが設定されていません。管理者に、サーバーの環境変数 ANTHROPIC_API_KEY の設定を依頼してください。", 503);
-  const { data: prof } = await supabase.from("profiles").select("school_id").eq("id", user.id).maybeSingle();
-  if (!prof?.school_id) return fail("所属校が設定されていません。管理者に確認してください。", 403);
+  const { data: prof } = await supabase.from("profiles").select("school_id, role").eq("id", user.id).maybeSingle();
+  if (!prof?.school_id || !["admin", "teacher"].includes(prof.role)) return fail("所属校が設定されていません。管理者に確認してください。", 403);
   const schoolId = prof.school_id as string;
   const prefix = `${schoolId}/imports/${requestId}/`;
   if (files.some((f) => !f.path.startsWith(prefix) || f.path.includes(".."))) return fail("資料の保存先が正しくありません。もう一度選び直してください。", 400);
@@ -92,7 +93,7 @@ export async function POST(request: Request) {
     sources.push({ kind: f.kind, name: f.name || `資料${sources.length + 1}`, mediaType, data: buf.toString("base64") });
   }
   if (total > MAX_TOTAL_BYTES) return fail("資料が大きすぎます（合計20MBまで）。PDF はページを分けて選んでください。", 400);
-  const inputSha = createHash("sha256").update(hashes.join("|")).digest("hex");
+  const inputSha = createHash("sha256").update(`${generate ? "generate-v1" : "read"}|${hashes.join("|")}`).digest("hex");
 
   /* ------------------------------------------------ 同じ資料の読み取り */
   if (!force) {
@@ -120,12 +121,12 @@ export async function POST(request: Request) {
       max_tokens: 32000,
       thinking: { type: "adaptive" },
       output_config: { effort: "high", format: { type: "json_schema", schema: IMPORT_SCHEMA as unknown as Record<string, unknown> } },
-      system: IMPORT_SYSTEM,
+      system: generate ? GENERATE_KEY_SYSTEM : IMPORT_SYSTEM,
       messages: [{ role: "user", content: buildImportContent(sources) }],
       ...(cfg.fallbacks ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
     }).finalMessage();
     const { parsed, model, usage } = readGradingResponse(message);
-    const result = normalizeImport(parsed, files.map((f) => f.kind));
+    const result = proposePoints(normalizeImport(parsed, files.map((f) => f.kind), generate));
     const tokens = { input: usage.input_tokens ?? 0, output: usage.output_tokens ?? 0, cacheWrite: usage.cache_creation_input_tokens ?? 0, cacheRead: usage.cache_read_input_tokens ?? 0 };
     await supabase.from("test_imports").update({
       status: "done", result, model, usage: tokens, cost_usd: costOfStage("opus", tokens), finished_at: new Date().toISOString(),

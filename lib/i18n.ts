@@ -138,7 +138,7 @@ export const JA: Dict = {
   nav_scores: "成績一覧",
   nav_weakness: "弱点分析",
   nav_reports: "レポート",
-  nav_review: "要確認一覧",
+  nav_review: "要確認一覧", nav_batch_review: "全員確認・返却",
   nav_settings: "設定",
   nav_compare: "モデル比較試験",
   fav: "お気に入り",

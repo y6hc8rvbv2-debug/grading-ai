@@ -10,7 +10,8 @@
     "test:db": "bash supabase/tests/run.sh",
     "test:e2e": "bash tests/e2e/run.sh",
     "test:unit": "node --conditions=react-server --import tsx --test tests/unit/*.test.ts",
-    "compare:models": "node --conditions=react-server --import tsx scripts/model-compare/run.ts"
+    "compare:models": "node --conditions=react-server --import tsx scripts/model-compare/run.ts",
+    "test:db:memory": "node tests/db/pglite.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",
@@ -25,6 +26,7 @@
     "server-only": "^0.0.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
     "@types/node": "^20.19.43",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",

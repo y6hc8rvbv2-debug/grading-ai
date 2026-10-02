@@ -47,6 +47,7 @@ export default function ReviewView() {
 
   return (
     <div>
+      <p><a href="/batch-review">全員を問題別に確認・一斉配信へ</a></p>
       <Card style={{ marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 200 }}>
