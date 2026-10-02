@@ -62,3 +62,65 @@ do $$ begin
  exception when raise_exception then if sqlerrm like 'TEST:%' then raise; end if; end;
 end $$;
 reset role;
+-- 個別返却：他の生徒が未提出でも、対象の確認条件は緩めない。
+set role app_owner;
+insert into public.students(id,school_id,class_id,number,exam_no,anon_id) values
+('cccccccc-0000-0000-0000-000000000022','cccccccc-0000-0000-0000-000000000000','cccccccc-0000-0000-0000-000000000011',2,'WF02','WF02');
+set role authenticated;
+select pg_temp.login('cccccccc-0000-0000-0000-000000000001');
+do $$ begin
+ begin
+ perform public.publish_submission_result('cccccccc-0000-0000-0000-000000000051');
+ raise exception 'TEST: unreviewed individual accepted';
+ exception when raise_exception then if sqlerrm like 'TEST:%' then raise; end if; end;
+end $$;
+select public.mark_submission_reviewed('cccccccc-0000-0000-0000-000000000051');
+do $$ begin
+ assert public.publish_submission_result('cccccccc-0000-0000-0000-000000000051')=1,'未提出の別生徒がいても個別返却';
+ assert public.publish_submission_result('cccccccc-0000-0000-0000-000000000051')=0,'同一内容の再返却は更新しない';
+ assert (select count(*) from public.result_releases)=1,'別生徒へは返却しない';
+ assert (select payload->'items'->0->>'comment' from public.result_releases)='教師修正';
+ begin
+ perform public.publish_class_results('cccccccc-0000-0000-0000-000000000031','cccccccc-0000-0000-0000-000000000011');
+ raise exception 'TEST: incomplete class accepted';
+ exception when raise_exception then if sqlerrm like 'TEST:%' then raise; end if; end;
+end $$;
+select pg_temp.login('cccccccc-0000-0000-0000-000000000002');
+do $$ begin
+ assert (select count(*) from public.result_releases)=1;
+ begin
+ perform public.publish_submission_result('cccccccc-0000-0000-0000-000000000051');
+ raise exception 'TEST: student individual publish';
+ exception when raise_exception then if sqlerrm like 'TEST:%' then raise; end if; end;
+end $$;
+select pg_temp.login('bbbbbbbb-0000-0000-0000-00000000000b');
+do $$ begin
+ begin
+ perform public.publish_submission_result('cccccccc-0000-0000-0000-000000000051');
+ raise exception 'TEST: other school individual publish';
+ exception when raise_exception then if sqlerrm like 'TEST:%' then raise; end if; end;
+end $$;
+reset role;
+-- 配信先未登録・要確認・設問欠落・削除済みを拒否し、既存返却を保つ。
+set role app_owner;
+do $$
+declare mode integer; rejected boolean;
+begin
+ for mode in 1..4 loop
+  begin
+   if mode=1 then delete from public.student_accounts where student_id='cccccccc-0000-0000-0000-000000000021';
+   elsif mode=2 then update public.submission_items set need_review=true where submission_id='cccccccc-0000-0000-0000-000000000051';
+   elsif mode=3 then delete from public.submission_items where submission_id='cccccccc-0000-0000-0000-000000000051';
+   else update public.submissions set deleted_at=now() where id='cccccccc-0000-0000-0000-000000000051'; end if;
+   update public.submissions set reviewed_at=now() where id='cccccccc-0000-0000-0000-000000000051';
+   perform pg_temp.login('cccccccc-0000-0000-0000-000000000001');
+   rejected:=false;
+   begin perform public.publish_submission_result('cccccccc-0000-0000-0000-000000000051');
+   exception when raise_exception then rejected:=true; end;
+   assert rejected,'unsafe individual release accepted';
+   assert (select count(*) from public.result_releases)=1;
+   raise exception using errcode='ZX001',message='rollback fixture';
+  exception when sqlstate 'ZX001' then null; end;
+ end loop;
+end $$;
+reset role;

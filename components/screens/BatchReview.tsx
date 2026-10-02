@@ -73,9 +73,19 @@ export default function BatchReview() {
       if (error) throw error;
       toast(`${data}名分を配信しました。生徒は /student で確認できます`);
     });
+  const publishOne = (sub: Submission) => act(async () => {
+    if (!window.confirm(`${who(sub.studentId)} の「${test?.name}」（${sub.result.total}点）を、登録済みの本人専用ページへ返却しますか？`)) return;
+    const { data, error } = await createClient().rpc("publish_submission_result", { p_submission: sub.id });
+    if (error) {
+      if (error.code === "PGRST202" || error.code === "42883")
+        throw new Error("個別返却には 0011_individual_return.sql の実行が必要です。");
+      throw new Error(error.message);
+    }
+    toast(data ? "この生徒に返却しました。生徒画面の「更新」で確認できます" : "同じ内容で返却済みです");
+  });
   return (
     <div>
-      <h2>全員の答案を確認・一斉配信</h2>
+      <h2>答案の確認・個別返却・一斉配信</h2>
       <p>
         採点中も10秒ごとに更新します。設問を選ぶと同じ問題の回答を横に並べます。
       </p>
@@ -223,6 +233,16 @@ export default function BatchReview() {
             <h3>
               {who(sub.studentId)}・{sub.result.total}点
             </h3>
+            <p>
+              <Btn disabled={busy || ds.mode === "demo" || !accounts.includes(sub.studentId) || !sub.reviewedBy ||
+                ["uploaded", "processing"].includes(sub.status) || !sub.result.items.length ||
+                sub.result.items.length !== test?.questions.length ||
+                sub.result.items.some(i => i.needReview || (i.mark === "-" && !i.blank))}
+                onClick={() => publishOne(sub)}>この生徒に返却</Btn>
+            </p>
+            <p>{!accounts.includes(sub.studentId) ? "配信先を登録すると個別返却できます。" :
+              !sub.reviewedBy ? "全設問を確認済みにすると個別返却できます。" :
+              "個別返却は、ほかの生徒が未提出でも利用できます。"}</p>
             {["uploaded", "processing"].includes(sub.status) ? (
               <p>採点待ち・採点中</p>
             ) : (
