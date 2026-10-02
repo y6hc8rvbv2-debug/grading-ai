@@ -56,6 +56,7 @@ export default function GradingDetail({ subId }: { subId: string }) {
   const svgRef = useRef<SVGSVGElement>(null);
   // 原本の赤ペン：各ページの縦横比と罫線、先生が動かした位置、選んでいる設問
   const [pagesInfo, setPagesInfo] = useState<{ key: string; pages: AnalyzedPage[] } | null>(null);
+  const [alignBusy, setAlignBusy] = useState(false);
   const [saved, setSaved] = useState<MarkPos[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [wide, setWide] = useState(true);
@@ -183,6 +184,7 @@ export default function GradingDetail({ subId }: { subId: string }) {
 
   // 赤ペンを動かす：画面はすぐ動かし、保存は少し待ってから（矢印キーで続けて動かしても1回にまとめる）
   const moveMark = (qno: number, page: number, x: number, y: number) => {
+    if (alignBusy) return;
     const pos: MarkPos = { qno, page, x: Math.round(x * 10000) / 10000, y: Math.round(y * 10000) / 10000 };
     setSaved((prev) => [...prev.filter((p) => p.qno !== qno), pos]);
     clearTimeout(saveTimers.current.get(qno));
@@ -203,6 +205,21 @@ export default function GradingDetail({ subId }: { subId: string }) {
     } catch (e) {
       toast(friendlyError(e, "赤ペンの位置を元に戻す処理"), "ng");
     }
+  };
+  const alignAllMarks = async () => {
+    if (alignBusy || !layouts) return;
+    if (!window.confirm("保存した赤ペンの調整位置を解除し、解答欄を基準に並べ直します。得点・判定・コメントは変わりません。続けますか？")) return;
+    setAlignBusy(true);
+    try {
+      for (const pos of saved) {
+        clearTimeout(saveTimers.current.get(pos.qno));
+        await ds.resetMarkPosition(sub.id, pos.qno);
+        setSaved(prev => prev.filter(p => p.qno !== pos.qno));
+      }
+      toast("保存した調整位置を解除しました。解答欄の右側と「位置の要確認」を確認してください。");
+    } catch (e) {
+      toast(friendlyError(e, "赤ペンの整列"), "ng");
+    } finally { setAlignBusy(false); }
   };
   const selectMark = (qno: number, page: number) => { setSelected(qno); setOrigPage(page - 1); };
 
@@ -354,6 +371,9 @@ export default function GradingDetail({ subId }: { subId: string }) {
                 <Btn size="sm" variant={sheetMode === "clean" ? "primary" : "default"} onClick={() => setSheetMode("clean")}>清書版</Btn>
               </div>
             )}
+            {overlayOn && saved.length > 0 && <Btn size="sm" disabled={alignBusy || !layouts} onClick={alignAllMarks}>
+              {alignBusy ? "整列中…" : "調整位置を解除して、解答欄の右に並べ直す"}
+            </Btn>}
             <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: T.textSub, cursor: "pointer" }}>
               <input type="checkbox" checked={showMarks} onChange={(e) => setShowMarks(e.target.checked)} />赤ペンを重ねる
             </label>
