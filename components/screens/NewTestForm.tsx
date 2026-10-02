@@ -127,7 +127,9 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
   const units = unitsText.split(/[,、，\n]/).map((u) => u.trim()).filter(Boolean);
   const total = rows.reduce((a, r) => a + (Number(r.points) || 0), 0);
   const flagged = rows.filter((r) => r.flags.length);
-  const unconfirmed = flagged.filter((r) => !r.confirmed);
+  const readyToConfirm = (r: Row) => Number.isInteger(Number(r.points)) && Number(r.points) >= 1 && Number(r.points) <= 100 && !!(r.type === "graph" ? r.model.trim() : r.correct.trim());
+  const unconfirmed = rows.filter((r) => !r.confirmed || !readyToConfirm(r));
+  const allConfirmed = rows.length > 0 && unconfirmed.length === 0;
   const maxScore = imported?.maxScore ?? null;
   const mismatch = maxScore != null && total !== maxScore;
   const bigs = useMemo(() => {
@@ -393,6 +395,8 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
     if (noPoints) return `${labelOf(noPoints.big, noPoints.sub)} の配点を入力してください（1〜100の整数）。`;
     const graphNoCriteria = rows.find((r) => r.type === "graph" && !r.model.trim());
     if (graphNoCriteria) return `${labelOf(graphNoCriteria.big, graphNoCriteria.sub)}（作図）の採点条件を入力してください。`;
+    const noAnswer = rows.find(r => !readyToConfirm(r));
+    if (noAnswer) return `${labelOf(noAnswer.big, noAnswer.sub)} の正答または採点条件を入力してください。`;
     if (unconfirmed.length) return `要確認の設問が ${unconfirmed.length} 問あります。内容を確認して「確認した」にチェックしてください。`;
     if (units.length) {
       const badUnit = rows.find((r) => r.unit && !units.includes(r.unit));
@@ -448,6 +452,12 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
   return (
     <Modal open={open} onClose={() => { if (!saving) onClose(); }} title={onCreated ? "新規採点：模範解答・配点を準備" : "テストを追加"} width={viewerOn ? 1320 : 1100}
       footer={<>
+        <label style={{display:"flex",gap:8,alignItems:"center",padding:8,border:`2px solid ${T.accent}`,borderRadius:8}}>
+          <input type="checkbox" checked={allConfirmed} disabled={saving || !!importing}
+            ref={el => { if(el) el.indeterminate = !allConfirmed && rows.some(r => r.confirmed && readyToConfirm(r)); }}
+            onChange={e => { const checked = e.target.checked; setRows(prev => prev.map(r => ({...r,confirmed:checked && readyToConfirm(r)}))); }} />
+          すべて確認した（{rows.filter(r => r.confirmed && readyToConfirm(r)).length}/{rows.length}問）
+        </label>
         <span style={{ flex: 1, fontSize: 12.5, color: error ? T.ng : T.textSub, alignSelf: "center" }} role={error ? "alert" : undefined}>
           {error || `${rows.length} 問・合計 ${total} 点${maxScore != null ? `（原本の満点 ${maxScore} 点）` : ""}`}
         </span>
@@ -459,6 +469,7 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
         <Btn onClick={onClose} disabled={saving}>閉じる（下書きは残ります）</Btn>
         <Btn variant="primary" onClick={save} disabled={saving || !!importing}>{saving ? "登録しています…" : onCreated ? "③ 登録して、採点開始の確認へ" : "登録する"}</Btn>
       </>}>
+      <p>各問の「確認した」、または下部の「すべて確認した」を使えます。正答・配点（作図は採点条件）が未入力の設問は、一括でも確認済みになりません。</p>
       {!!importing && <div role="status" style={{padding:16,background:T.infoSoft,borderRadius:10,marginBottom:12}}>
         <b>{importing === "upload" ? `資料を送信中：${uploadedSources} / ${sources.length}件` : "AIが問題・正答・配点を読み取っています"}</b>
         <progress aria-label="模範解答・配点の準備状況" max={sources.length || 1} value={importing === "upload" ? uploadedSources : undefined} style={{display:"block",width:"100%",height:24,marginTop:8}} />
@@ -722,11 +733,11 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
                             disabled={rows.length <= 1} title="この設問を削除">✕</Btn>
                         </td>
                       </tr>
-                      {(r.flags.length > 0 || r.type === "graph") && (
+                      {(true) && (
                         <tr style={{ background: warn ? T.warnSoft : "transparent" }}>
                           <td colSpan={9} style={{ padding: "0 8px 8px 8px", fontSize: 11.5, color: T.text }}>
                             <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
-                              {r.flags.length > 0 && <Badge tone={r.confirmed ? "ok" : "warn"}>{r.confirmed ? "確認済み" : "要確認"}</Badge>}
+                              <Badge tone={r.confirmed && readyToConfirm(r) ? "ok" : "warn"}>{r.confirmed && readyToConfirm(r) ? "確認済み" : "要確認"}</Badge>
                               <ul style={{ margin: 0, paddingInlineStart: 16, flex: 1, minWidth: 240, lineHeight: 1.7 }}>
                                 {r.flags.map((f, i) => <li key={i}>{f}</li>)}
                                 {r.type === "graph" && (
@@ -740,9 +751,9 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
                                   </li>
                                 )}
                               </ul>
-                              {r.flags.length > 0 && (
+                              {(true) && (
                                 <label style={{ display: "flex", gap: 6, alignItems: "center", whiteSpace: "nowrap" }}>
-                                  <input type="checkbox" checked={r.confirmed} aria-label={`${lbl} を確認した`}
+                                  <input type="checkbox" checked={r.confirmed && readyToConfirm(r)} disabled={!readyToConfirm(r) || saving || !!importing} title={readyToConfirm(r) ? "" : "正答・配点（作図は採点条件）を先に入力してください"} aria-label={`${lbl} を確認した`}
                                     onChange={(e) => update(r.key, { confirmed: e.target.checked })} />
                                   確認した
                                 </label>
