@@ -6,6 +6,7 @@
 // 生徒の答案（印刷された配点だけを読む）を選ぶと、AI が設問の一覧を読み取って入力欄を作る（/api/test-import）。
 // 読み取れなかった配点・正答は空欄のまま「要確認」にし、教師が確認・修正してから「登録する」で保存する。
 // 入力途中の内容（資料のファイルを含む）は、この端末に下書きとして自動保存する（lib/draft.ts）。
+import { fillAnswer } from "@/lib/answer-field";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FONT_MONO } from "@/lib/ui/theme";
 import { QTYPES } from "@/lib/grading/engine";
@@ -127,8 +128,15 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
   const units = unitsText.split(/[,、，\n]/).map((u) => u.trim()).filter(Boolean);
   const total = rows.reduce((a, r) => a + (Number(r.points) || 0), 0);
   const flagged = rows.filter((r) => r.flags.length);
+  useEffect(() => {
+    setRows(prev => {
+      const next = prev.map(fillAnswer);
+      return next.some((r, i) => r !== prev[i]) ? next : prev;
+    });
+  }, [rows]);
+
   const readyToConfirm = (r: Row) => Number.isInteger(Number(r.points)) && Number(r.points) >= 1 && Number(r.points) <= 100 && !!(r.type === "graph" ? r.model.trim() : r.correct.trim());
-  const unconfirmed = rows.filter((r) => !r.confirmed || !readyToConfirm(r));
+  const unconfirmed = rows.filter((r) => !r.confirmed);
   const allConfirmed = rows.length > 0 && unconfirmed.length === 0;
   const maxScore = imported?.maxScore ?? null;
   const mismatch = maxScore != null && total !== maxScore;
@@ -241,7 +249,7 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
 
   /* ---------------------------------------------------- 設問の操作 */
   const update = (key: number, patch: Partial<Row>) =>
-    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+    setRows((prev) => prev.map((r) => (r.key === key ? fillAnswer({ ...r, ...patch, confirmed: "confirmed" in patch ? !!patch.confirmed : false }) : r)));
 
   const reset = () => {
     setName(""); setTestNo(""); setDate(""); setUnitsText(""); setRows([blankRow()]); setError("");
@@ -325,11 +333,11 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
       const src = b ? placed[b.file - 1] : null;
       return b && src ? { sourceId: src.id, page: b.page, x: b.x, y: b.y, w: b.w, h: b.h } : null;
     };
-    setRows(res.questions.map((q) => blankRow({
+    setRows(res.questions.map((q) => fillAnswer(blankRow({
       big: q.big, sub: q.sub, type: q.type, unit: "", points: q.points ?? "", pointsHint: q.pointsHint,
       correct: q.correct, model: q.model, flags: q.flags, confirmed: q.flags.length === 0,
       answerBox: toRef(q.answerBox), figure: toRef(q.figure),
-    })));
+    }))));
     if (!name && res.title) setName(res.title);
     if (res.subject) setSubject((s) => s || res.subject);
     setImported({ importId: meta.importId, maxScore: res.maxScore, warnings: res.warnings, requestId: meta.requestId });
@@ -454,9 +462,9 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
       footer={<>
         <label style={{display:"flex",gap:8,alignItems:"center",padding:8,border:`2px solid ${T.accent}`,borderRadius:8}}>
           <input type="checkbox" checked={allConfirmed} disabled={saving || !!importing}
-            ref={el => { if(el) el.indeterminate = !allConfirmed && rows.some(r => r.confirmed && readyToConfirm(r)); }}
-            onChange={e => { const checked = e.target.checked; setRows(prev => prev.map(r => ({...r,confirmed:checked && readyToConfirm(r)}))); }} />
-          すべて確認した（{rows.filter(r => r.confirmed && readyToConfirm(r)).length}/{rows.length}問）
+            ref={el => { if(el) el.indeterminate = !allConfirmed && rows.some(r => r.confirmed); }}
+            onChange={e => { const checked = e.target.checked; setRows(prev => prev.map(r => ({...r,...fillAnswer(r),confirmed:checked}))); }} />
+          すべて確認した（{rows.filter(r => r.confirmed).length}/{rows.length}問）
         </label>
         <span style={{ flex: 1, fontSize: 12.5, color: error ? T.ng : T.textSub, alignSelf: "center" }} role={error ? "alert" : undefined}>
           {error || `${rows.length} 問・合計 ${total} 点${maxScore != null ? `（原本の満点 ${maxScore} 点）` : ""}`}
@@ -469,7 +477,7 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
         <Btn onClick={onClose} disabled={saving}>閉じる（下書きは残ります）</Btn>
         <Btn variant="primary" onClick={save} disabled={saving || !!importing}>{saving ? "登録しています…" : onCreated ? "③ 登録して、採点開始の確認へ" : "登録する"}</Btn>
       </>}>
-      <p>各問の「確認した」、または下部の「すべて確認した」を使えます。正答・配点（作図は採点条件）が未入力の設問は、一括でも確認済みになりません。</p>
+      <p>各問の「確認した」、または下部の「すべて確認した」を使えます。一括確認で全問にチェックが入ります。未入力の正答・配点がある場合は、登録時に該当する設問を案内します。</p>
       {!!importing && <div role="status" style={{padding:16,background:T.infoSoft,borderRadius:10,marginBottom:12}}>
         <b>{importing === "upload" ? `資料を送信中：${uploadedSources} / ${sources.length}件` : "AIが問題・正答・配点を読み取っています"}</b>
         <progress aria-label="模範解答・配点の準備状況" max={sources.length || 1} value={importing === "upload" ? uploadedSources : undefined} style={{display:"block",width:"100%",height:24,marginTop:8}} />
@@ -737,7 +745,7 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
                         <tr style={{ background: warn ? T.warnSoft : "transparent" }}>
                           <td colSpan={9} style={{ padding: "0 8px 8px 8px", fontSize: 11.5, color: T.text }}>
                             <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
-                              <Badge tone={r.confirmed && readyToConfirm(r) ? "ok" : "warn"}>{r.confirmed && readyToConfirm(r) ? "確認済み" : "要確認"}</Badge>
+                              <Badge tone={r.confirmed ? "ok" : "warn"}>{r.confirmed ? "確認済み" : "要確認"}</Badge>
                               <ul style={{ margin: 0, paddingInlineStart: 16, flex: 1, minWidth: 240, lineHeight: 1.7 }}>
                                 {r.flags.map((f, i) => <li key={i}>{f}</li>)}
                                 {r.type === "graph" && (
@@ -753,7 +761,7 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
                               </ul>
                               {(true) && (
                                 <label style={{ display: "flex", gap: 6, alignItems: "center", whiteSpace: "nowrap" }}>
-                                  <input type="checkbox" checked={r.confirmed && readyToConfirm(r)} disabled={!readyToConfirm(r) || saving || !!importing} title={readyToConfirm(r) ? "" : "正答・配点（作図は採点条件）を先に入力してください"} aria-label={`${lbl} を確認した`}
+                                  <input type="checkbox" checked={r.confirmed} disabled={saving || !!importing} aria-label={`${lbl} を確認した`}
                                     onChange={(e) => update(r.key, { confirmed: e.target.checked })} />
                                   確認した
                                 </label>

@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { answerFromExplanation, fillAnswer } from '../../lib/answer-field';
+assert.equal(answerFromExplanation('答え：x=4±√11\n解説：平方完成する。'), 'x=4±√11');
+assert.equal(answerFromExplanation('3√5'), '3√5');
+assert.equal(answerFromExplanation('座標が不明。\n答え：2'), '');
+assert.equal(answerFromExplanation('生徒の答え：2'), '');
+assert.equal(answerFromExplanation('代入すると2となる。'), '');
+assert.equal(fillAnswer({type:'calc', correct:'7',model:'答え：2'}).correct,'7');
+assert.equal(fillAnswer({type:'graph', correct:'',model:'2'}).correct,'');
+assert.equal(fillAnswer({type:'calc', correct:'',model:'答え：2'}).correct,'2');

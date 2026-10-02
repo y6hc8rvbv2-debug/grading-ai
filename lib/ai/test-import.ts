@@ -212,6 +212,7 @@ export function normalizeImport(raw: unknown, kinds: SourceKind[], generate = fa
 export const GENERATE_KEY_SYSTEM = IMPORT_SYSTEM + `
 今回は模範解答なしモードです。上の「正答の出どころは模範解答だけ」という制限に代えて、問題用紙または生徒の答案の印刷された問題文・図・条件だけから独立に問題を解いてください。
 生徒の手書きの回答・丸・得点・多数決は正答の根拠にしません。問題文が欠ける・図が読めない・解答用紙のみの場合は正答を空欄にし、問題用紙の追加を求めます。
+解けた問題の最終的な答えは必ず correct に入れます。explanation だけに答えを書いて correct を空欄にしてはいけません。correct は答えのみ、explanation はその答えに至る解き方・検算です。作図は correct を空欄とし criteria に採点条件を入れます。
 解けた問題は correct_status="generated"、correct_file=問題文の資料番号、explanation=解き方と検算の要点にします。生成した解答は教師確認前の案です。
 配点は印刷されたものだけを printed として返します。配点の記載のない問題は absent、印刷が読めない問題は unreadable と返します。`;
 
