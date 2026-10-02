@@ -19,6 +19,7 @@ import { Badge, Bar, Btn, Card, Empty, Field, Modal, PseudoQR, Section, Select, 
 import type { GradingInput, Quality, Source, Submission } from "@/lib/types";
 
 import { assignPages, type PageInfo } from "@/lib/workflow/intake";
+import NewTestForm from "./NewTestForm";
 import FileThumbnail from "@/components/FileThumbnail";
 import { preflight } from "@/lib/workflow/preflight";
 
@@ -39,7 +40,11 @@ export default function NewGrading() {
   const [source, setSource] = useState<Source>("camera");
   // アーカイブしたテスト（0008）は採点の対象に出さない
   const activeTests = useMemo(() => ws.tests.filter((t) => !t.archivedAt), [ws.tests]);
-  const [testId, setTestId] = useState(activeTests[0]?.id ?? "");
+  const [testId, setTestId] = useState("");
+  const [testSetup, setTestSetup] = useState<{ files: File[]; key: string } | null>(null);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [testChecked, setTestChecked] = useState(false);
+  const [referenceStudent, setReferenceStudent] = useState("");
   const [classId, setClassId] = useState(ws.classes[0]?.id ?? "");
   const [drag, setDrag] = useState(false);
   const [demoBlank, setDemoBlank] = useState(false);
@@ -188,6 +193,7 @@ export default function NewGrading() {
 
   const run = async () => {
     if (!test || !klass) { toast("先にテストとクラスを選んでください", "warn"); return; }
+    if (!testChecked) { toast("今回の答案とテストの正答・配点が一致することを確認してください", "warn"); return; }
     if (!files.length) { toast("答案画像を追加してください", "warn"); return; }
     if (files.some((f) => !f.studentId)) { toast("生徒が割り当てられていない答案があります。一覧で生徒を選んでください", "warn"); return; }
     if (!demo && !checked) {toast("生徒・ページ順・画質を確認し、確認済みにチェックしてください", "warn");return;}
@@ -283,22 +289,11 @@ export default function NewGrading() {
 
   const reset = () => {
     timers.current.forEach(clearTimeout);
-    setStage("select"); setFiles([]); setStep(-1); setLog([]); setCreatedIds([]); setFailed(0); setAiProgress(null);
+    setTestId(""); setTestChecked(false); setTestSetup(null); setSetupOpen(false); setStage("select"); setFiles([]); setStep(-1); setLog([]); setCreatedIds([]); setFailed(0); setAiProgress(null);
   };
 
   /* ------------------------------------------------ 前提（テスト・クラス） */
-  if (!activeTests.length || !ws.classes.length) {
-    return (
-      <Card>
-        <Empty icon="📝"
-          title={!activeTests.length ? "採点するテストがまだありません" : "クラスがまだ登録されていません"}
-          hint={!activeTests.length
-            ? "テスト管理でテストと設問（配点・単元・正答）を登録すると、答案を取り込めるようになります。"
-            : "クラスと生徒の名簿は、学校の管理者が登録します（docs/SUPABASE-SETUP.md のステップ4）。"}
-          action={!activeTests.length ? <Btn variant="primary" onClick={() => go("tests")}>テスト管理へ</Btn> : null} />
-      </Card>
-    );
-  }
+  if (!ws.classes.length) return <Card><Empty icon="📝" title="クラスがまだ登録されていません" hint="管理者にクラスと生徒の登録を依頼してください。" /></Card>;
 
   /* ------------------------------------------------------------- 実行中・完了 */
   if (stage === "run" || stage === "done") {
@@ -551,12 +546,31 @@ export default function NewGrading() {
         <p>{autoAssign ? "自動振り分けは候補です。" : ""}画像の四隅・解答欄・薄い作図線、生徒の割り当てとページ順を確認してください。</p>
         <label><input type="checkbox" checked={checked} onChange={e=>setChecked(e.target.checked)} /> 生徒・ページ順・不足や見切れがないことを確認しました</label>
       </Card>}
-      <Section title="3. 採点の対象と条件">
+      <Section title="3. 模範解答・配点を準備する">
+        <Card>
+          <p>新しいテストはここで作成できます。答案の取り込み直しや、テスト管理への移動は不要です。</p>
+          <Field label="模範解答・配点の作成に使う1人分の答案（全ページ）">
+            <Select value={(groups.some(g => g[0].studentId === referenceStudent) ? referenceStudent : groups[0]?.[0].studentId) || ""} onChange={setReferenceStudent}
+              options={groups.map(g => ({ value: g[0].studentId, label: `${who(g[0].studentId)}（${g.length}ページ）` }))} />
+          </Field>
+          <Btn variant="primary" disabled={preparing || scanBusy || !groups.length || (!demo && !checked)} onClick={() => {
+            if (testSetup) { setSetupOpen(true); return; }
+            const group = groups.find(g => g[0].studentId === (groups.some(g => g[0].studentId === referenceStudent) ? referenceStudent : groups[0]?.[0].studentId));
+            const picked = group?.flatMap(f => f.file ? [f.file] : []) ?? [];
+            if (!picked.length) { toast("実際の答案画像を選んでください", "warn"); return; }
+            setTestSetup({ files: picked, key: "new-grading-test" }); setSetupOpen(true);
+          }}>{testSetup ? "作成中の模範解答・配点を開く" : "この答案から新しいテストを作る"}</Btn>
+          {!checked && <p>先に上の「生徒・ページ順・不足や見切れがないことを確認しました」にチェックしてください。</p>}
+        </Card>
+        {testSetup && <NewTestForm open={setupOpen} initialFiles={testSetup.files} draftKey={testSetup.key}
+          onClose={() => setSetupOpen(false)} onCreated={id => { setTestId(id); setTestChecked(false); setTestSetup(null); }} />}
+      </Section>
+      <Section title="4. テストを確認して採点する">
         <Card>
           <div style={grid(220, 14)}>
             <Field label="対象のテスト">
-              <Select value={testId} onChange={setTestId}
-                options={activeTests.map((t) => ({ value: t.id, label: `${t.subject}／${t.name}（${t.grade}年）` }))} />
+              <Select value={testId} onChange={id => { setTestId(id); setTestChecked(false); }}
+                options={[{ value: "", label: "今回のテストを選択（自動選択しません）" }, ...activeTests.map((t) => ({ value: t.id, label: `${t.subject}／${t.name}（${t.questions.length}問・${t.maxScore}点）` }))]} />
             </Field>
             <Field label="対象クラス" hint="答案は出席番号の順に割り当てます。違う場合は上の一覧で直せます。">
               <Select value={classId} onChange={setClassId}
@@ -569,6 +583,12 @@ export default function NewGrading() {
             </Field>
           </div>
 
+          {test && <div style={{margin: "12px 0"}}>
+            <details><summary>「{test.name}」の正答・配点を確認（{test.questions.length}問・満点{test.maxScore}点）</summary>
+              {test.questions.map(q => <p key={q.id}>{q.label || `問${q.no}`}：{q.correct || q.model} ／ {q.points}点</p>)}
+            </details>
+            <label><input type="checkbox" checked={testChecked} onChange={e => setTestChecked(e.target.checked)} /> 今回の答案と、テスト名・設問・正答・配点が一致しています</label>
+          </div>}
           {demo ? (
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 4 }}>
               <label style={{ display: "flex", gap: 7, alignItems: "center", fontSize: 12.5, color: T.textSub, cursor: "pointer" }}>
@@ -589,7 +609,7 @@ export default function NewGrading() {
               </div>
               <div style={{ marginTop: 10 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 6 }}>採点方式</div>
-                <GradingModePicker pages={pagesPer} questions={test?.questions.length ?? 10} answers={Math.max(1, groups.length)} />
+                <GradingModePicker pages={Math.max(1, ...groups.map(g => g.length))} questions={test?.questions.length ?? 10} answers={Math.max(1, groups.length)} />
               </div>
               <label style={{ display: "flex", gap: 7, alignItems: "flex-start", fontSize: 12, color: T.textSub, cursor: "pointer", marginTop: 8 }}>
                 <input type="checkbox" checked={uploadOnly} onChange={(e) => setUploadOnly(e.target.checked)} style={{ marginTop: 3 }} />
@@ -611,7 +631,7 @@ export default function NewGrading() {
           )}
 
           <div style={{ marginTop: 16, display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
-            <Btn variant="shu" size="lg" onClick={run} disabled={!files.length || preparing}>
+            <Btn variant="shu" size="lg" onClick={run} disabled={!files.length || preparing || !test || !testChecked || (!demo && !checked)}>
               {preparing ? "画像を準備しています…"
                 : mode === "ai" ? `保存してAI採点する（${MODE_LABEL[gradingMode]}）`
                 : mode === "local" ? (demo ? "AI採点をはじめる" : "仮採点をはじめる")

@@ -70,7 +70,10 @@ function nextSub(sub: string) {
 export const labelOf = (big: number, sub: string) => (sub ? `大問${big}-${sub}` : `大問${big}`);
 const uid = () => Math.random().toString(36).slice(2, 10);
 
-export default function NewTestForm({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function NewTestForm({ open, onClose, initialFiles, onCreated, draftKey = DRAFT_KEY }: {
+  open: boolean; onClose: () => void; initialFiles?: File[];
+  onCreated?: (id: string) => void; draftKey?: string;
+}) {
   const { T, ds, toast, refresh, ai } = useUI();
   const [name, setName] = useState("");
   const [subject, setSubject] = useState("数学");
@@ -85,8 +88,10 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
   const [error, setError] = useState("");
 
   // 自動入力
-  const [importOpen, setImportOpen] = useState(false);
-  const [sources, setSources] = useState<Source[]>([]);
+  const [importOpen, setImportOpen] = useState(!!initialFiles);
+  const [sources, setSources] = useState<Source[]>(() => (initialFiles ?? []).map(f => ({
+    id: uid(), name: f.name, kind: "student", type: f.type, blob: f,
+  })));
   const [imported, setImported] = useState<Draft["imported"]>(null);
   const [importing, setImporting] = useState<"" | "upload" | "read">("");
   const [force, setForce] = useState(false);
@@ -116,6 +121,7 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
   // 下書き
   const [draftNote, setDraftNote] = useState("");
   const restored = useRef(false);
+  const [draftReady, setDraftReady] = useState(false);
 
   const units = unitsText.split(/[,、，\n]/).map((u) => u.trim()).filter(Boolean);
   const total = rows.reduce((a, r) => a + (Number(r.points) || 0), 0);
@@ -137,9 +143,9 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
   useEffect(() => {
     if (!open || restored.current) return;
     restored.current = true;
-    loadDraft<Draft>(DRAFT_KEY).then((d) => {
-      if (d && (d.v === 1 || d.v === 2)) applyDraft(d, `下書きを復元しました（${new Date(d.savedAt).toLocaleString("ja-JP")} に自動保存）`);
-    });
+    loadDraft<Draft>(draftKey).then((d) => {
+      if (d && (d.v === 1 || d.v === 2) && (!initialFiles || window.confirm("新規採点の作成途中の下書きがあります。復元しますか？キャンセルなら今回の答案で新しく作ります。"))) applyDraft(d, `下書きを復元しました（${new Date(d.savedAt).toLocaleString("ja-JP")} に自動保存）`);
+    }).finally(() => setDraftReady(true));
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** 下書きを入力欄に戻す（端末の自動保存・ファイルの読み込みで共通。AI は呼ばない） */
@@ -184,7 +190,7 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
       const n = (d.rows ?? []).length;
       if (dirty && !window.confirm(`いま入力中の内容を、ファイルの下書き（資料 ${d.sources.length} 件・設問 ${n} 問）で置き換えますか？`)) return;
       applyDraft(d, `ファイルから下書きを読み込みました（資料 ${d.sources.length} 件・設問 ${n} 問。AI は呼んでいません）`);
-      await saveDraft(DRAFT_KEY, { ...d, v: 2, savedAt: new Date().toISOString() });
+      await saveDraft(draftKey, { ...d, v: 2, savedAt: new Date().toISOString() });
     } catch (e) {
       setError(e instanceof Error ? e.message : "下書きのファイルを読み込めませんでした。");
     }
@@ -218,14 +224,14 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
   }), [name, subject, grade, term, date, testNo, unitsText, rows, sources, imported]);
   const dirty = !!(name || testNo || unitsText || sources.length || rows.length > 1 || rows[0]?.correct || rows[0]?.model);
   useEffect(() => {
-    if (!open || !restored.current || !dirty) return;
-    const t = setTimeout(() => { saveDraft(DRAFT_KEY, snapshot()); }, 500);
+    if (!open || !draftReady || !dirty) return;
+    const t = setTimeout(() => { saveDraft(draftKey, snapshot()); }, 500);
     return () => clearTimeout(t);
-  }, [open, dirty, snapshot]);
+  }, [open, dirty, snapshot, draftKey, draftReady]);
 
   const discardDraft = async () => {
     if (!window.confirm("下書きを破棄して、入力欄を空にしますか？")) return;
-    await deleteDraft(DRAFT_KEY);
+    await deleteDraft(draftKey);
     reset();
     toast("下書きを破棄しました");
   };
@@ -271,7 +277,7 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
   };
 
   /* ---------------------------------------------------- AI で読み取る */
-  const [generateKey, setGenerateKey] = useState(false);
+  const [generateKey, setGenerateKey] = useState(!!initialFiles);
   const runImport = async () => {
     if (lock.current) return;
     if (!generateKey && !sources.some((s) => s.kind === "key")) { toast("模範解答の画像またはPDFを選んでください", "warn"); return; }
@@ -419,10 +425,11 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
       // 生徒の答案は、配点を読むためだけに使った。テストには残さない
       await ds.removeImportFiles(sources.filter((s) => s.path && s.kind === "student").map((s) => s.path!)).catch(() => {});
       if (imported?.importId) await ds.linkImport(imported.importId, testId).catch(() => {});
-      await deleteDraft(DRAFT_KEY);
+      await deleteDraft(draftKey);
       await refresh();
       toast(`「${name.trim()}」を登録しました（${rows.length} 問・${total} 点）。新規採点で選べます`);
       reset();
+      onCreated?.(testId);
       onClose();
     } catch (e) {
       setError(friendlyError(e, "テストの登録"));
@@ -437,7 +444,7 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
   const viewerOn = showViewer && imagesOn;
 
   return (
-    <Modal open={open} onClose={() => { if (!saving) onClose(); }} title="テストを追加" width={viewerOn ? 1320 : 1100}
+    <Modal open={open} onClose={() => { if (!saving) onClose(); }} title={onCreated ? "新規採点：模範解答・配点を準備" : "テストを追加"} width={viewerOn ? 1320 : 1100}
       footer={<>
         <span style={{ flex: 1, fontSize: 12.5, color: error ? T.ng : T.textSub, alignSelf: "center" }} role={error ? "alert" : undefined}>
           {error || `${rows.length} 問・合計 ${total} 点${maxScore != null ? `（原本の満点 ${maxScore} 点）` : ""}`}
@@ -448,8 +455,9 @@ export default function NewTestForm({ open, onClose }: { open: boolean; onClose:
           </Btn>
         )}
         <Btn onClick={onClose} disabled={saving}>閉じる（下書きは残ります）</Btn>
-        <Btn variant="primary" onClick={save} disabled={saving || !!importing}>{saving ? "登録しています…" : "登録する"}</Btn>
+        <Btn variant="primary" onClick={save} disabled={saving || !!importing}>{saving ? "登録しています…" : onCreated ? "登録して採点に戻る" : "登録する"}</Btn>
       </>}>
+      {onCreated && <p>答案の印刷された問題と配点から解答案を作成します。生徒の手書き回答を正答には使いません。模範解答がある場合は追加して「模範解答がない」のチェックを外してください。読み取り後、正答・配点を確認して登録してください。</p>}
       {draftNote && (
         <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 11px", borderRadius: 9, background: T.infoSoft, color: T.info, fontSize: 12.5, marginBottom: 10 }}>
           <span style={{ flex: 1 }}>{draftNote}</span>
