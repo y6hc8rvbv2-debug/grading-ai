@@ -457,14 +457,14 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
           </Btn>
         )}
         <Btn onClick={onClose} disabled={saving}>閉じる（下書きは残ります）</Btn>
-        <Btn variant="primary" onClick={save} disabled={saving || !!importing}>{saving ? "登録しています…" : onCreated ? "登録して採点を始める" : "登録する"}</Btn>
+        <Btn variant="primary" onClick={save} disabled={saving || !!importing}>{saving ? "登録しています…" : onCreated ? "③ 登録して、採点開始の確認へ" : "登録する"}</Btn>
       </>}>
       {!!importing && <div role="status" style={{padding:16,background:T.infoSoft,borderRadius:10,marginBottom:12}}>
         <b>{importing === "upload" ? `資料を送信中：${uploadedSources} / ${sources.length}件` : "AIが問題・正答・配点を読み取っています"}</b>
         <progress aria-label="模範解答・配点の準備状況" max={sources.length || 1} value={importing === "upload" ? uploadedSources : undefined} style={{display:"block",width:"100%",height:24,marginTop:8}} />
         {importing === "read" && <small>AIの応答を待っています。処理中のため、画面を閉じずにお待ちください。</small>}
       </div>}
-      {onCreated && <p>答案の印刷された問題と配点から解答案を作成します。生徒の手書き回答を正答には使いません。模範解答がある場合は追加して「模範解答がない」のチェックを外してください。読み取り後、正答・配点を確認して登録してください。</p>}
+      {onCreated && <p><b>現在は手順3：模範解答・配点の準備です。まだ採点は始まりません。①資料を確認 → ②AIで読み取り、正答・配点を確認 → ③登録 → 手順4で採点開始。</b><br />答案の印刷された問題と配点から解答案を作成します。生徒の手書き回答を正答には使いません。模範解答がある場合は追加して「模範解答がない」のチェックを外してください。読み取り後、正答・配点を確認して登録してください。</p>}
       {draftNote && (
         <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 11px", borderRadius: 9, background: T.infoSoft, color: T.info, fontSize: 12.5, marginBottom: 10 }}>
           <span style={{ flex: 1 }}>{draftNote}</span>

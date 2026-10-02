@@ -45,7 +45,7 @@ const NAV: { k: View; i: string; tk: string; admin?: boolean }[] = [
 const TITLES: Record<View, [string, string]> = {
   "batch-review": ["nav_batch_review", "問題別に確認し、本人専用ページへ返却します"],
   dashboard: ["nav_dashboard", "採点の状況・お知らせ・利用状況をまとめて確認できます"],
-  new: ["nav_new", "答案画像を取り込むと、5つのステップで自動採点します"],
+  new: ["nav_new", "①答案取込 → ②ページ確認 → ③正答・配点 → ④採点開始"],
   history: ["nav_history", "採点済みの答案を検索・書き出しできます"],
   processing: ["nav_processing", "いま処理中の答案とその進み具合"],
   tests: ["nav_tests", "テストの設問構成・配点・単元を管理します"],

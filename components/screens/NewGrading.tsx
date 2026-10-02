@@ -178,6 +178,10 @@ export default function NewGrading() {
   };
   const tooManyPages = groups.some((g) => g.length > MAX_PAGES);
 
+  const missingAnswers = test?.questions.filter(q => q.type === "graph" ? !q.model.trim() : !q.correct.trim()) ?? [];
+  const nextStep = !files.length ? 1 : !checked ? 2 : !test || missingAnswers.length ? 3 : 4;
+  const jumpTo = (n: number) => document.getElementById(`grading-step-${n}`)?.scrollIntoView({behavior:"smooth",block:"start"});
+
   /* ------------------------------------------------------------- 実行 */
   const buildInput = (group: Picked[], i: number): GradingInput => {
     const f = group[0];
@@ -205,6 +209,7 @@ export default function NewGrading() {
 
   const run = async () => {
     if (!test || !klass) { toast("先にテストとクラスを選んでください", "warn"); return; }
+    if (missingAnswers.length) { toast("正答・採点条件が未入力です。手順3で準備してください", "warn"); return; }
     if (!testChecked) { toast("今回の答案とテストの正答・配点が一致することを確認してください", "warn"); return; }
     if (!files.length) { toast("答案画像を追加してください", "warn"); return; }
     if (files.some((f) => !f.studentId)) { toast("生徒が割り当てられていない答案があります。一覧で生徒を選んでください", "warn"); return; }
@@ -445,6 +450,19 @@ export default function NewGrading() {
 
   return (
     <div>
+      <Card style={{border:`2px solid ${T.accent}`, marginBottom:16}}>
+        <h2 style={{marginTop:0}}>● 採点はまだ始まっていません</h2>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {["答案を入れる", "生徒・ページを確認", "正答・配点を準備", "確認して採点開始"].map((label,i) => <button key={label} onClick={() => jumpTo(i+1)}
+            aria-current={nextStep === i+1 ? "step" : undefined}
+            style={{padding:12,borderRadius:10,cursor:"pointer",border:`2px solid ${nextStep === i+1 ? T.accent : T.line}`,background:nextStep === i+1 ? T.accentSoft : T.panel,color:nextStep === i+1 ? T.accent : T.text}}>
+            {nextStep === i+1 ? "● 今ここ " : ""}{i+1}. {label}
+          </button>)}
+        </div>
+        <p style={{fontWeight:700,color:T.accent}}>次にすること：{nextStep === 1 ? "答案写真を選んでください" : nextStep === 2 ? "同じ生徒の全ページと順番を確認し、チェックしてください" : nextStep === 3 ? "新しいテストを作成するか、正答・配点がそろった既存テストを選んでください" : "正答・配点を確認し、採点開始ボタンを押してください"}</p>
+        <Btn variant="shu" onClick={() => jumpTo(nextStep)}>➜ 手順{nextStep}へ移動する</Btn>
+      </Card>
+      <div id="grading-step-1" style={{scrollMarginTop:110}} />
       <Section title="1. 答案の取り込み方法を選ぶ">
         <div style={grid(180)}>
           {options.map((o) => (
@@ -523,6 +541,7 @@ export default function NewGrading() {
         </div>
       </Modal>
 
+      <div id="grading-step-2" style={{scrollMarginTop:110}} />
       <Section title={`2. 取り込んだ答案（${files.length} / ${MAX_FILES} 枚）`}
         right={files.length ? <Btn size="sm" variant="ghost" onClick={() => setFiles([])}>すべて外す</Btn> : null}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
@@ -577,8 +596,10 @@ export default function NewGrading() {
         <p>{autoAssign ? "自動振り分けは候補です。" : ""}画像の四隅・解答欄・薄い作図線、生徒の割り当てとページ順を確認してください。</p>
         <label><input type="checkbox" checked={checked} onChange={e=>setChecked(e.target.checked)} /> 生徒・ページ順・不足や見切れがないことを確認しました</label>
       </Card>}
+      <div id="grading-step-3" style={{scrollMarginTop:110}} />
       <Section title="3. 模範解答・配点を準備する">
         <Card>
+          {missingAnswers.length > 0 && <p role="alert" style={{color:T.ng,fontWeight:700}}>● 正答・採点条件が未入力の設問が{missingAnswers.length}問あります。このテストでは採点を開始できません。下のボタンから問題が読める資料や模範解答を使って作成してください。</p>}
           <p>新しいテストはここで作成できます。答案の取り込み直しや、テスト管理への移動は不要です。</p>
           <Field label="模範解答・配点の作成に使う1人分の答案（全ページ）">
             <Select value={(groups.some(g => g[0].studentId === referenceStudent) ? referenceStudent : groups[0]?.[0].studentId) || ""} onChange={setReferenceStudent}
@@ -596,6 +617,7 @@ export default function NewGrading() {
         {testSetup && <NewTestForm open={setupOpen} initialFiles={testSetup.files} draftKey={testSetup.key}
           onClose={() => setSetupOpen(false)} onCreated={id => { setTestId(id); setTestChecked(false); setTestSetup(null); }} />}
       </Section>
+      <div id="grading-step-4" style={{scrollMarginTop:110}} />
       <Section title="4. テストを確認して採点する">
         <Card>
           <div style={grid(220, 14)}>
@@ -616,9 +638,9 @@ export default function NewGrading() {
 
           {test && <div style={{margin: "12px 0"}}>
             <details><summary>「{test.name}」の正答・配点を確認（{test.questions.length}問・満点{test.maxScore}点）</summary>
-              {test.questions.map(q => <p key={q.id}>{q.label || `問${q.no}`}：{q.correct || q.model} ／ {q.points}点</p>)}
+              {test.questions.map(q => <p key={q.id}>{q.label || `問${q.no}`}：{q.correct || q.model || "【未入力：採点できません】"} ／ {q.points}点</p>)}
             </details>
-            <label><input type="checkbox" checked={testChecked} onChange={e => setTestChecked(e.target.checked)} /> 今回の答案と、テスト名・設問・正答・配点が一致しています</label>
+            <label><input type="checkbox" disabled={missingAnswers.length > 0} checked={testChecked} onChange={e => setTestChecked(e.target.checked)} /> 今回の答案と、テスト名・設問・正答・配点が一致しています</label>
           </div>}
           {demo ? (
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 4 }}>
@@ -661,8 +683,10 @@ export default function NewGrading() {
             </div>
           )}
 
+          <p role="status" style={{color:T.accent,fontWeight:700}}>{!files.length ? "● 手順1：答案写真を追加してください" : !checked ? "● 手順2：生徒・ページの確認がまだです" : !test || missingAnswers.length ? "● 手順3：正答・配点の準備がまだです" : !testChecked ? "● 手順4：正答・配点の確認にチェックしてください" : "● 準備完了：下の赤いボタンを押すと採点が始まります"}</p>
+          {(nextStep < 4 || !testChecked) && <Btn variant="shu" onClick={() => jumpTo(nextStep)}>➜ 未完了の手順{nextStep}へ移動</Btn>}
           <div style={{ marginTop: 16, display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
-            <Btn variant="shu" size="lg" onClick={run} disabled={!files.length || preparing || !test || !testChecked || (!demo && !checked)}>
+            <Btn variant="shu" size="lg" onClick={run} disabled={!files.length || preparing || !test || !testChecked || missingAnswers.length > 0 || (!demo && !checked)}>
               {preparing ? "画像を準備しています…"
                 : mode === "ai" ? `保存してAI採点する（${MODE_LABEL[gradingMode]}）`
                 : mode === "local" ? (demo ? "AI採点をはじめる" : "仮採点をはじめる")
