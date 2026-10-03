@@ -611,7 +611,7 @@ export default function NewGrading() {
             const picked = group?.flatMap(f => f.file ? [f.file] : []) ?? [];
             if (!picked.length) { toast("実際の答案画像を選んでください", "warn"); return; }
             setTestSetup({ files: picked, key: "new-grading-test" }); setSetupOpen(true);
-          }}>{testSetup ? "作成中の模範解答・配点を開く" : "この答案から新しいテストを作る"}</Btn>
+          }}>{testSetup ? "作成中の模範解答・配点を開く" : "この答案から、模範解答を作る"}</Btn>
           {!checked && <p>先に上の「生徒・ページ順・不足や見切れがないことを確認しました」にチェックしてください。</p>}
         </Card>
         {testSetup && <NewTestForm open={setupOpen} initialFiles={testSetup.files} draftKey={testSetup.key}
