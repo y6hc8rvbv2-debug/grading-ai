@@ -5,14 +5,15 @@
 #
 # 前提: Docker が動いていること。初回は Supabase のイメージ取得に数分かかる。
 # 手順: Supabase 起動 → DB を初期化（supabase/migrations を適用）→ 初期データ投入
-#       → 採点AIの代役を起動 → アプリをビルドして起動 → tests/e2e/scenario.mjs を実行 → 停止
+#       → 採点AIの代役を起動 → アプリをビルドして起動 → tutor.mjs・scenario.mjs・fullflow.mjs を実行 → 停止
 # 本物の Anthropic API は呼ばない（APIキーも不要）。
 #
 # 環境変数（任意）
 #   SUPABASE_INTERNAL_IMAGE_REGISTRY=docker.io   ECR に届かない環境で Docker Hub から取得する
 #   CHROMIUM_PATH=/path/to/chrome                 Playwright 同梱のブラウザ以外を使う
 #   KEEP_SUPABASE=1                               終了後も Supabase を止めない
-#   ONLY_TUTOR=1                                  返却とチャッピー先生のシナリオ（tests/e2e/tutor.mjs）だけを実行する
+#   ONLY_TUTOR=1                                  教員の通しシナリオ（scenario.mjs）を省き、返却とチャッピー先生（tutor.mjs）と
+#                                                 答案登録→復習の通し（fullflow.mjs）だけを実行する
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -89,6 +90,9 @@ if [ -n "${ONLY_TUTOR:-}" ]; then SKIP_MAIN=1; fi
 if [ -z "${SKIP_MAIN:-}" ]; then
   SUPABASE_URL="$API" ANON="$ANON" DUMMY_KEY="$DUMMY_KEY" BASE_URL="http://localhost:$PORT" MOCK_URL="http://127.0.0.1:$MOCK_PORT" node tests/e2e/scenario.mjs
 fi
+# 答案登録 → 採点 → 教師確認 → 返却 → 復習 を画面の操作で1本につなげる（学校C）
+SUPABASE_URL="$API" ANON="$ANON" SERVICE="$SERVICE" BASE_URL="http://localhost:$PORT" MOCK_URL="http://127.0.0.1:$MOCK_PORT" \
+  MOCK_OPENAI_URL="http://127.0.0.1:$MOCK_OPENAI_PORT" STUDENT_KEY2="$STUDENT_KEY2" node tests/e2e/fullflow.mjs
 # 生徒の長期キーが、ブラウザ向けのファイル・アプリのログに出ていないこと
 for k in "$STUDENT_KEY" "$STUDENT_KEY2"; do
   if grep -rq "$k" .next-e2e/static tests/e2e/.out/app.log 2>/dev/null; then echo "✗ 生徒の API キーがビルド成果物かログに含まれています"; exit 1; fi

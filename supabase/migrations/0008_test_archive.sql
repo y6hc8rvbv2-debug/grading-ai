@@ -11,6 +11,9 @@
 -- 既存のテスト・答案・成績は変更しない（列は空のまま追加する）。
 -- ============================================================================
 
+-- 途中で失敗したら何も変わらないよう、1つのトランザクションで実行する（docs/DB-RUNBOOK.md）
+begin;
+
 alter table public.tests add column archived_at timestamptz;
 
 -- 答案があるテストの削除を止める。学校ごと削除するときの連鎖（トリガーの入れ子）は止めない
@@ -97,3 +100,5 @@ revoke execute on function public.remove_test(uuid) from public, anon;
 revoke execute on function public.restore_test(uuid) from public, anon;
 grant  execute on function public.remove_test(uuid) to authenticated, service_role;
 grant  execute on function public.restore_test(uuid) to authenticated, service_role;
+
+commit;

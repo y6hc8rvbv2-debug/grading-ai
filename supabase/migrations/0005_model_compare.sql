@@ -12,6 +12,9 @@
 --       * 1つの試験で、同じモデルは1回しか呼べない（pending → calling は1度だけ。トリガーで戻せない）
 -- ============================================================================
 
+-- 途中で失敗したら何も変わらないよう、1つのトランザクションで実行する（docs/DB-RUNBOOK.md）
+begin;
+
 create table public.model_compare_runs (
   id            uuid primary key default gen_random_uuid(),
   school_id     uuid not null references public.schools(id) on delete cascade,
@@ -138,3 +141,5 @@ create policy model_compare_results_update on public.model_compare_results
 create policy model_compare_results_delete on public.model_compare_results
   for delete to authenticated
   using (school_id = public.current_school_id() and created_by = auth.uid() and public.current_role_is('admin'));
+
+commit;

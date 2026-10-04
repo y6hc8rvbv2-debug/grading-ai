@@ -10,6 +10,9 @@
 --   - 合計点と status は既存のトリガー（recalc_submission_total）が決める
 -- ============================================================================
 
+-- 途中で失敗したら何も変わらないよう、1つのトランザクションで実行する（docs/DB-RUNBOOK.md）
+begin;
+
 create or replace function public.save_ai_grading(
   p_submission_id uuid,
   p_quality       jsonb,
@@ -103,3 +106,5 @@ $$;
 
 revoke execute on function public.save_ai_grading(uuid, jsonb, jsonb) from public, anon;
 grant  execute on function public.save_ai_grading(uuid, jsonb, jsonb) to authenticated, service_role;
+
+commit;

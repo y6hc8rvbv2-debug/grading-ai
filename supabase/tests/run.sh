@@ -27,4 +27,6 @@ echo "== supabase/tests/rls_test.sql"
 "${PSQL_APP[@]}" -f supabase/tests/workflow_test.sql
 echo "== supabase/tests/tutor_test.sql"
 "${PSQL_APP[@]}" -f supabase/tests/tutor_test.sql
+echo "== supabase/tests/upgrade_test.sh（本番と同じ順の適用）"
+bash supabase/tests/upgrade_test.sh
 echo "OK: すべてのテストが通りました"

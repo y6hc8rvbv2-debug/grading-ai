@@ -15,6 +15,9 @@
 -- 既存のテスト・設問・答案・成績は変更しない（列は空のまま追加する）。
 -- ============================================================================
 
+-- 途中で失敗したら何も変わらないよう、1つのトランザクションで実行する（docs/DB-RUNBOOK.md）
+begin;
+
 alter table public.tests add column answer_key_paths text[];
 alter table public.questions add column figure jsonb;
 
@@ -74,3 +77,5 @@ create policy test_imports_update on public.test_imports
 create policy test_imports_delete on public.test_imports
   for delete to authenticated
   using (school_id = public.current_school_id() and public.current_role_is('admin'));
+
+commit;

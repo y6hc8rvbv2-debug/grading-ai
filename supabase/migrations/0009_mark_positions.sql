@@ -12,6 +12,9 @@
 -- 既存のテーブル・データは変更しない。
 -- ============================================================================
 
+-- 途中で失敗したら何も変わらないよう、1つのトランザクションで実行する（docs/DB-RUNBOOK.md）
+begin;
+
 create table public.mark_positions (
   id             uuid primary key default gen_random_uuid(),
   school_id      uuid not null references public.schools(id) on delete cascade,
@@ -86,3 +89,5 @@ create policy mark_positions_update on public.mark_positions
 create policy mark_positions_delete on public.mark_positions
   for delete to authenticated
   using (school_id = public.current_school_id());
+
+commit;

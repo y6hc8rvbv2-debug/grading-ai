@@ -20,25 +20,51 @@
 - OpenAI を呼ぶ関数は、引数で受け取った本人のキーだけを使う。環境変数の読み取りを記録し、管理者のキーに触れないことを検査（同上）
 - キーの不備・残高不足・失効・混雑では、別のキーへ切り替えず理由を表示（同上・E2E）
 - E2E では、アプリのサーバーに管理者のキー（`ANTHROPIC_API_KEY`・`OPENAI_API_KEY`）を置いたまま、OpenAI の代役が受けた要求のキーを全件記録し、
-  すべて生徒本人のキーか短期の資格情報だったことを確認（`tests/e2e/tutor.mjs`）
+  すべて生徒本人のキーだったことを確認（`tests/e2e/tutor.mjs`）
 
 ## 2. 採用した方式と制限（2026-10-04 時点）
 
 | 方式 | 状態 | 理由 |
 |---|---|---|
-| A. アプリ内音声（本人の OpenAI API 契約・BYOK） | **実装** | サーバーが本人のキーで `POST /v1/realtime/client_secrets` を呼んで短期の資格情報（60秒）を発行し、ブラウザはそれだけで `POST /v1/realtime/calls`（WebRTC）に接続する |
+| A. アプリ内音声（本人の OpenAI API 契約・BYOK） | **実装** | ブラウザが WebRTC の申し込み（SDP）を作り、**アプリのサーバーが本人のキーで `POST /v1/realtime/calls` を呼んで通話を作る**。ブラウザには SDP の応答だけを返す（キーも短期の資格情報も渡さない）。通話はサーバーが `POST /v1/realtime/calls/{call_id}/hangup` で切れる |
 | B. 本人の ChatGPT で復習（外部アプリ） | **実装** | 「復習内容をコピー」「ChatGPT を開く」。ログイン・貼り付け・音声開始・会話の取得はアプリが行わない |
-| C. Sign in with ChatGPT で本人の ChatGPT 契約をアプリ内で使う | **無効（実装しない）** | 公開の経路は、オープンソースやローカルで動くアプリが対象で、商用・リモートホスト型は別途申請が必要。対象は Responses API（`stream: true`・`store: false` などの制約）で、Realtime API は ChatGPT のプランのトークンを受け付けない |
+| C. Sign in with ChatGPT で本人の ChatGPT 契約をアプリ内で使う | **無効（実装しない）** | 公開の経路は、オープンソースやローカルで動くアプリが対象で、商用・リモートホスト型は別途申請が必要。Realtime API は ChatGPT のプランのトークンを受け付けない（検索結果の要約での確認。公式ページは開けなかった） |
 
-- 公式ドキュメント（developers.openai.com）はこの開発環境のネットワークから直接開けなかったため、検索結果の要約で確認した。**導入前に公式資料で必ず再確認すること**：
-  - WebRTC：https://developers.openai.com/api/docs/guides/voice-webrtc
-  - 料金：https://developers.openai.com/api/docs/pricing
-  - ChatGPT プランの利用：https://developers.openai.com/siwc/token-sharing-open-source ・ https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations
-- **モデル名は固定していない**。生徒のキーで `GET /v1/models` を呼び、名前に `realtime` を含むものから本人が選ぶ（字幕用の文字起こしは `transcribe` を含むモデルがあれば使う）
-- 音声の声は `marin`、ゆっくり話すときは `speed: 0.85`。イベント名は GA と以前の名前の両方を受け付けているが、**実機の OpenAI との接続は未検証**
-- **未成年の利用**：OpenAI の利用規約上の年齢・保護者の同意の条件は、導入時点の規約で確認すること。保護者の契約を年齢制限の回避手段として扱わない。
+### 公式資料との照合
+
+developers.openai.com・openai.com・api.openai.com はこの開発環境のネットワークから開けなかった。代わりに、**OpenAI が公開している一次資料**を直接読んで照合した（検索結果の要約では確認済みにしていない）：
+
+- 公式の API 仕様 `github.com/openai/openai-openapi`（`openapi.yaml`、2.3.0）
+- 公式 SDK `openai`（npm、7.27.0・2026-10-01 公開）の型定義 `resources/realtime/*`
+
+| 項目 | 公式資料の内容 | アプリ |
+|---|---|---|
+| 接続方法 | `POST /v1/realtime/calls`：multipart/form-data（`sdp`＝application/sdp、`session`＝application/json）。201 で SDP の応答、`Location` に通話ID | サーバーが同じ形で送る（`lib/tutor/openai.ts` の `createCall`） |
+| 通話を切る | `POST /v1/realtime/calls/{call_id}/hangup`（見つからなければ 404） | 上限時間・停止・同意の撤回・キーの削除・終了で呼ぶ（`hangupCall`） |
+| 短期の資格情報 | `client_secrets` の `expires_after` は「**会話を始められる期限**」。「始めた会話は期限後も続き、期限内なら同じ資格情報で複数の会話を作れる」 | **使わない**。60秒の期限は会話の時間制限にならないため、会話の時間はサーバーが測って切る |
+| 会話に使えるモデル | `RealtimeSessionCreateRequest.model`：gpt-realtime 系・gpt-realtime-mini 系・gpt-4o(-mini)-realtime-preview 系・gpt-audio-1.5・gpt-audio-mini 系 | この一覧（`lib/tutor/models.ts`）と本人のキーの `GET /v1/models` の両方にあるものだけを表示。翻訳・文字起こし用（名前に realtime を含んでも）は出さない |
+| 字幕（文字起こし） | `audio.input.transcription.model`（gpt-4o-mini-transcribe など）・`language` | gpt-4o-mini-transcribe などを `language: "ja"` で（使えるものがあれば） |
+| 声・速さ | `voice`（marin など10種）・`speed` 0.25〜1.5 | marin・通常 1.0／ゆっくり 0.85 |
+| イベント名 | `response.output_text.delta/done`・`response.output_audio.delta`・`response.output_audio_transcript.delta/done`・`conversation.item.input_audio_transcription.completed`・`input_audio_buffer.speech_started/stopped`・`output_audio_buffer.started/stopped`・`response.done`（usage）・`error` | 同じ名前で受ける（以前の beta の名前も受け付ける） |
+
+- **年齢・保護者の同意の条件は未確認**（OpenAI の利用規約のページを開けなかった）。導入前に、学校の担当者が最新の利用規約で確かめること。保護者の契約を年齢制限の回避手段として扱わない。
   アプリでは、学校・クラスごとに有効にでき（既定は無効）、生徒は支払者（本人／保護者）を選んで利用条件を確認したことにチェックしないと使えない。
   使えない生徒は、返却画面で先生のコメント・（公開した場合）解説で復習する
+- 本物の OpenAI との接続（音声・イベント・料金）は、本人のキーで `npm run tutor:live-check` を実行して確かめる（`docs/TUTOR-LIVE-CHECK.md`。**有料の確認は依頼者の指示があるまで実行しない**）
+
+### 会話を終わらせる仕組み
+
+| きっかけ | どこで気づくか | 通話を切る |
+|---|---|---|
+| 生徒が「会話を終える」・画面を閉じる・バックグラウンド | 画面 → `/api/tutor/session/end` | サーバーが本人のキーで hangup。画面も接続とマイクを止める |
+| 1回の上限時間 | 画面が20秒ごとに生存確認 → DB が開始時刻から判定（`heartbeat_tutor_session`。画面の申告は信用しない） | 同上（理由 time_limit） |
+| 学校・クラスで無効にした | 次の生存確認（最大20秒後） | 同上（disabled） |
+| 同意の撤回・キーの削除 | その操作の中で | 撤回・削除の**前に**本人のキーで hangup |
+| 緊急停止 `TUTOR_FEATURE=off` | 次の生存確認 | 同上（feature_off）。停止中も終了・撤回・削除の操作は受け付ける |
+
+E2E（`tests/e2e/tutor.mjs`）で、上の各きっかけで OpenAI の代役が hangup を受け取り、画面の会話も止まることを確かめた。
+**制限**：生存確認はブラウザが送る。改造したブラウザなどが生存確認を止めると、サーバーはその生徒の次の要求（開始・終了・撤回など）まで通話を切れない（料金は本人のキー。管理者には流れない）。
+OpenAI 側の1通話あたりの最大時間は公式資料に記載が見つからず未確認。
 
 ## 3. 導入手順（管理者）
 
@@ -46,7 +72,8 @@
    設定画面の「AI採点の準備状況」で 0012 が「済」になることを確かめる
 2. （任意）生徒がキーを「暗号化して保存」できるようにするときは、Vercel の環境変数に `TUTOR_KEY_ENCRYPTION_KEY`（32バイトの乱数を base64）を入れる。
    作り方：`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`。**DB には置かない。変えると保存済みのキーは使えなくなる**。
-   設定しない場合、生徒は「保存しない（画面を閉じるまで使う）」だけを選べる
+   設定しない場合、生徒は「保存しない（画面を閉じるまで使う）」だけを選べる。
+   この環境変数を見られる人（Vercel の管理権限）を最小限にする（下の「キーを読めるのは誰か」）
 3. （任意）概算料金を表示するときは `TUTOR_PRICES_JSON` に、OpenAI の料金表を見て単価（1M トークンあたりの米ドル）を入れる。無ければ概算料金は出さない
 4. 設定画面の「チャッピー先生（生徒の音声復習）」で、学校で有効にし、使ってよいクラスにチェックし、1回・1日の上限（分）を決めて保存する
 5. 止めるとき：設定画面で無効にする。緊急時は環境変数 `TUTOR_FEATURE=off`（チャッピー先生の API だけが止まり、採点は止まらない）
@@ -70,7 +97,7 @@
    1. 本人（または保護者）が OpenAI のサイトでアカウントと支払い方法を設定し、API キーを作る（アプリの外で行う）。予算・通知も設定する
    2. 設定画面の「OpenAI API キー」欄に貼り付け、「保存しない」または「暗号化して保存する」を選んで「キーを確かめて登録」
    3. 使うモデルを選ぶ（料金はモデルで違うので、OpenAI の料金表で確かめる）
-   - キーはチャット・メール・メモに書かない。画面には末尾4文字だけが出る。先生・管理者も見られない
+   - キーはチャット・メール・メモに書かない。画面には末尾4文字だけが出る。先生・管理者もアプリの画面では見られない（技術的な扱いは下の「キーを読めるのは誰か」）
 4. 問題カードで「音声で質問する」（マイクの許可を求める）または「文字で質問する」。会話中は「もう一度説明」「ヒント」「自分で解く」「復習を終了（まとめ）」
    - 状態（接続中／聞き取り中／考え中／発話中／停止／エラー）を表示し、「マイクを止める」「会話を終える」はいつでも押せる
    - チャッピー先生の言葉は字幕でも出る。自分の発言の聞き取り（字幕）が違うときは「聞き取りを直して送る」
@@ -82,6 +109,18 @@
 7. **学習データの削除**：設定画面の「学習データを消す」（復習の状態・振り返り・文字起こし。キーの削除とは別。先生の「理解確認済み」と利用時間の記録は残る）
 
 保護者：OpenAI の契約・支払い・予算の設定を行い、生徒の端末でキーを登録する（またはキーを渡して生徒が登録する）。キーは保護者の管理画面でいつでも無効にできる。
+
+### キーを読めるのは誰か
+
+| 立場 | アプリの画面・DB の権限（RLS） | 技術的に元のキーを得られるか |
+|---|---|---|
+| 生徒本人 | 末尾4文字だけ表示。暗号文の行は本人だけが読める | 本人は元のキーを持っている |
+| 先生・学校の管理者（アプリの利用者） | **見られない**（画面に出さない。`tutor_credentials` は本人以外は読めない。DB テストで確認） | 得られない（アプリの権限だけでは暗号文も読めない） |
+| サーバーの運用者（Supabase のプロジェクト管理者＝暗号文を読める人、かつ Vercel の環境変数 `TUTOR_KEY_ENCRYPTION_KEY` を見られる人） | — | **得られる**。暗号文と暗号鍵の両方があれば復号できる。動いているサーバーのコードを変えられる人も同じ |
+| 「保存しない」を選んだとき | — | 会話の開始・生存確認・終了のたびに、キーが HTTPS でアプリのサーバーを通る（保存・ログ出力はしない）。サーバーのコードを変えられる人は技術的に取得できる |
+
+このため、生徒・保護者への説明は「先生・管理者はアプリの画面ではキーを見られない。ただし、アプリのサーバーを管理する人は技術的には元に戻せる」とする（設定画面にも表示している）。
+心配な場合は、予算の上限を決めた専用のキーを作り、使い終わったら OpenAI の管理画面で無効にする。
 
 ## 6. 外部の AI へ送るもの・送らないもの
 
@@ -99,49 +138,42 @@
   生徒の操作は `current_student_id()`（auth.uid() から決める）で本人に限る。クライアントの生徒IDは信用しない
 - API（`app/api/tutor/*`）：同じサイトからの要求か（Origin・Sec-Fetch-Site）、HTTPS か（キーを受け取るとき）、キー登録は10分に5回まで、監査ログ（秘密・会話の中身は残さない）、応答はキャッシュさせない
 - キーの暗号化：AES-256-GCM、追加認証データに生徒ID（`lib/tutor/crypto.ts`）。暗号鍵は環境変数だけ
-- ブラウザ：`lib/tutor/realtime-client.ts`（WebRTC・データチャネル `oai-events`）。終了・切断・バックグラウンド・画面を閉じたときにマイク・接続・サーバーの会話を終える。
+- 通話：`app/api/tutor/session`（開始：本人のキーで `/v1/realtime/calls`、通話ID を `tutor_sessions.call_id` に記録）・`session/heartbeat`（20秒ごと。止める理由があればサーバーが hangup）・`session/end`。
+  `lib/tutor/server.ts` の `hangupSessions()` が本人のキーで通話を切る（保存したキーの復号、または「保存しない」ときに画面が添えたキー）
+- ブラウザ：`lib/tutor/realtime-client.ts`（WebRTC・データチャネル `oai-events`）。OpenAI への HTTP 要求はしない（SDP の交換はアプリのサーバー経由）。終了・切断・バックグラウンド・画面を閉じたときにマイク・接続・サーバーの会話を終える。
   生徒の画面と API は `cache-control: no-store`。ログアウトで sessionStorage・Cache Storage を消す
 - 機能の停止：`schools.tutor_enabled`（画面）・`TUTOR_FEATURE=off`（緊急）
 
 ## 8. 元に戻す（ロールバック）
 
-画面から使えなくするだけなら、設定画面で無効にする（データは残る）。テーブルごと消すときは、**返却の受信箱・版の履歴も消える**ことを確認してから実行する：
+**データを消さない戻し方を先に使う**（手順は `docs/DB-RUNBOOK.md`）：
+1. 設定画面で学校の「チャッピー先生」を無効にする（進行中の会話は次の生存確認で切れる）
+2. 緊急時は Vercel の環境変数 `TUTOR_FEATURE=off` で API を止める（採点・返却は止まらない）
+3. アプリを以前の版に戻す（Vercel の Instant Rollback）。0012 で足した列・テーブルは残しておいても以前の版の動作に影響しない
 
-```sql
-begin;
-drop trigger if exists result_releases_enrich on public.result_releases;
-drop trigger if exists result_releases_after on public.result_releases;
-drop trigger if exists tutor_consent_revoked on public.tutor_consents;
-drop table if exists public.tutor_transcripts, public.tutor_reflections, public.tutor_progress, public.tutor_sessions,
-  public.tutor_credentials, public.tutor_consents, public.student_inbox, public.result_release_history;
-drop function if exists public.result_releases_enrich(), public.result_releases_after(), public.tutor_consent_revoked(),
-  public.start_tutor_session(uuid, integer, text, text), public.heartbeat_tutor_session(uuid, integer),
-  public.end_tutor_session(uuid, text, integer, jsonb), public.mark_inbox_read(uuid), public.set_tutor_settings(boolean, integer, integer, uuid[]),
-  public.tutor_status(), public.tutor_log(text), public.tutor_shared_with_teacher(uuid), public.current_student_id(), public.current_student_school(), public.is_staff();
-alter table public.result_releases drop column if exists version;
-alter table public.schools drop column if exists tutor_enabled, drop column if exists tutor_session_minutes, drop column if exists tutor_daily_minutes;
-alter table public.classes drop column if exists tutor_enabled;
-alter table public.questions drop column if exists prompt_text;
-alter table public.tests drop column if exists release_model_answer;
-commit;
-```
-
-返却済みの内容（`result_releases.payload`）に 0012 で加えた項目（本人の解答・問題文・公開した正答と解説・学年と教科）は残る。
+テーブルを消す（`drop`）戻し方は、返却の受信箱・版の履歴・復習の記録が消えて元に戻せないので、この文書には載せない。どうしても必要なときは、
+`docs/DB-RUNBOOK.md` のバックアップを取り、消す対象を一覧にして依頼者の承認を得てから行う。
 
 ## 9. 検証の状況
 
-実行済み（すべて代役の OpenAI。本物の OpenAI は呼んでいない）
+実行済み（本物の OpenAI は呼んでいない。OpenAI は `tests/e2e/mock-openai.mjs`、WebRTC はブラウザの RTCPeerConnection の代役）
+- 公式資料との照合（上の表）：公式の API 仕様と公式 SDK の型定義を直接読んだ
 - DB（`npm run test:db`、`supabase/tests/tutor_test.sql`）：返却前は見えない・二重返却で版も通知も増えない・確認後の修正は再確認まで出ない・再返却で版2と「更新」1件、
   他の生徒の返却・同意・キー・会話・状態・振り返りが見えない・他人の返却で会話を始められない、管理者・教員は生徒のキーを見られない、
-  同時1件・1時間6回・経過時間の過大申告を受け付けない、「理解確認済み」は先生だけ・生徒は戻せない、同意なしの文字起こしは保存できない・撤回で消える、復習しても採点は変わらない
-- 単体（`npm run test:unit`、`tests/unit/tutor.test.ts`）：管理者のキーを読まない・依存関係の分離・キーの暗号化・エラー時に切り替えない・送る資料の範囲
-- E2E（`tests/e2e/tutor.mjs`、36項目）：スマホ幅の生徒画面で、返却→受信箱→間違えた問題→同意→キー登録（誤ったキー・暗号化保存）→文字の会話→同時2件の拒否→終了、
-  マイク拒否→文字への案内、音声→画面を離れると停止、残高不足・失効、他の生徒・他のサイトからの操作の拒否、キー削除後に始めない、外部の ChatGPT へのコピーと振り返り、
-  先生の「理解確認済み」、確認後の修正と返し直し、ログアウト、ビルド成果物・アプリのログに生徒のキーが含まれない
+  同時1件・1時間6回・経過時間の過大申告を受け付けない、生存確認が上限時間・学校/クラスの停止・同意の撤回を理由つきで返して会話を終える、通話ID は本人の進行中の会話に1回だけ記録できる、
+  「理解確認済み」は先生だけ・生徒は戻せない、同意なしの文字起こしは保存できない・撤回で消える、復習しても採点は変わらない
+- 単体（`npm run test:unit`、`tests/unit/tutor.test.ts`）：管理者のキーを読まない・依存関係の分離・キーの暗号化・エラー時に切り替えない・送る資料の範囲、
+  通話の作成（multipart の形・通話ID）と切断が本人のキーだけで行われる、会話に使えないモデル（翻訳・文字起こし用）を一覧から外す
+- E2E（`tests/e2e/tutor.mjs`）：スマホ幅の生徒画面で、返却→受信箱→間違えた問題→同意→キー登録→モデルの一覧（会話用だけ）→文字の会話→同時2件の拒否→終了（hangup）、
+  マイク拒否→文字への案内、音声→画面を離れると停止（hangup）、**上限時間・学校/クラスでの停止・同意の撤回・キーの削除で、サーバーが通話を切り画面も止まる**、
+  残高不足・失効、他の生徒・他のサイトからの操作の拒否、外部の ChatGPT へのコピーと振り返り、先生の「理解確認済み」、確認後の修正と返し直し、ログアウト、
+  ブラウザは OpenAI に直接つながず、短期の資格情報も受け取らない、ビルド成果物・アプリのログに生徒のキーが含まれない
+- 通し（`tests/e2e/fullflow.mjs`）：先生がテストを登録 → 答案を取り込んで AI 採点（代役）→ 確認済みにする → 個別返却 → 生徒が受信箱から間違えた問題をチャッピー先生と復習 → 正式な採点は変わらない
 
-未検証・設定待ち
-- **本物の OpenAI Realtime との接続（WebRTC の音声・イベント名・料金の数値）**：E2E はブラウザの RTCPeerConnection を代役にしている
-- **iPhone / iPad の Safari、Android の Chrome の実機**（マイクの許可・バックグラウンドへの移行・音声の再生）
-- OpenAI の年齢・保護者の同意の条件（導入時点の規約で確認）、プッシュ通知（未実装。受信箱で受け取る）、メール通知（実装しない）
+未検証・依頼者の操作待ち
+- **本物の OpenAI Realtime との接続**（通話の作成・イベント名・hangup で実際に切れるか・料金）：`npm run tutor:live-check -- --paid`（`docs/TUTOR-LIVE-CHECK.md`）。依頼者の指示があるまで実行しない
+- **iPhone / iPad の Safari、Android の Chrome の実機**：`docs/TUTOR-DEVICE-CHECK.md` のチェックリスト（すべて未確認）
+- OpenAI の年齢・保護者の同意の条件（利用規約のページを開けなかった。導入時点の規約で確認）、OpenAI 側の1通話の最大時間
+- プッシュ通知（未実装。受信箱で受け取る）、メール通知（実装しない）
 - 図が必要な問題の図は AI に送っていない（画像から個人情報を除いて切り出す処理は未実装。図の様子は生徒に尋ねるよう指示している）
-- AI による理解確認の判定は実装していない（会話はブラウザと OpenAI の間で行われ、サーバーで確かめられないため）。生徒の自己申告と先生の確認だけ
+- AI による理解確認の判定は実装していない（会話の中身はブラウザと OpenAI の間で流れ、サーバーで確かめられないため）。生徒の自己申告と先生の確認だけ

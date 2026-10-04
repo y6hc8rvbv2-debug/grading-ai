@@ -18,6 +18,9 @@
 --       失敗・中断した採点を終わらせ、答案の状態を採点前に戻す
 -- ============================================================================
 
+-- 途中で失敗したら何も変わらないよう、1つのトランザクションで実行する（docs/DB-RUNBOOK.md）
+begin;
+
 alter table public.submissions
   add column grading_mode  text check (grading_mode in ('opus', 'cascade')),
   add column grading_stage text check (grading_stage in ('haiku', 'sonnet', 'opus'));
@@ -262,3 +265,5 @@ revoke execute on function public.expire_stale_grading_jobs(uuid, integer) from 
 grant  execute on function public.finish_grading_job(uuid, text, jsonb, jsonb, boolean, jsonb) to authenticated, service_role;
 grant  execute on function public.fail_grading_job(uuid, text) to authenticated, service_role;
 grant  execute on function public.expire_stale_grading_jobs(uuid, integer) to authenticated, service_role;
+
+commit;
