@@ -1,25 +1,32 @@
 "use client";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/data/source";
 import { analyzePage, displayableUrl } from "@/lib/redpen/analyze";
 import { layoutMarks } from "@/lib/redpen/layout";
 import { RedPenOverlay } from "@/components/RedPenOverlay";
+import { TutorPanel, type EphemeralKey, type TutorStatus } from "@/components/tutor/TutorPanel";
+import { TutorSettings } from "@/components/tutor/TutorSettings";
+import type { ReleasedItem as TutorItem } from "@/lib/tutor/prompt";
 import type { Submission, Test, Item, MarkPos } from "@/lib/types";
 type ReleasedItem = Item & { big: number };
 type Release = {
   id: string;
   released_at: string;
+  version?: number;
   image_paths: string[];
   payload: {
     test: string;
     total: number;
     maxScore: number;
-    items: ReleasedItem[];
+    items: (ReleasedItem & { detected?: string; prompt?: string; correct?: string; model?: string })[];
     positions: MarkPos[];
+    showModelAnswer?: boolean;
+    subject?: string;
   };
 };
-function ReleasedAnswer({ r }: { r: Release }) {
+type InboxRow = { id: string; release_id: string; version: number; kind: string; created_at: string; read_at: string | null };
+function ReleasedAnswer({ r, tutor }: { r: Release; tutor?: React.ReactNode }) {
   const [pages, setPages] = useState<
     { url: string; info: Awaited<ReturnType<typeof analyzePage>> }[]
   >([]);
@@ -111,7 +118,7 @@ function ReleasedAnswer({ r }: { r: Release }) {
           layout={layouts[i]}
         />
       ))}
-      {items.map((i) => (
+      {tutor ?? items.map((i) => (
         <p key={i.qno}>
           <b>
             {i.label} {i.mark} {i.earned}／{i.points}点
@@ -123,13 +130,55 @@ function ReleasedAnswer({ r }: { r: Release }) {
     </article>
   );
 }
+/** 返却されたテスト1件：原本の赤ペンと、間違えた問題ごとの「チャッピー先生に聞く」 */
+function ReleaseDetail({ r, status, ephemeral, openSettings }: { r: Release; status: TutorStatus | null; ephemeral: EphemeralKey; openSettings: () => void }) {
+  const [open, setOpen] = useState<number | null>(null);
+  const wrong = r.payload.items.filter((i) => i.mark !== "○");
+  return (
+    <ReleasedAnswer r={r} tutor={
+      <section>
+        <h3>間違えた問題（{wrong.length}問）</h3>
+        {!wrong.length && <p>全問正解です。</p>}
+        {wrong.map((i) => (
+          <div key={i.qno} data-testid="wrong-question" style={{ borderTop: "1px solid #e1e4e8", padding: "10px 0" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <b>{i.label}</b><span>{i.mark}</span><span>{i.earned}／{i.points}点</span>
+              <button style={{ padding: "8px 12px", minHeight: 40, borderRadius: 10, border: "1px solid #1E3A5F", background: open === i.qno ? "#1E3A5F" : "#fff", color: open === i.qno ? "#fff" : "#1E3A5F", fontSize: 14 }}
+                onClick={() => setOpen(open === i.qno ? null : i.qno)}>{open === i.qno ? "閉じる" : "チャッピー先生に聞く"}</button>
+            </div>
+            {i.comment && <p style={{ margin: "4px 0", color: "#B3261E" }}>{i.comment}</p>}
+            {open === i.qno && (
+              <TutorPanel releaseId={r.id} item={i as TutorItem} showModelAnswer={!!r.payload.showModelAnswer}
+                status={status} ephemeral={ephemeral} onOpenSettings={openSettings} />
+            )}
+          </div>
+        ))}
+        <h3>すべての問題</h3>
+        {r.payload.items.map((i) => (
+          <p key={i.qno} style={{ margin: "4px 0" }}><b>{i.label} {i.mark} {i.earned}／{i.points}点</b>{i.comment ? `　${i.comment}` : ""}</p>
+        ))}
+      </section>
+    } />
+  );
+}
+
 export default function StudentPage() {
   const [user, setUser] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [rows, setRows] = useState<Release[]>([]);
+  const [inbox, setInbox] = useState<InboxRow[]>([]);
   const [busy, setBusy] = useState(false);
+  const [view, setView] = useState<"list" | "settings" | string>("list");
+  const [status, setStatus] = useState<TutorStatus | null>(null);
+  // 保存しないキー：この画面を閉じるまでメモリにだけ置く（ブラウザの保存領域には置かない）
+  const [ephemeral, setEphemeral] = useState<EphemeralKey>(null);
+
+  const loadStatus = async () => {
+    const res = await fetch("/api/tutor/status", { cache: "no-store" }).catch(() => null);
+    setStatus(res && res.ok ? await res.json() : null);
+  };
   const load = async () => {
     if (!isSupabaseConfigured()) {
       setMessage("接続設定が必要です");
@@ -141,10 +190,10 @@ export default function StudentPage() {
     } = await db.auth.getUser();
     setUser(user?.email || "");
     if (user) {
-      const { data, error } = await db
-        .from("result_releases")
-        .select("id,payload,image_paths,released_at")
-        .order("released_at", { ascending: false });
+      const [{ data, error }, { data: ib }] = await Promise.all([
+        db.from("result_releases").select("id,payload,image_paths,released_at,version").order("released_at", { ascending: false }),
+        db.from("student_inbox").select("id,release_id,version,kind,created_at,read_at").order("created_at", { ascending: false }),
+      ]);
       if (error) setMessage("結果を取得できません。先生に確認してください");
       else
         setRows((previous) =>
@@ -152,10 +201,12 @@ export default function StudentPage() {
             ? previous
             : ((data || []) as Release[]),
         );
+      setInbox((ib ?? []) as InboxRow[]);
     }
   };
   useEffect(() => {
-    load();
+    // ログイン前はチャッピー先生の状態を問い合わせない（未ログインの 401 を出さない）
+    load().then(async () => { const { data: { user } } = await createClient().auth.getUser(); if (user) await loadStatus(); });
     const id = setInterval(load, 30000);
     return () => clearInterval(id);
   }, []);
@@ -176,23 +227,47 @@ export default function StudentPage() {
           ? "確認メールのリンクを開き、先生に登録したアドレスを伝えてください"
           : "",
       );
+      setPassword("");
       await load();
+      await loadStatus();
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "ログインできません");
     } finally {
       setBusy(false);
     }
   };
+  // ログアウト：会話・入力したキー・画面の内容を消し、ブラウザのキャッシュに答案を残さない
+  const logout = async () => {
+    setView("list");
+    setEphemeral(null);
+    await createClient().auth.signOut();
+    try { sessionStorage.clear(); } catch { /* 使えない環境 */ }
+    try { if ("caches" in window) for (const k of await caches.keys()) await caches.delete(k); } catch { /* 使えない環境 */ }
+    setUser("");
+    setRows([]);
+    setInbox([]);
+    setStatus(null);
+  };
+  const openRelease = async (r: Release) => {
+    setView(r.id);
+    const db = createClient();
+    for (const m of inbox.filter((x) => x.release_id === r.id && !x.read_at)) await db.rpc("mark_inbox_read", { p_id: m.id });
+    setInbox((ib) => ib.map((x) => (x.release_id === r.id ? { ...x, read_at: x.read_at ?? new Date().toISOString() } : x)));
+  };
+  const unread = (id: string) => inbox.filter((x) => x.release_id === id && !x.read_at);
+  const current = rows.find((r) => r.id === view) ?? null;
+  const tab = (active: boolean): React.CSSProperties => ({ padding: "8px 14px", minHeight: 40, borderRadius: 10, border: "1px solid #1E3A5F", background: active ? "#1E3A5F" : "#fff", color: active ? "#fff" : "#1E3A5F", fontSize: 15 });
+
   return (
     <main
       style={{
         maxWidth: 850,
         margin: "auto",
-        padding: 20,
+        padding: 16,
         fontFamily: "sans-serif",
       }}
     >
-      <h1>返却された答案</h1>
+      <h1 style={{ fontSize: 22 }}>返却された答案</h1>
       <p role="status">{message}</p>
       {!user ? (
         <form
@@ -232,27 +307,55 @@ export default function StudentPage() {
         </form>
       ) : (
         <>
-          <p>
-            {user}{" "}
-            <button
-              onClick={async () => {
-                await createClient().auth.signOut();
-                setUser("");
-                setRows([]);
-              }}
-            >
-              ログアウト
-            </button>{" "}
-            <button onClick={load}>更新</button>
+          <p style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <span>{user}</span>
+            <button onClick={logout}>ログアウト</button>
+            <button onClick={() => { load(); loadStatus(); }}>更新</button>
           </p>
-          {!rows.length && (
-            <p>
-              返却された答案はまだありません。先生の配信後にここへ表示されます。
-            </p>
+          <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0" }}>
+            <button style={tab(view === "list" || !!current)} onClick={() => setView("list")}>
+              受信箱{inbox.some((x) => !x.read_at) ? `（新着 ${inbox.filter((x) => !x.read_at).length}）` : ""}
+            </button>
+            {status?.student && <button style={tab(view === "settings")} onClick={() => setView("settings")}>チャッピー先生の設定</button>}
+          </nav>
+          {view === "settings" && (
+            <TutorSettings status={status} reload={loadStatus} ephemeral={ephemeral} setEphemeral={setEphemeral} />
           )}
-          {rows.map((r) => (
-            <ReleasedAnswer key={r.id} r={r} />
-          ))}
+          {view === "list" && (
+            <>
+              {!rows.length && (
+                <p>
+                  返却された答案はまだありません。先生の配信後にここへ表示されます。
+                </p>
+              )}
+              <ul data-testid="inbox" style={{ listStyle: "none", padding: 0 }}>
+                {rows.map((r) => (
+                  <li key={r.id} style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12, margin: "8px 0" }}>
+                    <button onClick={() => openRelease(r)} style={{ all: "unset", cursor: "pointer", display: "block", width: "100%" }}>
+                      <b>{r.payload.test}</b>
+                      {unread(r.id).length > 0 && (
+                        <span style={{ marginInlineStart: 8, background: "#B3261E", color: "#fff", borderRadius: 8, padding: "2px 8px", fontSize: 12 }}>
+                          {unread(r.id).some((x) => x.kind === "updated") ? "更新" : "新着"}
+                        </span>
+                      )}
+                      <br />
+                      <span style={{ fontSize: 13, color: "#555" }}>
+                        返却日時：{new Date(r.released_at).toLocaleString("ja-JP")}
+                        {(r.version ?? 1) > 1 ? `（先生が内容を更新しました・第${r.version}版）` : ""}
+                        ／間違えた問題 {r.payload.items.filter((i) => i.mark !== "○").length} 問
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {current && (
+            <>
+              <button onClick={() => setView("list")}>← 受信箱に戻る</button>
+              <ReleaseDetail key={current.id} r={current} status={status} ephemeral={ephemeral} openSettings={() => setView("settings")} />
+            </>
+          )}
         </>
       )}
     </main>

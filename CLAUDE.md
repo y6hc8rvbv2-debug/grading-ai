@@ -16,7 +16,7 @@
   デモモードはプロトタイプと同じデモデータで全機能を試せるが、何も保存しない（画面上部に「デモモード（保存されません）」と出る）。
 - 採点AI: サーバーの `ANTHROPIC_API_KEY` があれば、「新規採点」は画像を保存して続けて AI 採点する。
   保存済み（AI採点待ち）の答案も「採点中」画面・答案詳細から採点できる。キーが無ければ画像の保存だけ。
-- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004〜0009 はまだ**（0005 はモデル比較試験、0006 は採点方式と AI採点の記録、0009 は赤ペンの位置）。
+- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004〜0012 はまだ**（0005 はモデル比較試験、0006 は採点方式と AI採点の記録、0009 は赤ペンの位置、0010・0011 は返却、0012 は返却の版・受信箱とチャッピー先生）。
   Vercel の Preview で、ログイン・名簿表示・答案画像の保存まで動作確認済み（ユーザー報告）。
 - **本物の Claude API での採点はまだ一度も実行していない**（開発環境にキーが無い）。
   E2E はリクエストの形を検査する代役サーバー（`tests/e2e/mock-anthropic.mjs`）で検証している。
@@ -27,7 +27,7 @@
 
 ### 1. 本番で AI 採点を動かす ← ユーザー作業待ち
 
-- Supabase の SQL Editor で `0004_ai_grading.sql`・`0005_model_compare.sql`・`0006_grading_modes.sql`・`0007_test_import.sql`・`0008_test_archive.sql`・`0009_mark_positions.sql` を実行する
+- Supabase の SQL Editor で `0004_ai_grading.sql`・`0005_model_compare.sql`・`0006_grading_modes.sql`・`0007_test_import.sql`・`0008_test_archive.sql`・`0009_mark_positions.sql`・`0010_workflow.sql`・`0011_individual_return.sql`・`0012_voice_tutor.sql` を実行する
 - Preview で誤登録の模擬テスト（1問・満点4点・採点済0枚）をごみ箱から削除する（ユーザー作業）
 - Preview で模範解答（20問・100点・5・5・1・3・1・3・2）から自動入力し、読み取り精度を確かめる
 - Preview で「3モデル併用」を試し、Sonnet・Opus に回った割合（目安 20%・5%）と実際の費用を「AI採点の記録」で確かめる
@@ -49,7 +49,8 @@
   root 環境では `su postgres -c "bash supabase/tests/run.sh"`
 - `npm run test:e2e` … Supabase CLI のローカル環境（Docker）にアプリを繋ぎ、ブラウザで教員の作業を通しで検証（`tests/e2e/`）。
   採点AIは代役サーバー（本物の API は呼ばない）。ECR に届かない環境では `SUPABASE_INTERNAL_IMAGE_REGISTRY=docker.io` を付ける
-- `npm run test:unit` … 赤ペンの置き場所（罫線の検出・表への割り当て。実物の写真は REDPEN_REAL_DIR があるときだけ）・採点AIの出力の後処理（`normalizeResult`）・3モデル併用の振り分けと料金の目安・比較試験・HEIC 変換（`tests/fixtures/sample.heic` は合成画像）の単体テスト
+- `npm run test:db` には `supabase/tests/workflow_test.sql`（返却）・`tutor_test.sql`（受信箱・チャッピー先生）も含まれる
+- `npm run test:unit` … チャッピー先生（管理者のキーを使わない・依存関係の分離・暗号化）・赤ペンの置き場所（罫線の検出・表への割り当て。実物の写真は REDPEN_REAL_DIR があるときだけ）・採点AIの出力の後処理（`normalizeResult`）・3モデル併用の振り分けと料金の目安・比較試験・HEIC 変換（`tests/fixtures/sample.heic` は合成画像）の単体テスト
 
 検証中に見つけて直したもの（0001/0002 は未適用だったので直接修正、0003 で追加修正）:
 - サインアップ時の `user_metadata` で任意校の管理者になれた → `app_metadata` から読むよう変更
@@ -126,6 +127,16 @@
   - 今後の採点では、指示文で bbox を「解答欄の枠全体（作図は描いた範囲）」と指定している（以前は「解答が書かれている場所」）
 - 「清書版」（`RedPenSheet`）は固定レイアウトのまま（原本の座標には使わない）
 
+- **チャッピー先生（0012。生徒の音声復習）**：返却した答案の間違えた問題を、生徒が AI と音声・文字で復習する。詳細は `docs/VOICE-TUTOR.md`
+  - **AI 利用料は生徒本人または保護者が OpenAI と直接契約して支払う（BYOK）。管理者のキーへは、失敗・再試行を含めどの経路でもフォールバックしない**
+  - `lib/tutor/`（サーバー：`crypto.ts` AES-GCM・`openai.ts` 本人のキーだけ・`prompt.ts` 指導方針と1問分の資料・`server.ts` 本人確認/CSRF/HTTPS）、`app/api/tutor/*`、
+    `lib/tutor/realtime-client.ts`（ブラウザの WebRTC）、`components/tutor/`（生徒の `TutorPanel`・`TutorSettings`、教職員の `TeacherTutor`）、生徒画面 `app/student/page.tsx`（受信箱 → 間違えた問題 → チャッピー先生）
+  - チャッピー先生のコードは `lib/ai`・Anthropic SDK・`ANTHROPIC_API_KEY`・`OPENAI_API_KEY` に依存しない（`tests/unit/tutor.test.ts` で静的に検査）。この分離を崩さないこと
+  - モデル名は固定しない（本人のキーで `/v1/models` を見て本人が選ぶ）。Sign in with ChatGPT（方式C）は商用・ホスト型と Realtime が対象外のため無効
+  - 生徒の操作は `current_student_id()`（auth.uid()）で本人に限る。キーの暗号文は本人しか読めず、暗号鍵は環境変数 `TUTOR_KEY_ENCRYPTION_KEY`（DB に置かない）
+  - 「理解確認済み」は先生だけ。生徒は自己申告まで。復習で正式な採点・赤ペン・コメントは変わらない
+  - 返却：`result_releases` は内容が変わったときだけ版を上げ、`student_inbox` に (返却,版) で1件。同じ内容の返し直しは何もしない（`result_releases_enrich` が返却内容に本人の解答・問題文・公開した正答と解説を加える）
+
 まだ生成AIに置き換えていないもの（`// PROD-API:` コメントが残っている）:
 - `buildFeedback`（生徒向けフィードバック・教師向け指導提案）/ `buildModelAnswers`（白紙時の模範解答）… テンプレート文面のまま。`model_answer_sets` は未使用
 - 為替レート・請求（Stripe）… デモ表示のまま
@@ -200,6 +211,7 @@ Next.js 14 (App Router, TypeScript)
       ├── ai/grade.ts            採点AI（Claude 呼び出し・指示文・出力の後処理）。サーバー専用
       ├── image.ts               答案画像の縮小（ブラウザ）
       ├── redpen/                原本の赤ペンの置き場所（罫線の検出・表への割り当て・PNG/印刷）
+      ├── tutor/                 チャッピー先生（本人の OpenAI キーだけを使う。lib/ai に依存しない）
       ├── grading/engine.ts      仮採点（ルールベース）・1枚単位の分析・文面生成・定数
       ├── demo/data.ts           デモデータ（デモモード専用）
       ├── i18n.ts / ui/theme.ts  多言語・テーマ
@@ -304,7 +316,11 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
 17. **赤ペンの位置は、実物の答案写真（1ページ目：IMG_1208、2ページ目：ユーザーのスクリーンショットから切り出した低解像度の原本）＋台本の AI 位置でのみ検証** —
    ユーザーの答案に実際に保存された AI の bbox は見ていない（スクリーンショットの旧版の赤丸から逆算した位置で再現）。
    罫線の無い答案（問題用紙に直接書く形式）では表への割り当てが効かず、AI の位置に頼る（ずれは「位置の要確認」と手動調整で直す）
-2. **0004〜0009 が本番 Supabase に未適用**（「次にやること」1）
+18. **チャッピー先生は代役の OpenAI でのみ検証** — 本物の Realtime（WebRTC の音声・イベント名・料金）と iPhone/iPad Safari・Android Chrome の実機は未検証。
+   E2E（`tests/e2e/tutor.mjs`）はブラウザの RTCPeerConnection を代役にしている。OpenAI の年齢・保護者の同意の条件は導入時点の規約で確認する
+19. **既存の通しテスト `tests/e2e/scenario.mjs` が手順2（テストの登録）で止まる** — 0276380 の時点で既に失敗（テストの登録・新規採点の画面の変更にシナリオが追いついていない）。
+   `ONLY_TUTOR=1 npm run test:e2e` でチャッピー先生のシナリオだけを実行できる
+2. **0004〜0012 が本番 Supabase に未適用**（「次にやること」1）
 16. **模範解答からの自動入力は代役 API でのみ検証** — 本物の模範解答での読み取り精度（特に配点表・作図・PDF の bbox）は Preview で確かめる。PDF の資料は該当箇所の枠を表示できない（ページを開くだけ）。作図の模範図は採点AIには送っていない（採点条件の文章だけ）
 15. **3モデル併用は代役 API でのみ検証** — 本物の Haiku / Sonnet での読み取り精度・振り分けの割合・費用は未確認。正答との照合（`normAnswer`）は表記ゆれで誤検知しうる（誤検知は上のモデル・要確認に回るので、精度側に倒れる）
 14. **モデル比較試験は未実行** — Preview で管理者が実行する準備まで完了（代役サーバーでの E2E のみ検証済み）

@@ -15,6 +15,7 @@ import { analyzePage, displayableUrl, type AnalyzedPage } from "@/lib/redpen/ana
 import { composePng, loadPhoto, printImages, saveBlob } from "@/lib/redpen/export";
 import { friendlyError } from "@/lib/errors";
 import { GradingLogCard } from "@/components/GradingLogCard";
+import { TutorReviewCard } from "@/components/tutor/TeacherTutor";
 import { GradingModeSelect } from "@/components/GradingModePicker";
 import { MODE_LABEL, STAGE_LABEL } from "@/lib/grading/cost";
 import type { Item, MarkPos, Submission } from "@/lib/types";
@@ -434,6 +435,7 @@ export default function GradingDetail({ subId }: { subId: string }) {
         </Card>
       )}
 
+      {tab === "items" && <div style={{ marginBottom: 14 }}><TutorReviewCard sub={sub} /></div>}
       {tab === "items" && (
         <Card title="設問別の採点結果" sub="判定・得点・コメントはその場で修正できます。修正は合計点と赤ペン画像に即時反映されます。">
           <div style={{ display: "grid", gap: 9 }}>

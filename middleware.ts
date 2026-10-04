@@ -32,8 +32,14 @@ export async function middleware(request: NextRequest) {
   // セッションを更新する。この呼び出しを省くとトークンが失効する。
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 未ログインならログイン画面へ
-  if (!user && !request.nextUrl.pathname.startsWith("/login") && !request.nextUrl.pathname.startsWith("/student") && !request.nextUrl.pathname.startsWith("/auth/callback")) {
+  // 生徒の画面とチャッピー先生の API は、答案・会話を端末や共有のキャッシュに残さない
+  const path = request.nextUrl.pathname;
+  if (path.startsWith("/student") || path.startsWith("/api/tutor")) {
+    response.headers.set("cache-control", "no-store, private");
+  }
+
+  // 未ログインならログイン画面へ（チャッピー先生の API は、自分で 401 を返す）
+  if (!user && !path.startsWith("/login") && !path.startsWith("/student") && !path.startsWith("/auth/callback") && !path.startsWith("/api/tutor")) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

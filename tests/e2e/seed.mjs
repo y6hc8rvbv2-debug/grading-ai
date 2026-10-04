@@ -53,4 +53,37 @@ const { error: e6 } = await admin.from("students").insert(students);
 if (e6) throw e6;
 const { data: cb } = await admin.from("classes").insert({ school_id: B, grade: 1, name: "B", school_year: 2026 }).select("id").single();
 await admin.from("students").insert({ school_id: B, class_id: cb.id, number: 1, exam_no: "1B01", anon_id: "生徒B01" });
-console.log("seeded", { A, B });
+// ---------------------------------------------------------------- 学校C：返却とチャッピー先生の確認用（tests/e2e/tutor.mjs）
+// 既存のシナリオ（学校A・B）と混ざらないように別の学校にする。答案は採点済み（大問1-(2) だけ ×）、まだ確認・返却していない
+const C = await school("チャッピー中学校", "SCHOOL-C");
+const { data: uc, error: ec } = await admin.auth.admin.createUser({ email: "admin@c.example", password: "pass-C-123", email_confirm: true });
+if (ec) throw ec;
+await admin.auth.admin.updateUserById(uc.user.id, { app_metadata: { school_id: C, role: "admin" } });
+const { data: cc } = await admin.from("classes").insert({ school_id: C, grade: 2, name: "C", school_year: 2026 }).select("id").single();
+const { data: stC } = await admin.from("students").insert([1, 2].map((n) => ({ school_id: C, class_id: cc.id, number: n, exam_no: `2C0${n}`, anon_id: `生徒C0${n}` }))).select("id, number");
+stC.sort((a, b) => a.number - b.number);
+for (const [i, s] of stC.entries()) {
+  const { data: u, error } = await admin.auth.admin.createUser({ email: `student${i + 1}@c.example`, password: `pass-S-${i + 1}${i + 1}${i + 1}x`, email_confirm: true });
+  if (error) throw error;
+  const { error: eb } = await admin.from("student_accounts").insert({ student_id: s.id, user_id: u.user.id, school_id: C });
+  if (eb) throw eb;
+}
+const { data: tc } = await admin.from("tests").insert({ school_id: C, name: "チャッピー確認テスト", subject: "数学", grade: 2, max_score: 12 }).select("id").single();
+const qs = [1, 2, 3].map((no) => ({ school_id: C, test_id: tc.id, no, big: 1, label: `大問1-(${no})`, qtype: "calc", points: 4, correct: ["-1", "-4a+6b-12", "3a²/b"][no - 1] }));
+const { data: qrows, error: eq } = await admin.from("questions").insert(qs).select("id, no");
+if (eq) throw eq;
+const { data: subC, error: es } = await admin.from("submissions").insert({ school_id: C, test_id: tc.id, student_id: stC[0].id, class_id: cc.id, status: "done", progress: 100 }).select("id").single();
+if (es) throw es;
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC", "base64");
+const imgPath = `${C}/${tc.id}/${subC.id}/1.png`;
+const { error: eu } = await admin.storage.from("answer-sheets").upload(imgPath, png, { contentType: "image/png" });
+if (eu) throw eu;
+await admin.from("submissions").update({ image_paths: [imgPath] }).eq("id", subC.id);
+const marks = { 1: ["○", 4, "", "-1"], 2: ["×", 0, "符号に注意", "-4a-6b-12"], 3: ["○", 4, "", "3a²/b"] };
+const { error: ei } = await admin.from("submission_items").insert(qrows.map((q) => ({
+  school_id: C, submission_id: subC.id, question_id: q.id, qno: q.no, mark: marks[q.no][0], earned: marks[q.no][1],
+  comment: marks[q.no][2], detected: marks[q.no][3], confidence: 0.95, need_review: false,
+})));
+if (ei) throw ei;
+console.log("✓ 学校C（返却とチャッピー先生の確認用）");
+console.log("seeded", { A, B, C });

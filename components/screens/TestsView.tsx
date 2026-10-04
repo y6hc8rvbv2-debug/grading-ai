@@ -1,5 +1,6 @@
 "use client";
 // テスト管理。docs/prototype-v3.jsx から移植し、テストの登録フォームを追加した。
+import { TestTutorFields } from "@/components/tutor/TeacherTutor";
 import React, { useEffect, useState } from "react";
 import { download, fmtDate, toCSV } from "@/lib/util";
 import { useUI } from "@/components/ui-context";
@@ -143,6 +144,7 @@ export default function TestsView() {
               rows={test.questions.map((q) => ({ ...q, id: `q${q.no}` }))}
               maxHeight={340}
             />
+            <TestTutorFields test={test} />
             {!!test.answerKeyPaths?.length && (
               <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 10, fontSize: 12, color: T.textSub }}>
                 登録時の模範解答・配点表：

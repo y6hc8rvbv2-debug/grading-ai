@@ -1,6 +1,7 @@
 "use client";
 // 設定。docs/prototype-v3.jsx から移植。
 // 表示の設定は端末に、保存期間は学校（schools.retention）に保存する。
+import { TutorAdminCard } from "@/components/tutor/TeacherTutor";
 import React, { useEffect, useState } from "react";
 import { FONT_UI, FONT_MONO } from "@/lib/ui/theme";
 import { LANGS } from "@/lib/i18n";
@@ -125,6 +126,7 @@ export default function SettingsView() {
         </label>
       </Card>
 
+      <TutorAdminCard />
       <Card title="データの取り扱い" sub="学校の規程に合わせて調整できます">
         <Field label="答案画像の保存期間" hint={isAdmin ? "学校全体の設定です。変更は監査ログに残ります。" : "変更できるのは学校の管理者だけです。"}>
           <Select value={retention} onChange={setRetention} style={isAdmin ? undefined : { opacity: 0.6 }} options={[
@@ -239,6 +241,7 @@ function ReadinessCard() {
       { label: "模範解答からの自動入力（0007_test_import.sql）", ok: h.migrations?.["0007"] ?? null, fix: "テスト管理の「模範解答・配点表から自動入力」を使う場合に必要です。Supabase の SQL Editor で supabase/migrations/0007_test_import.sql を実行してください。" },
       { label: "テストの削除・アーカイブ（0008_test_archive.sql）", ok: h.migrations?.["0008"] ?? null, fix: "テスト管理でテストを削除するときに必要です（答案・成績があるテストは削除せずアーカイブします）。Supabase の SQL Editor で 0008_test_archive.sql を実行してください。" },
       { label: "原本の赤ペンの位置の調整（0009_mark_positions.sql）", ok: h.migrations?.["0009"] ?? null, fix: "採点結果の原本で ○×△ を動かした位置を保存するのに必要です（実行しなくても、自動で決めた位置で表示できます）。Supabase の SQL Editor で 0009_mark_positions.sql を実行してください。" },
+      { label: "返却の版・受信箱・チャッピー先生（0012_voice_tutor.sql）", ok: h.migrations?.["0012"] ?? null, fix: "生徒の受信箱・返し直しの版・チャッピー先生（生徒本人の契約での音声復習）に必要です。0010・0011 の後に、Supabase の SQL Editor で 0012_voice_tutor.sql を実行してください。" },
       { label: "モデル比較試験の記録（0005_model_compare.sql）", ok: h.migrations?.["0005"] ?? null, fix: "管理者がモデル比較試験を使う場合だけ必要です。Supabase の SQL Editor で 0005_model_compare.sql を実行してください。" },
       { label: "iPhone の写真（HEIC）", ok: true, fix: "" },
     ] : [];

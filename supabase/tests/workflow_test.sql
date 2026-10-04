@@ -1,4 +1,8 @@
 -- 既存rls_test.sqlの後に、隔離DBだけで実行する。
+-- psql の接続が rls_test.sql と別なので、ログイン状態を切り替えるヘルパをここでも作る
+create or replace function pg_temp.login(uid uuid) returns void language sql as $$
+  select set_config('request.jwt.claims', json_build_object('sub', uid, 'role', 'authenticated')::text, false);
+$$;
 set role app_owner;
 insert into public.schools(id,name,code) values('cccccccc-0000-0000-0000-000000000000','Workflow','WF');
 insert into auth.users(id,email,email_confirmed_at,raw_app_meta_data) values
