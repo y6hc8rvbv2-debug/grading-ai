@@ -21,6 +21,14 @@ export type EphemeralKey = { apiKey: string; model: string } | null;
 const STATES: Record<string, string> = {
   untouched: "未着手", reviewing: "復習中", self_understood: "理解できた（自己申告）", verified: "理解確認済み（先生が確認）", ask_teacher: "先生に質問",
 };
+/** サーバーが会話を終えた理由（通話もサーバーが切っている） */
+const STOP_REASON: Record<string, string> = {
+  time_limit: "1回の利用時間の上限になったので、会話を終えました。",
+  disabled: "学校またはクラスでチャッピー先生が停止されたので、会話を終えました。",
+  no_consent: "同意が撤回されたので、会話を終えました。",
+  feature_off: "チャッピー先生が停止されたので、会話を終えました。",
+  ended: "会話は終わっています。",
+};
 const MARK_TEXT: Record<string, string> = { "○": "正解", "△": "部分点", "×": "不正解", "-": "無記入" };
 const btn: React.CSSProperties = { padding: "10px 14px", borderRadius: 10, border: "1px solid #9aa3ad", background: "#fff", fontSize: 15, minHeight: 44, cursor: "pointer" };
 const primary: React.CSSProperties = { ...btn, background: "#1E3A5F", color: "#fff", border: "1px solid #1E3A5F" };
@@ -46,7 +54,7 @@ export function TutorPanel({ releaseId, item, showModelAnswer, status, ephemeral
 }) {
   const [, force] = useState(0);
   const tutor = useRef<RealtimeTutor | null>(null);
-  const session = useRef<{ id: string; started: number; max: number; model: string; mode: "voice" | "text" } | null>(null);
+  const session = useRef<{ id: string; started: number; max: number; model: string; mode: "voice" | "text"; lastBeat?: number } | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [slow, setSlow] = useState(false);
@@ -77,11 +85,12 @@ export function TutorPanel({ releaseId, item, showModelAnswer, status, ephemeral
     if (!s) { tt?.stop(); return; }
     session.current = null;
     tt?.stop();
-    const body = JSON.stringify({ sessionId: s.id, reason, seconds: Math.round((Date.now() - s.started) / 1000), usage: tt?.usage ?? {}, transcript: status?.consent?.save_transcript ? tt?.transcript() ?? "" : "" });
+    // 保存しないキーのときは、サーバーが通話を切るのに本人のキーが要るので、終了の要求にだけ添える（HTTPS・保存しない）
+    const body = JSON.stringify({ sessionId: s.id, reason, seconds: Math.round((Date.now() - s.started) / 1000), usage: tt?.usage ?? {}, transcript: status?.consent?.save_transcript ? tt?.transcript() ?? "" : "", ...(ephemeral ? { apiKey: ephemeral.apiKey } : {}) });
     if (beacon && navigator.sendBeacon) navigator.sendBeacon("/api/tutor/session/end", new Blob([body], { type: "text/plain" }));
     else await fetch("/api/tutor/session/end", { method: "POST", headers: { "content-type": "text/plain" }, body, keepalive: true }).catch(() => {});
     force((n) => n + 1);
-  }, [status?.consent?.save_transcript]);
+  }, [status?.consent?.save_transcript, ephemeral]);
 
   // 画面を閉じた・別のアプリに切り替えた（バックグラウンド）ときは会話を止める
   useEffect(() => {
@@ -99,14 +108,19 @@ export function TutorPanel({ releaseId, item, showModelAnswer, status, ephemeral
       if (!s) return;
       const sec = Math.round((Date.now() - s.started) / 1000);
       setElapsed(sec);
-      if (sec >= s.max) { await end("time_limit"); setMessage("1回の利用時間の上限になったので終えました。"); return; }
-      if (sec % 20 === 0) {
-        const r = await api("/api/tutor/session/heartbeat", { sessionId: s.id, seconds: sec }).catch(() => ({ continue: true }));
-        if (!r.continue) { await end("time_limit"); setMessage("利用時間の上限になったので終えました。"); }
+      if (sec >= s.max) { setMessage("1回の利用時間の上限になったので終えました。"); await end("time_limit"); return; }
+      // 1秒ごとの処理は遅れて秒を飛ばすことがあるので、「前回から20秒以上たったか」で判定する
+      if (sec - (s.lastBeat ?? 0) >= 20) {
+        s.lastBeat = sec;
+        const r = await api("/api/tutor/session/heartbeat", { sessionId: s.id, seconds: sec, ...(ephemeral ? { apiKey: ephemeral.apiKey } : {}) }).catch(() => ({ continue: true }));
+        if (!r.continue) {
+          setMessage(STOP_REASON[String(r.reason)] ?? "会話を終えました。");
+          await end(String(r.reason ?? "ended"));
+        }
       }
     }, 1000);
     return () => clearInterval(id);
-  }, [end]);
+  }, [end, ephemeral]);
 
   const start = async (mode: "voice" | "text") => {
     setMessage("");
@@ -124,14 +138,22 @@ export function TutorPanel({ releaseId, item, showModelAnswer, status, ephemeral
           throw Object.assign(new Error("マイクを使えませんでした（許可されていないか、ほかのアプリが使っています）。文字で質問できます。"), { code: "no_mic" });
         }
       }
-      const r = await api("/api/tutor/session", { releaseId, qno: item.qno, mode, slow, ...(ephemeral ? { apiKey: ephemeral.apiKey, model: ephemeral.model } : {}) });
       const tt = new RealtimeTutor(() => force((n) => n + 1));
       tutor.current = tt;
-      session.current = { id: r.sessionId, started: Date.now(), max: r.maxSeconds, model: r.model, mode };
-      setElapsed(0);
-      await tt.start({ clientSecret: r.clientSecret, callsUrl: r.callsUrl, model: r.model, mode }, mic);
+      let captions = true;
+      // 接続の申し込み（SDP）をサーバーへ送る。通話はサーバーが本人のキーで作る
+      await tt.start({
+        mode,
+        exchange: async (sdp) => {
+          const r = await api("/api/tutor/session", { releaseId, qno: item.qno, mode, slow, sdp, ...(ephemeral ? { apiKey: ephemeral.apiKey, model: ephemeral.model } : {}) });
+          session.current = { id: r.sessionId, started: Date.now(), max: r.maxSeconds, model: r.model, mode };
+          captions = !!r.captions;
+          setElapsed(0);
+          return r.answer;
+        },
+      }, mic);
       if (progress?.state !== "verified") saveProgress("reviewing");
-      if (mode === "voice" && !r.captions) setMessage("このキーでは文字起こしのモデルが見つからないため、あなたの発言の字幕は出ません。");
+      if (mode === "voice" && !captions) setMessage("このキーでは文字起こしのモデルが見つからないため、あなたの発言の字幕は出ません。");
     } catch (e) {
       mic?.getTracks().forEach((x) => x.stop());
       if (session.current) await end("error");

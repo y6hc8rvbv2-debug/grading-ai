@@ -230,6 +230,8 @@ create table public.tutor_sessions (
   qno         integer not null,
   mode        text not null check (mode in ('voice', 'text')),
   model       text not null default '',
+  -- OpenAI の通話ID（POST /v1/realtime/calls の Location）。サーバーから通話を切る（hangup）のに使う
+  call_id     text check (call_id is null or call_id ~ '^[A-Za-z0-9_-]{1,100}$'),
   status      text not null default 'active' check (status in ('active', 'ended')),
   started_at  timestamptz not null default now(),
   last_seen_at timestamptz not null default now(),
@@ -297,25 +299,39 @@ begin
     'max_seconds', least(v_school.tutor_session_minutes * 60, v_school.tutor_daily_minutes * 60 - v_used));
 end $$;
 
--- 会話中の生存確認。時間の上限を超えたら終わらせ、false を返す（画面は会話を止める）
+-- 通話IDを記録する（会話を始めた本人だけ。1回だけ）
+create or replace function public.set_tutor_call(p_id uuid, p_call text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  update public.tutor_sessions set call_id = p_call
+   where id = p_id and student_id = public.current_student_id() and status = 'active' and call_id is null;
+end $$;
+
+-- 会話中の生存確認。続けてよければ 'ok'。続けられないときは会話を終えて理由を返す（サーバーが通話を切る）：
+--   time_limit（1回の上限）/ disabled（学校・クラスで無効にされた）/ no_consent（同意を撤回した）/ no_key（保存したキーを削除した）/ ended（終了済み）
 create or replace function public.heartbeat_tutor_session(p_id uuid, p_seconds integer)
-returns boolean language plpgsql security definer set search_path = public as $$
-declare v public.tutor_sessions%rowtype; v_max integer;
+returns text language plpgsql security definer set search_path = public as $$
+declare v public.tutor_sessions%rowtype; v_school public.schools%rowtype; v_class boolean; v_reason text := 'ok';
 begin
   select * into v from public.tutor_sessions where id = p_id and student_id = public.current_student_id() for update;
-  if not found or v.status <> 'active' then return false; end if;
-  select tutor_session_minutes * 60 into v_max from public.schools where id = v.school_id;
+  if not found or v.status <> 'active' then return 'ended'; end if;
+  select * into v_school from public.schools where id = v.school_id;
+  select c.tutor_enabled into v_class from public.students st join public.classes c on c.id = st.class_id where st.id = v.student_id;
   -- 経過時間はサーバーの時計でも確かめる（画面が少なく申告しても上限で止める）
   update public.tutor_sessions
      set seconds = greatest(v.seconds, least(coalesce(p_seconds, 0), extract(epoch from now() - v.started_at)::int)),
          last_seen_at = now()
    where id = p_id;
-  if extract(epoch from now() - v.started_at) >= v_max then
-    update public.tutor_sessions set status = 'ended', ended_at = now(), end_reason = 'time_limit',
-           seconds = greatest(seconds, v_max) where id = p_id;
-    return false;
+  if not v_school.tutor_enabled or not coalesce(v_class, false) then v_reason := 'disabled';
+  elsif not exists (select 1 from public.tutor_consents where student_id = v.student_id and revoked_at is null) then v_reason := 'no_consent';
+  elsif extract(epoch from now() - v.started_at) >= v_school.tutor_session_minutes * 60 then v_reason := 'time_limit';
   end if;
-  return true;
+  if v_reason <> 'ok' then
+    update public.tutor_sessions set status = 'ended', ended_at = now(), end_reason = v_reason,
+           seconds = greatest(seconds, least(extract(epoch from now() - started_at)::int, v_school.tutor_session_minutes * 60))
+     where id = p_id;
+  end if;
+  return v_reason;
 end $$;
 
 -- 会話を終える（何度呼んでもよい）
@@ -341,6 +357,8 @@ end $$;
 
 revoke all on function public.start_tutor_session(uuid, integer, text, text) from public, anon;
 revoke all on function public.heartbeat_tutor_session(uuid, integer) from public, anon;
+revoke all on function public.set_tutor_call(uuid, text) from public, anon;
+grant execute on function public.set_tutor_call(uuid, text) to authenticated;
 revoke all on function public.end_tutor_session(uuid, text, integer, jsonb) from public, anon;
 grant execute on function public.start_tutor_session(uuid, integer, text, text) to authenticated;
 grant execute on function public.heartbeat_tutor_session(uuid, integer) to authenticated;

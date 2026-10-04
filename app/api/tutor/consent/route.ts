@@ -1,5 +1,5 @@
 // チャッピー先生：外部の AI（OpenAI）へ送る内容・会話の保存・先生への共有の同意と、その撤回
-import { fail, json, requireStudent } from "@/lib/tutor/server";
+import { fail, hangupSessions, json, requireStudent } from "@/lib/tutor/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,10 +23,12 @@ export async function POST(req: Request) {
   return json({ ok: true });
 }
 
-/** 同意を撤回する（保存した会話の文字起こしも消える） */
+/** 同意を撤回する（進行中の会話の通話を切る。保存した会話の文字起こしも消える） */
 export async function DELETE(req: Request) {
-  const ctx = await requireStudent(req, { write: true });
+  const ctx = await requireStudent(req, { write: true, evenIfOff: true });
   if (ctx instanceof Response) return ctx;
+  const b = await req.json().catch(() => null) as { apiKey?: unknown } | null;
+  await hangupSessions(ctx, "consent_revoked", { apiKey: b?.apiKey });
   const { error } = await ctx.db.from("tutor_consents").update({ revoked_at: new Date().toISOString() }).eq("student_id", ctx.studentId);
   if (error) return fail("同意を撤回できませんでした。時間をおいてお試しください。", 500, "revoke_failed");
   await ctx.db.rpc("tutor_log", { p_action: "consent_revoked" });

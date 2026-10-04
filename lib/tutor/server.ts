@@ -6,6 +6,8 @@
 import "server-only";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { decryptKey } from "@/lib/tutor/crypto";
+import { hangupCall, looksLikeKey } from "@/lib/tutor/openai";
 
 export const featureOff = () => (process.env.TUTOR_FEATURE ?? "").toLowerCase() === "off";
 
@@ -35,8 +37,9 @@ export function secureTransport(req: Request) {
 export type StudentCtx = { db: Awaited<ReturnType<typeof createClient>>; userId: string; studentId: string };
 
 /** ログイン中の生徒。生徒でなければエラーの応答を返す */
-export async function requireStudent(req: Request, opts: { write?: boolean } = {}): Promise<StudentCtx | NextResponse> {
-  if (featureOff()) return fail("チャッピー先生は現在停止しています。先生に確認してください。", 503, "feature_off");
+export async function requireStudent(req: Request, opts: { write?: boolean; evenIfOff?: boolean } = {}): Promise<StudentCtx | NextResponse> {
+  // 停止中でも、会話を止める操作（生存確認・終了・同意の撤回・キーの削除）は受け付ける
+  if (featureOff() && !opts.evenIfOff) return fail("チャッピー先生は現在停止しています。先生に確認してください。", 503, "feature_off");
   if (opts.write && !sameOrigin(req)) return fail("この画面からの操作ではありません。ページを開き直してください。", 403, "csrf");
   const db = await createClient();
   const { data: { user } } = await db.auth.getUser();
@@ -74,4 +77,31 @@ export function sessionRefusal(message: string): { text: string; status: number;
   };
   const [text, status] = table[m] ?? ["会話を始められませんでした。時間をおいてお試しください。", 500];
   return { text, status, code: m || "unknown" };
+}
+
+/** 本人のキー：今回渡されたもの（保存しない方式）か、保存した暗号文を復号したもの。どちらも無ければ null（他のキーは使わない） */
+export async function studentKey(ctx: StudentCtx, provided?: unknown): Promise<string | null> {
+  if (typeof provided === "string" && looksLikeKey(provided)) return provided.trim();
+  const { data: cred } = await ctx.db.from("tutor_credentials").select("ciphertext, status").eq("student_id", ctx.studentId).maybeSingle();
+  if (!cred || cred.status !== "active" || !cred.ciphertext) return null;
+  try { return decryptKey(cred.ciphertext, ctx.studentId); } catch { return null; }
+}
+
+/**
+ * 本人の会話の通話をサーバーから切り、会話の記録を終える（sessionId を省くと、進行中の会話すべて）。
+ * 通話は本人のキーでしか切れない。キーが無い・切れないときも記録は終え、画面にも接続を閉じさせる。
+ */
+export async function hangupSessions(ctx: StudentCtx, reason: string, opts: { sessionId?: string; apiKey?: unknown; key?: string | null } = {}) {
+  let q = ctx.db.from("tutor_sessions").select("id, call_id, status").eq("student_id", ctx.studentId);
+  q = opts.sessionId ? q.eq("id", opts.sessionId) : q.eq("status", "active");
+  const { data: rows } = await q;
+  let hungUp = 0, missed = 0;
+  const key = opts.key !== undefined ? opts.key : await studentKey(ctx, opts.apiKey);
+  for (const r of rows ?? []) {
+    if (r.call_id) {
+      if (key && await hangupCall(key, r.call_id)) hungUp++; else missed++;
+    }
+    if (r.status === "active") await ctx.db.rpc("end_tutor_session", { p_id: r.id, p_reason: reason, p_seconds: 0, p_usage: {} });
+  }
+  return { hungUp, missed };
 }

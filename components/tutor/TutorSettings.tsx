@@ -78,7 +78,8 @@ export function TutorSettings({ status, reload, ephemeral, setEphemeral }: {
           })}>{c ? "同意の内容を更新する" : "同意する"}</button>
           {c && <button style={btn} disabled={busy} onClick={() => run(async () => {
             if (!window.confirm("同意を撤回すると、アプリ内でチャッピー先生と話せなくなり、保存した会話の文字起こしも消えます。撤回しますか？")) return;
-            await call("DELETE", "/api/tutor/consent"); await reload(); setMsg("同意を撤回しました。");
+            // 進行中の会話があれば、サーバーが通話を切る（保存しないキーのときは、そのキーで切る）
+            await call("DELETE", "/api/tutor/consent", ephemeral ? { apiKey: ephemeral.apiKey } : {}); await reload(); setMsg("同意を撤回しました。");
           })}>同意を撤回する</button>}
         </div>
         {c && <p style={{ fontSize: 13 }}>同意済み（支払う人：{c.payer === "self" ? "本人" : "保護者"}）</p>}
@@ -110,14 +111,18 @@ export function TutorSettings({ status, reload, ephemeral, setEphemeral }: {
             placeholder="sk- で始まるキーを貼り付け" style={{ width: "100%", boxSizing: "border-box", padding: 10, fontSize: 15, borderRadius: 8, border: "1px solid #9aa3ad" }} />
           <div style={{ fontSize: 14, lineHeight: 2 }}>
             <label><input type="radio" name="store" checked={!store} onChange={() => setStore(false)} /> 保存しない（この画面を閉じるまで使う）</label><br />
-            <label style={{ opacity: status.canStoreKeys ? 1 : 0.5 }}><input type="radio" name="store" disabled={!status.canStoreKeys} checked={store} onChange={() => setStore(true)} /> 暗号化して保存する（あなただけが使えます。先生・管理者も見られません）</label>
+            <label style={{ opacity: status.canStoreKeys ? 1 : 0.5 }}><input type="radio" name="store" disabled={!status.canStoreKeys} checked={store} onChange={() => setStore(true)} /> 暗号化して保存する（使うのはあなたの会話だけ。先生・管理者もアプリの画面では見られません）</label>
+          </div>
+          <div style={{ fontSize: 12.5, color: "#555", lineHeight: 1.7, marginBottom: 6 }}>
+            ご注意：保存したキーは暗号化していますが、アプリのサーバーを管理する人（学校が契約するサーバーの運用者）は、技術的には元に戻せます。
+            「保存しない」でも、会話のたびにキーはサーバーを通ります（記録はしません）。心配なときは、予算の上限を決めた専用のキーを作り、使い終わったら OpenAI の画面で無効にしてください。
           </div>
           <button style={primary} disabled={busy || !key || !c}>キーを確かめて登録</button>
           {!c && <span style={{ fontSize: 13, marginInlineStart: 8 }}>先に上で同意してください。</span>}
         </form>
         {(models.length > 0 || status.credential) && (
           <div style={{ marginTop: 8, fontSize: 14 }}>
-            <label>使うモデル（あなたのキーで使えるもの）：{" "}
+            <label>使うモデル（音声の会話に対応し、あなたのキーで使えるもの）：{" "}
               <select value={model} onChange={(e) => run(async () => {
                 setModel(e.target.value);
                 if (ephemeral) setEphemeral({ ...ephemeral, model: e.target.value });

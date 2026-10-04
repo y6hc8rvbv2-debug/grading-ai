@@ -4,7 +4,7 @@
 //   - 確認は本人のキーで GET /v1/models を呼ぶだけ（料金はかからない）。管理者のキーは使わない
 import { canStoreKeys, encryptKey, keyHint } from "@/lib/tutor/crypto";
 import { TutorError, listModels, looksLikeKey } from "@/lib/tutor/openai";
-import { fail, json, requireStudent, secureTransport, sessionRefusal } from "@/lib/tutor/server";
+import { fail, hangupSessions, json, requireStudent, secureTransport, sessionRefusal } from "@/lib/tutor/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,8 +38,8 @@ export async function POST(req: Request) {
     const err = e instanceof TutorError ? e : new TutorError("provider_down", "キーを確かめられませんでした。", 502);
     return fail(err.message, err.status, err.code);
   }
-  if (!models.realtime.length) {
-    return fail("このキーでは音声の会話（Realtime）に使えるモデルが見つかりません。OpenAI の管理画面でプロジェクトの権限を確かめてください。", 400, "no_realtime");
+  if (!models.voice.length) {
+    return fail("このキーでは、音声の会話に対応したモデルが見つかりません。OpenAI の管理画面でプロジェクトの権限（モデルの利用）を確かめてください。", 400, "no_realtime");
   }
   if (store) {
     const { data: school } = await ctx.db.rpc("current_student_school");
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
     if (error) return fail("キーを保存できませんでした。管理者が 0012_voice_tutor.sql を実行済みか確認してください。", 500, "save_failed");
     await ctx.db.rpc("tutor_log", { p_action: "key_saved" });
   }
-  return json({ ok: true, stored: store, hint: keyHint(apiKey), models: models.realtime });
+  return json({ ok: true, stored: store, hint: keyHint(apiKey), models: models.voice });
 }
 
 /** 使うモデルを選ぶ（保存したキーのとき） */
@@ -67,10 +67,11 @@ export async function PATCH(req: Request) {
   return json({ ok: true, model });
 }
 
-/** キーを削除する（暗号文ごと消す。学習データは消さない） */
+/** キーを削除する（進行中の会話の通話を、削除する前のキーで切る。暗号文ごと消す。学習データは消さない） */
 export async function DELETE(req: Request) {
-  const ctx = await requireStudent(req, { write: true });
+  const ctx = await requireStudent(req, { write: true, evenIfOff: true });
   if (ctx instanceof Response) return ctx;
+  await hangupSessions(ctx, "key_deleted");
   const { error } = await ctx.db.from("tutor_credentials").delete().eq("student_id", ctx.studentId);
   if (error) return fail("キーを削除できませんでした。時間をおいてお試しください。", 500, "delete_failed");
   await ctx.db.rpc("tutor_log", { p_action: "key_deleted" });

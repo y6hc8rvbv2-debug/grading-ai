@@ -119,13 +119,15 @@ begin
   begin perform public.start_tutor_session(v_rel, 1, 'text', 'm'); rejected := false;
   exception when others then rejected := sqlerrm = 'tutor_busy'; end;
   assert rejected, '同時に2つの会話は断る';
-  assert public.heartbeat_tutor_session((v->>'id')::uuid, 30), '会話中は続けられる';
+  assert public.heartbeat_tutor_session((v->>'id')::uuid, 30) = 'ok', '会話中は続けられる';
+  perform public.set_tutor_call((v->>'id')::uuid, 'rtc_test_1');
+  assert (select call_id from public.tutor_sessions where id = (v->>'id')::uuid) = 'rtc_test_1', '通話IDを記録する';
   perform public.end_tutor_session((v->>'id')::uuid, 'user', 45, '{"input_tokens": 10}'::jsonb);
   perform public.end_tutor_session((v->>'id')::uuid, 'again', 999, '{}'::jsonb);
   assert (select status from public.tutor_sessions where id = (v->>'id')::uuid) = 'ended';
   assert (select end_reason from public.tutor_sessions where id = (v->>'id')::uuid) = 'user', '終わった会話の理由は変わらない';
   assert (select seconds from public.tutor_sessions where id = (v->>'id')::uuid) <= 1, '経過時間はサーバーの時計を超えて申告できない';
-  assert not public.heartbeat_tutor_session((v->>'id')::uuid, 60), '終わった会話は続けられない';
+  assert public.heartbeat_tutor_session((v->>'id')::uuid, 60) = 'ended', '終わった会話は続けられない';
   -- 1時間に6回まで
   for i in 2..6 loop
     v := public.start_tutor_session(v_rel, 1, 'text', 'm');
@@ -191,6 +193,42 @@ do $$ begin
   update public.tutor_progress set state = 'verified', source = 'teacher';
   assert found, '先生は理解確認済みにできる';
 end $$;
+-- 生存確認で、1回の上限・機能の停止・同意の撤回を見つけたら会話を終え、理由を返す（サーバーが通話を切る）
+reset role;
+create or replace function pg_temp.fake_session(p_minutes_ago integer) returns uuid language sql as $$
+  insert into public.tutor_sessions (school_id, student_id, user_id, release_id, qno, mode, started_at, last_seen_at)
+  values ('cccccccc-0000-0000-0000-000000000000', 'cccccccc-0000-0000-0000-000000000022', 'cccccccc-0000-0000-0000-000000000003',
+          current_setting('test.rel52')::uuid, 1, 'voice', now() - make_interval(mins => p_minutes_ago), now())
+  returning id
+$$;
+select set_config('test.s1', pg_temp.fake_session(11)::text, false);
+set role authenticated;
+select pg_temp.login('cccccccc-0000-0000-0000-000000000003');
+do $$ begin
+  assert public.heartbeat_tutor_session(current_setting('test.s1')::uuid, 5) = 'time_limit', '1回の上限（10分）を過ぎたら time_limit';
+  assert (select status from public.tutor_sessions where id = current_setting('test.s1')::uuid) = 'ended';
+end $$;
+reset role;
+select set_config('test.s2', pg_temp.fake_session(0)::text, false);
+update public.classes set tutor_enabled = false where id = 'cccccccc-0000-0000-0000-000000000011';
+set role authenticated;
+select pg_temp.login('cccccccc-0000-0000-0000-000000000003');
+do $$ begin
+  assert public.heartbeat_tutor_session(current_setting('test.s2')::uuid, 5) = 'disabled', 'クラスで無効にされたら disabled';
+end $$;
+reset role;
+update public.classes set tutor_enabled = true where id = 'cccccccc-0000-0000-0000-000000000011';
+select set_config('test.s3', pg_temp.fake_session(0)::text, false);
+update public.tutor_consents set revoked_at = now() where student_id = 'cccccccc-0000-0000-0000-000000000022';
+set role authenticated;
+select pg_temp.login('cccccccc-0000-0000-0000-000000000003');
+do $$ begin
+  assert public.heartbeat_tutor_session(current_setting('test.s3')::uuid, 5) = 'no_consent', '同意を撤回したら no_consent';
+end $$;
+reset role;
+update public.tutor_consents set revoked_at = null where student_id = 'cccccccc-0000-0000-0000-000000000022';
+set role authenticated;
+
 -- 生徒が共有に同意すると、先生は振り返りを見られる。撤回すると見えなくなる
 select pg_temp.login('cccccccc-0000-0000-0000-000000000003');
 do $$ begin

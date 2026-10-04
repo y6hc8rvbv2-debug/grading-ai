@@ -32,7 +32,7 @@ export function TutorAdminCard() {
     <Card title="チャッピー先生（生徒の音声復習）" sub="返却した答案の間違えた問題を、生徒が AI と復習します">
       <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.8, marginBottom: 10 }}>
         AI の利用料は、<b>生徒本人または保護者が OpenAI と直接契約して支払います</b>（生徒が自分の API キーを登録）。
-        学校・管理者のキー（採点用の ANTHROPIC_API_KEY を含む）は使いません。キーは本人だけが使え、管理者も見られません。
+        学校・管理者のキー（採点用の ANTHROPIC_API_KEY を含む）は使いません。アプリの画面・データベースの権限では、先生・管理者は生徒のキーを見られません（末尾4文字も生徒の画面だけ）。ただし、保存したキーは暗号文として Supabase に、復号の鍵はサーバーの環境変数にあるため、その両方を扱えるサーバーの運用者（Supabase と Vercel の管理権限を持つ人）は技術的には復号できます。運用者を最小限にし、生徒・保護者にもこのことを伝えてください。
         採点・保存・通信などの費用はこれまでどおりです。年齢・保護者の同意など、提供元の利用条件を確かめてから、使ってよいクラスだけ有効にしてください。
       </div>
       {missing && <div style={{ fontSize: 12.5, color: T.warn }}>まだ使えません。管理者が Supabase で 0012_voice_tutor.sql を実行してください。</div>}

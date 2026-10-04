@@ -83,7 +83,7 @@ for _ in $(seq 1 30); do curl -sf -o /dev/null "http://localhost:$PORT/login" &&
 
 echo "== シナリオを実行"
 # 返却とチャッピー先生（学校Cだけを使う。既存のシナリオと混ざらない）
-SUPABASE_URL="$API" ANON="$ANON" BASE_URL="http://localhost:$PORT" \
+SUPABASE_URL="$API" ANON="$ANON" SERVICE="$SERVICE" BASE_URL="http://localhost:$PORT" \
   MOCK_OPENAI_URL="http://127.0.0.1:$MOCK_OPENAI_PORT" STUDENT_KEY="$STUDENT_KEY" STUDENT_KEY2="$STUDENT_KEY2" node tests/e2e/tutor.mjs
 if [ -n "${ONLY_TUTOR:-}" ]; then SKIP_MAIN=1; fi
 if [ -z "${SKIP_MAIN:-}" ]; then

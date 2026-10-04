@@ -67,7 +67,7 @@ await stuCtx.addInitScript(() => {
     constructor() { this.connectionState = "new"; this.senders = []; window.__rtc.created++; window.__rtc.open++; }
     addTrack(t) { this.senders.push({ track: t }); } addTransceiver() {} getSenders() { return this.senders; }
     createDataChannel() { return (this.dc = new FakeDC()); }
-    async createOffer() { return { type: "offer", sdp: "v=0 fake" }; }
+    async createOffer() { return { type: "offer", sdp: "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n" }; }
     async setLocalDescription() {}
     async setRemoteDescription() { this.connectionState = "connected"; }
     close() { if (this.connectionState !== "closed") { this.connectionState = "closed"; window.__rtc.open--; } }
@@ -135,19 +135,29 @@ ok((await stuPage.getByLabel("OpenAI API キー").inputValue()) === "", "送信�
 await stuPage.getByLabel("OpenAI API キー").fill(SK);
 await stuPage.getByLabel(/暗号化して保存する/).check();
 await stuPage.getByRole("button", { name: "キーを確かめて登録" }).click();
-await stuPage.locator('[data-testid="key-registered"]').waitFor({ timeout: 15000 });
+await stuPage.locator('[data-testid="key-registered"]').waitFor({ timeout: 15000 }).catch(async (e) => {
+  console.log("✗ キーを登録できなかった画面:", (await stuPage.locator('[data-testid="tutor-settings"]').innerText()).slice(-800));
+  throw e;
+});
 const stuHtml = await stuPage.content();
 const stuStored = await stuPage.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }) + document.cookie);
 ok((await stuPage.locator('[data-testid="key-registered"]').innerText()).includes("…1111") && !stuHtml.includes(SK) && !stuStored.includes(SK.slice(10)),
   "キーは暗号化して保存し、画面・HTML・ブラウザの保存領域には末尾4文字しか出さない");
 
-// 文字で会話する（短期の資格情報だけをブラウザへ。代役の WebRTC で応答を受ける）
+const modelOptions = await stuPage.locator('[data-testid="tutor-settings"] select option').evaluateAll((os) => os.map((o) => o.value));
+ok(modelOptions.join(",") === "gpt-realtime-2,gpt-audio-mini", `モデルの選択肢は、音声の会話に対応したものだけ（翻訳・文字起こし用などは出さない：${modelOptions.join(",")}）`);
+
+// 文字で会話する（通話はサーバーが本人のキーで作り、ブラウザには SDP の応答だけを返す。WebRTC は代役）
 await stuPage.getByRole("button", { name: /受信箱/ }).click();
 await stuPage.locator('[data-testid="inbox"] li button').first().click();
 await stuPage.getByRole("button", { name: "チャッピー先生に聞く" }).click();
 const oaiStart = (await oaiReqs()).length;
 await stuPage.getByRole("button", { name: "⌨ 文字で質問する" }).click();
-await stuPage.getByRole("button", { name: "会話を終える" }).waitFor({ timeout: 15000 });
+await stuPage.getByRole("button", { name: "会話を終える" }).waitFor({ timeout: 15000 }).catch(async (e) => {
+  console.log("✗ 会話を始められなかった画面:", (await stuPage.locator('[data-testid="tutor-panel"]').innerText()).slice(-1200));
+  console.log("  OpenAI 代役への要求:", JSON.stringify((await oaiReqs()).slice(oaiStart).map((r) => [r.method, r.path, r.status])));
+  throw e;
+});
 await stuPage.getByRole("button", { name: "ヒント", exact: true }).click();
 await stuPage.getByText("ヒント：符号を確かめよう").waitFor({ timeout: 10000 });
 ok((await stuPage.locator('[data-testid="tutor-state"]').innerText()).includes("状態："), "会話の状態（接続中・考え中など）を表示し、応答を字幕で出す");
@@ -155,19 +165,30 @@ await stuPage.screenshot({ path: new URL("./.out/tutor-mobile-chat.png", import.
 ok(await stuPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "スマホの幅（390px）で横にはみ出さない（会話中）");
 ok((await stuText()).includes("入力 120・出力 30 トークン") && (await stuText()).includes("請求額は OpenAI が決めます"), "使用量を表示し、請求額は提供元が決めると明記");
 // 同時に2つは始められない
-const busyRes12 = await stuPage.request.post(BASE + "/api/tutor/session", { data: { releaseId: (await rp(`result_releases?select=id&submission_id=eq.${rpSub.id}`))[0].id, qno: 2, mode: "text" }, headers: { origin: BASE } });
+const busyRes12 = await stuPage.request.post(BASE + "/api/tutor/session", { data: { releaseId: (await rp(`result_releases?select=id&submission_id=eq.${rpSub.id}`))[0].id, qno: 2, mode: "text", sdp: "v=0\r\nfake" }, headers: { origin: BASE } });
 ok(busyRes12.status() === 409, `同じ生徒の会話は同時に1つだけ（HTTP ${busyRes12.status()}）`);
 await stuPage.getByRole("button", { name: "会話を終える" }).click(); await stuPage.waitForTimeout(800);
 const rtcAfterEnd = await stuPage.evaluate(() => window.__rtc);
 const sessAfterEnd = await rp(`tutor_sessions?select=status,end_reason,mode&order=started_at`);
 ok(rtcAfterEnd.open === 0 && sessAfterEnd.length === 1 && sessAfterEnd[0].status === "ended" && sessAfterEnd[0].end_reason === "user", "「会話を終える」で接続を閉じ、サーバーの記録も終える");
 const oaiDuring = (await oaiReqs()).slice(oaiStart);
-const mintedReq = oaiDuring.find((r) => r.url === "/v1/realtime/client_secrets");
-ok(oaiDuring.filter((r) => r.url !== "/v1/realtime/calls").every((r) => r.known && r.keyTail === "1111") && oaiDuring.some((r) => r.url === "/v1/realtime/calls" && r.ephemeral),
-  "OpenAI への要求は本人のキーだけ。ブラウザは短期の資格情報だけで接続する");
-const mintedBody = JSON.parse(mintedReq.body);
-ok(mintedBody.session.instructions.includes("チャッピー先生") && mintedBody.session.instructions.includes("符号に注意") && !mintedBody.session.instructions.includes("student1@")
-  && !mintedBody.session.instructions.includes("2C01") && !/生徒C01/.test(mintedBody.session.instructions), "AI に渡すのは1問分の資料と指導方針だけ（メール・出席番号・匿名ID を含めない）");
+const callReq = oaiDuring.find((r) => r.url === "/v1/realtime/calls");
+ok(oaiDuring.every((r) => r.known && r.keyTail === "1111" && !r.origin) && callReq && oaiDuring.some((r) => r.hangup === callReq.callId),
+  "OpenAI への要求はすべてサーバーから本人のキーで（ブラウザは OpenAI に直接つながず、短期の資格情報も受け取らない）。終了でサーバーが通話を切る");
+const sessionJson = JSON.parse(callReq.body.split('name="session"\r\nContent-Type: application/json\r\n\r\n')[1].split("\r\n--")[0]);
+ok(sessionJson.type === "realtime" && sessionJson.model === "gpt-realtime-2" && sessionJson.instructions.includes("チャッピー先生") && sessionJson.instructions.includes("符号に注意")
+  && !sessionJson.instructions.includes("student1@") && !sessionJson.instructions.includes("2C01") && !/生徒C01/.test(sessionJson.instructions),
+  "AI に渡すのは1問分の資料と指導方針だけ（メール・出席番号・匿名ID を含めない）");
+const hangups = async () => (await oaiReqs()).filter((r) => r.hangup).map((r) => r.hangup);
+const lastCall = async () => (await oaiReqs()).filter((r) => r.callId).at(-1)?.callId;
+const startText = async () => {
+  await stuPage.getByRole("button", { name: "⌨ 文字で質問する" }).click();
+  await stuPage.getByRole("button", { name: "会話を終える" }).waitFor({ timeout: 15000 });
+  return lastCall();
+};
+const waitHangup = async (id, ms = 50000) => { const t = Date.now(); while (Date.now() - t < ms) { if ((await hangups()).includes(id)) return true; await settle(500); } return false; };
+const waitText = async (t, ms = 5000) => { const s0 = Date.now(); while (Date.now() - s0 < ms) { if ((await stuText()).includes(t)) return true; await settle(300); } return false; };
+const waitUiStopped = async (ms = 50000) => { const t = Date.now(); while (Date.now() - t < ms) { if (!(await stuPage.getByRole("button", { name: "会話を終える" }).count())) return true; await settle(500); } return false; };
 
 // 音声：マイクを拒否したら文字へ切り替えを案内し、会話を始めない
 await stuPage.getByRole("button", { name: "🎤 音声で質問する" }).click(); await stuPage.waitForTimeout(600);
@@ -184,8 +205,44 @@ await stuPage.evaluate(() => {
 await stuPage.waitForTimeout(1500);
 const rtcAfterHide = await stuPage.evaluate(() => ({ open: window.__rtc.open, mic: window.__micStream?.getTracks().every((t) => t.readyState === "ended") }));
 const sessAfterHide = await rp(`tutor_sessions?select=status,end_reason,mode&order=started_at`);
-ok(rtcAfterHide.open === 0 && rtcAfterHide.mic && sessAfterHide.at(-1).mode === "voice" && sessAfterHide.at(-1).status === "ended" && sessAfterHide.at(-1).end_reason === "background",
-  "画面を離れると、マイク・接続・サーバーの会話をすべて止める");
+ok(rtcAfterHide.open === 0 && rtcAfterHide.mic && sessAfterHide.at(-1).mode === "voice" && sessAfterHide.at(-1).status === "ended" && sessAfterHide.at(-1).end_reason === "background"
+  && await waitHangup(await lastCall(), 5000), "画面を離れると、マイク・接続・サーバーの会話をすべて止め、サーバーが通話を切る");
+
+// 1回の上限：接続から上限時間を過ぎたら、次の生存確認（20秒ごと）でサーバーが通話を切り、画面も止まる
+// （短期の資格情報の期限ではなく、会話の時間で止める。テストでは開始時刻を11分前にずらす）
+const callT = await startText();
+const [actT] = await rp("tutor_sessions?select=id&status=eq.active");
+await fetch(`${process.env.SUPABASE_URL}/rest/v1/tutor_sessions?id=eq.${actT.id}`, { method: "PATCH", headers: { apikey: process.env.SERVICE, authorization: `Bearer ${process.env.SERVICE}`, "content-type": "application/json" }, body: JSON.stringify({ started_at: new Date(Date.now() - 11 * 60000).toISOString() }) });
+const hT = await waitHangup(callT), uT = await waitUiStopped(), tT = await waitText("上限になったので"), rT = (await rp(`tutor_sessions?select=end_reason&id=eq.${actT.id}`))[0].end_reason;
+if (!(hT && uT && tT && rT === "time_limit")) console.log("  診断:", JSON.stringify({ callT, hT, uT, tT, rT, hang: await hangups(), sess: await rp("tutor_sessions?select=id,status,end_reason,call_id,started_at,last_seen_at&order=started_at") }));
+ok(hT && uT && tT && rT === "time_limit",
+  "1回の利用時間の上限を過ぎると、サーバーが通話を切り、画面も会話を止める");
+// 機能の停止：管理者がクラスで無効にすると、次の生存確認でサーバーが通話を切る
+const callD = await startText();
+const disRes = await rpcA("set_tutor_settings", { p_enabled: true, p_session_minutes: 10, p_daily_minutes: 30, p_class_ids: [] });
+const hD = await waitHangup(callD), uD = await waitUiStopped(), tD = await waitText("停止されたので");
+if (!(hD && uD && tD)) console.log("  診断:", JSON.stringify({ disRes, callD, hD, uD, tD, sess: await rp("tutor_sessions?select=status,end_reason,call_id&order=started_at") }));
+ok(hD && uD && tD, "管理者が無効にすると、進行中の会話もサーバーが通話を切って止める");
+await rpcA("set_tutor_settings", { p_enabled: true, p_session_minutes: 10, p_daily_minutes: 30, p_class_ids: [clsA.id] });
+// 同意の撤回：その場でサーバーが通話を切る
+const callC = await startText();
+const rev = await stuPage.request.delete(BASE + "/api/tutor/consent", { data: {}, headers: { origin: BASE } });
+ok(rev.ok() && await waitHangup(callC, 5000) && await waitUiStopped(), "同意を撤回すると、その場でサーバーが通話を切り、画面も止まる");
+await stuPage.request.post(BASE + "/api/tutor/consent", { data: { payer: "self", termsConfirmed: true }, headers: { origin: BASE } });
+await stuPage.reload(); await stuPage.waitForTimeout(800);
+await stuPage.locator('[data-testid="inbox"] li button').first().click();
+await stuPage.getByRole("button", { name: "チャッピー先生に聞く" }).click();
+// キーの削除：削除する前のキーで、サーバーが通話を切る
+const callK = await startText();
+const delKey = await stuPage.request.delete(BASE + "/api/tutor/key", { headers: { origin: BASE } });
+ok(delKey.ok() && await waitHangup(callK, 5000) && await waitUiStopped(), "キーを削除すると、削除する前に本人のキーで通話を切る");
+// 以降の確認のために、キーを登録し直す
+const reg = await stuPage.request.post(BASE + "/api/tutor/key", { data: { apiKey: SK, payer: "self", store: true }, headers: { origin: BASE } });
+await stuPage.request.patch(BASE + "/api/tutor/key", { data: { model: "gpt-realtime-2" }, headers: { origin: BASE } });
+ok(reg.ok(), "（準備）キーを登録し直す");
+await stuPage.reload(); await stuPage.waitForTimeout(800);
+await stuPage.locator('[data-testid="inbox"] li button').first().click();
+await stuPage.getByRole("button", { name: "チャッピー先生に聞く" }).click();
 
 // キーの失効・残高不足：別のキー（管理者のキーなど）へ切り替えず、理由を表示する
 await fetch(OAI + "/__quota", { method: "POST", body: JSON.stringify({ key: SK }) });
@@ -196,7 +253,7 @@ await fetch(OAI + "/__revoke", { method: "POST", body: JSON.stringify({ key: SK 
 await stuPage.getByRole("button", { name: "⌨ 文字で質問する" }).click();
 await stuPage.getByText(/API キーが無効です/).waitFor({ timeout: 15000 });
 const oaiAfter = (await oaiReqs()).slice(oaiN0);
-ok(oaiAfter.length >= 2 && oaiAfter.every((r) => r.keyTail === "1111") && (await rp("tutor_sessions?select=id&status=eq.active")).length === 0,
+ok(oaiAfter.length >= 2 && oaiAfter.every((r) => r.keyTail === "1111" && !r.origin) && (await rp("tutor_sessions?select=id&status=eq.active")).length === 0,
   "残高不足・失効では会話を始めず、ほかのキーへ切り替えない（OpenAI への要求はすべて本人のキー）");
 
 // 別の生徒は、他人の返却・資料・会話を使えない
@@ -210,7 +267,7 @@ await stu2Page.getByText("student2@c.example").waitFor({ timeout: 15000 });
 await stu2Page.waitForTimeout(800);
 const stuRelId = (await rp(`result_releases?select=id&submission_id=eq.${rpSub.id}`))[0].id;
 const stu2Ctx2 = await stu2Page.request.post(BASE + "/api/tutor/context", { data: { releaseId: stuRelId, qno: 2 }, headers: { origin: BASE } });
-const stu2Start = await stu2Page.request.post(BASE + "/api/tutor/session", { data: { releaseId: stuRelId, qno: 2, mode: "text", apiKey: SK2, model: "gpt-realtime-e2e" }, headers: { origin: BASE } });
+const stu2Start = await stu2Page.request.post(BASE + "/api/tutor/session", { data: { releaseId: stuRelId, qno: 2, mode: "text", apiKey: SK2, model: "gpt-realtime-2", sdp: "v=0\r\nfake" }, headers: { origin: BASE } });
 ok((await stu2Page.locator("body").innerText()).includes("返却された答案はまだありません") && stu2Ctx2.status() === 404 && [403, 404].includes(stu2Start.status()),
   `別の生徒は、他人の返却を見られず、その資料で会話も始められない（HTTP ${stu2Ctx2.status()} / ${stu2Start.status()}）`);
 const csrfRes = await stu2Page.request.post(BASE + "/api/tutor/key", { data: { apiKey: SK2, payer: "self" }, headers: { origin: "https://evil.example", "sec-fetch-site": "cross-site" } });
@@ -270,9 +327,9 @@ ok((await stuText()).includes("更新") && (await stuText()).includes("第2版")
 await stuPage.getByRole("button", { name: "ログアウト" }).click(); await stuPage.waitForTimeout(600);
 ok(!(await stuText()).includes("チャッピー確認テスト"), "ログアウトすると、答案の内容を画面に残さない");
 const oaiAll = await oaiReqs();
-// 生徒がわざと誤って入れたキー（末尾 0000）以外は、すべて生徒本人の登録済みのキーか短期の資格情報。管理者のキー（末尾 real）は1件も無い
-ok(oaiAll.length > 0 && oaiAll.every((r) => r.url === "/v1/realtime/calls" ? r.ephemeral : (r.known || r.keyTail === "0000")) && !oaiAll.some((r) => r.keyTail === "real"),
-  `OpenAI への要求に管理者のキーは1件も無い（${oaiAll.length} 件すべて生徒本人のキーか短期の資格情報）`);
+// 生徒がわざと誤って入れたキー（末尾 0000）以外は、すべて生徒本人のキー（登録済み、または保存しない方式で今回だけ渡したもの）。管理者のキー（末尾 real）は1件も無い
+ok(oaiAll.length > 0 && oaiAll.every((r) => (r.known || r.keyTail === "0000") && !r.origin) && !oaiAll.some((r) => r.keyTail === "real") && !oaiAll.some((r) => r.url.includes("client_secrets")),
+  `OpenAI への要求に管理者のキーは1件も無い（${oaiAll.length} 件すべて生徒本人のキー）`);
 await stuCtx.close();
 
 

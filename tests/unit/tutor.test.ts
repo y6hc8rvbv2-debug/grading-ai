@@ -57,55 +57,54 @@ test("キーの暗号化：復号できる・別の生徒の行に移すと復�
   process.env.TUTOR_KEY_ENCRYPTION_KEY = saved;
 });
 
-test("本人のキーだけを使い、管理者のキー（環境変数）を読まない：モデルの確認と短期資格情報の発行", async () => {
-  const { listModels, mintClientSecret, callsUrl } = await import("../../lib/tutor/openai");
+test("本人のキーだけを使い、管理者のキー（環境変数）を読まない：モデルの確認・通話の作成・通話を切る", async () => {
+  const { listModels, createCall, hangupCall } = await import("../../lib/tutor/openai");
   const env = watchEnv();
   const f = stubFetch([
-    () => jsonRes({ data: [{ id: "gpt-realtime-x" }, { id: "gpt-4o-mini-transcribe" }, { id: "gpt-5" }] }),
-    () => jsonRes({ value: "ek_short_lived", expires_at: 1234 }),
+    () => jsonRes({ data: [{ id: "gpt-realtime-2" }, { id: "gpt-audio-mini" }, { id: "gpt-realtime-translate" }, { id: "gpt-realtime-whisper" }, { id: "gpt-4o-mini-transcribe" }, { id: "gpt-5" }] }),
+    () => new Response("v=0\r\nanswer", { status: 201, headers: { location: "/v1/realtime/calls/rtc_abc123", "content-type": "application/sdp" } }),
+    () => new Response(null, { status: 200 }),
   ]);
+  let call;
   try {
     const m = await listModels(STUDENT_KEY);
-    assert.deepEqual(m.realtime, ["gpt-realtime-x"]);
-    assert.deepEqual(m.transcribe, ["gpt-4o-mini-transcribe"]);
-    const s = await mintClientSecret(STUDENT_KEY, { model: "gpt-realtime-x", instructions: "x", mode: "voice", slow: true, transcribeModel: m.transcribe[0] });
-    assert.equal(s.value, "ek_short_lived");
+    assert.deepEqual(m.voice, ["gpt-realtime-2", "gpt-audio-mini"], "音声の会話に対応したモデルだけ（翻訳・文字起こし用・その他は出さない）");
+    assert.equal(m.transcribe, "gpt-4o-mini-transcribe", "字幕は文字起こし用のモデル");
+    call = await createCall(STUDENT_KEY, "v=0\r\noffer", { model: "gpt-realtime-2", instructions: "指示", mode: "voice", slow: true, transcribeModel: m.transcribe });
+    assert.equal(call.answer, "v=0\r\nanswer");
+    assert.equal(call.callId, "rtc_abc123", "Location ヘッダーから通話ID を取る");
+    assert.ok(await hangupCall(STUDENT_KEY, call.callId!));
   } finally { f.restore(); env.restore(); }
-  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls.length, 3);
   assert.ok(f.calls.every((c) => c.auth === `Bearer ${STUDENT_KEY}`), "どの呼び出しも本人のキー");
   assert.ok(f.calls.every((c) => !c.body.includes(ADMIN_OPENAI) && !c.body.includes(ADMIN_ANTHROPIC)));
-  assert.ok(f.calls[0].url.startsWith("https://api.openai.com/v1/models"));
-  assert.ok(f.calls[1].url === "https://api.openai.com/v1/realtime/client_secrets");
-  const body = JSON.parse(f.calls[1].body);
-  assert.equal(body.expires_after.seconds, 60, "短期資格情報は60秒");
-  assert.equal(body.session.audio.output.speed, 0.85, "ゆっくり話す");
-  assert.equal(callsUrl(), "https://api.openai.com/v1/realtime/calls");
+  assert.ok(f.calls[0].url === "https://api.openai.com/v1/models");
+  assert.ok(f.calls[1].url === "https://api.openai.com/v1/realtime/calls");
+  assert.ok(f.calls[2].url === "https://api.openai.com/v1/realtime/calls/rtc_abc123/hangup");
+  // 公式の例と同じ multipart（sdp は application/sdp、session は application/json）
+  const body = f.calls[1].body;
+  assert.match(body, /name="sdp"\r\nContent-Type: application\/sdp\r\n\r\nv=0\r\noffer/);
+  const session = JSON.parse(body.split('name="session"\r\nContent-Type: application/json\r\n\r\n')[1].split("\r\n--")[0]);
+  assert.equal(session.type, "realtime");
+  assert.equal(session.model, "gpt-realtime-2");
+  assert.deepEqual(session.output_modalities, ["audio"]);
+  assert.equal(session.audio.output.speed, 0.85, "ゆっくり話す（公式の範囲 0.25〜1.5）");
+  assert.equal(session.audio.input.transcription.model, "gpt-4o-mini-transcribe");
   const touched = [...env.seen].filter((k) => /ANTHROPIC|OPENAI_API_KEY|SERVICE_ROLE/.test(k));
   assert.deepEqual(touched, [], `管理者のキーの環境変数を読んでいない（読んだもの: ${touched.join(",")}）`);
 });
 
-test("キーの不備・残高不足・混雑では、別のキーへ切り替えずに本人向けの理由を返す", async () => {
-  const { listModels, mintClientSecret, TutorError } = await import("../../lib/tutor/openai");
-  for (const [status, body, code] of [
-    [401, { error: { code: "invalid_api_key" } }, "invalid_key"],
-    [429, { error: { code: "insufficient_quota" } }, "no_quota"],
-    [429, { error: { code: "rate_limit_exceeded" } }, "rate_limited"],
-    [403, { error: { code: "forbidden" } }, "forbidden"],
-    [500, {}, "provider_down"],
-  ] as const) {
-    const env = watchEnv();
-    const f = stubFetch([() => jsonRes(body, status)]);
-    await assert.rejects(listModels(STUDENT_KEY), (e: unknown) => e instanceof TutorError && e.code === code && !e.message.includes(STUDENT_KEY));
-    f.restore(); env.restore();
-    assert.equal(f.calls.length, 1, `${code}：再試行で別のキーを使わない（呼び出し1回）`);
-    assert.ok([...env.seen].every((k) => !/ANTHROPIC|OPENAI_API_KEY/.test(k)));
-  }
-  // 形の正しくないキー・未登録（空）は、OpenAI を呼ばずに断る（管理者のキーで代わりに呼ばない）
-  const f = stubFetch([]);
-  await assert.rejects(listModels(""), (e: unknown) => e instanceof TutorError && e.code === "invalid_key");
-  await assert.rejects(mintClientSecret("not-a-key", { model: "m", instructions: "", mode: "text", slow: false }), (e: unknown) => e instanceof TutorError);
+test("通話ID の無い応答・不正な通話ID・不正な SDP は使わない", async () => {
+  const { createCall, hangupCall, TutorError } = await import("../../lib/tutor/openai");
+  const f = stubFetch([() => new Response("v=0\r\nanswer", { status: 201 })]);
+  const r = await createCall(STUDENT_KEY, "v=0\r\noffer", { model: "gpt-realtime-2", instructions: "", mode: "text", slow: false });
   f.restore();
-  assert.equal(f.calls.length, 0);
+  assert.equal(r.callId, null, "Location が無ければ通話ID は null（呼び出し側は会話を始めない）");
+  const g = stubFetch([]);
+  assert.equal(await hangupCall(STUDENT_KEY, "../../evil"), false);
+  await assert.rejects(createCall(STUDENT_KEY, "not sdp", { model: "m", instructions: "", mode: "text", slow: false }), (e: unknown) => e instanceof TutorError && e.code === "bad_sdp");
+  g.restore();
+  assert.equal(g.calls.length, 0);
 });
 
 test("接続先の差し替えは、このマシンの中（テストの代役）だけ", async () => {

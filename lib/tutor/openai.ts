@@ -4,11 +4,16 @@
 // 「本人のキー」だけ。環境変数のキー（採点用の ANTHROPIC_API_KEY・OPENAI_API_KEY など）は読まない。
 // 失敗・再試行・要約・文字起こし・音声合成のどの経路でも、別のキーへ切り替えない。
 //
-// 公式の手順（2026-10 時点。実装時に再確認すること）
-//   1. サーバーが本人のキーで POST /v1/realtime/client_secrets → 短期の資格情報（value）
-//   2. ブラウザがその短期資格情報で、WebRTC の SDP を POST /v1/realtime/calls へ送る
-// モデル名は固定しない。本人のキーで GET /v1/models を呼び、名前に realtime を含むものから本人が選ぶ。
+// 接続の方式（公式の API 仕様・公式 SDK 7.27.0 で確認）
+//   1. ブラウザが WebRTC の SDP（offer）を作り、このアプリのサーバーへ送る
+//   2. サーバーが本人のキーで POST /v1/realtime/calls（multipart：sdp と session）→ SDP（answer）と
+//      Location ヘッダーの通話ID を受け取る。ブラウザには SDP だけを返す（キーも短期の資格情報も渡さない）
+//   3. 上限時間・同意の撤回・機能の停止・キーの削除・終了のときは、サーバーが本人のキーで
+//      POST /v1/realtime/calls/{call_id}/hangup を呼んで通話を切る
+// （短期の資格情報 client_secrets は使わない：資格情報の期限は「会話を始められる期限」で、始めた会話は期限後も続き、
+//   期限内なら同じ資格情報で別の会話も始められるため、会話の時間制限にはならない）
 import "server-only";
+import { pickTranscribeModel, pickVoiceModels } from "@/lib/tutor/models";
 
 const OFFICIAL = "https://api.openai.com/v1";
 
@@ -24,7 +29,7 @@ export function apiBase(): string {
 }
 
 export type TutorErrorCode =
-  | "invalid_key" | "no_quota" | "rate_limited" | "forbidden" | "model_unavailable" | "provider_down" | "network";
+  | "invalid_key" | "no_quota" | "rate_limited" | "forbidden" | "model_unavailable" | "provider_down" | "network" | "bad_sdp";
 
 export class TutorError extends Error {
   constructor(public code: TutorErrorCode, message: string, public status = 400) { super(message); }
@@ -43,6 +48,7 @@ async function toError(res: Response): Promise<TutorError> {
   if (res.status === 429) return new TutorError("rate_limited", "OpenAI が混み合っているか、利用の上限に達しました。少し待ってからもう一度お試しください。", 429);
   if (res.status === 403) return new TutorError("forbidden", "このキーでは音声の会話（Realtime）を使えません。キーの権限やプロジェクトの設定を確かめてください。", 403);
   if (res.status === 404) return new TutorError("model_unavailable", "選んだモデルをこのキーでは使えません。モデルを選び直してください。", 400);
+  if (res.status === 400) return new TutorError("bad_sdp", "音声の接続の準備に失敗しました。ページを開き直してもう一度お試しください。", 400);
   return new TutorError("provider_down", `OpenAI でエラーが起きました（HTTP ${res.status}）。時間をおいてお試しください。`, 502);
 }
 
@@ -59,15 +65,12 @@ async function call(apiKey: string, path: string, init: RequestInit = {}): Promi
   }
 }
 
-/** 本人のキーで使える Realtime のモデルと、文字起こしのモデル（字幕用）。キーの確認も兼ねる */
-export async function listModels(apiKey: string): Promise<{ realtime: string[]; transcribe: string[] }> {
+/** 本人のキーで使える、音声の会話に対応したモデルと、字幕用の文字起こしのモデル。キーの確認も兼ねる（料金はかからない） */
+export async function listModels(apiKey: string): Promise<{ voice: string[]; transcribe: string | null }> {
   const res = await call(apiKey, "/models");
   if (!res.ok) throw await toError(res);
   const ids: string[] = ((await res.json())?.data ?? []).map((m: { id?: unknown }) => String(m?.id ?? "")).filter(Boolean);
-  return {
-    realtime: ids.filter((id) => /realtime/i.test(id) && !/transcri|translat/i.test(id)).sort(),
-    transcribe: ids.filter((id) => /transcribe|^whisper/i.test(id)).sort(),
-  };
+  return { voice: pickVoiceModels(ids), transcribe: pickTranscribeModel(ids) };
 }
 
 export type SessionOptions = {
@@ -80,8 +83,8 @@ export type SessionOptions = {
   transcribeModel?: string | null;
 };
 
-/** 短期の資格情報を発行する（有効期限 60 秒。会話の開始にだけ使える） */
-export async function mintClientSecret(apiKey: string, o: SessionOptions) {
+/** 会話の設定（公式の RealtimeSessionCreateRequest） */
+export function sessionConfig(o: SessionOptions) {
   const session: Record<string, unknown> = {
     type: "realtime",
     model: o.model,
@@ -97,17 +100,37 @@ export async function mintClientSecret(apiKey: string, o: SessionOptions) {
       output: { voice: "marin", speed: o.slow ? 0.85 : 1.0 },
     };
   }
-  const res = await call(apiKey, "/realtime/client_secrets", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ expires_after: { anchor: "created_at", seconds: 60 }, session }),
-  });
-  if (!res.ok) throw await toError(res);
-  const j = await res.json();
-  const value = String(j?.value ?? j?.client_secret?.value ?? "");
-  if (!value) throw new TutorError("provider_down", "OpenAI から会話用の資格情報を受け取れませんでした。時間をおいてお試しください。", 502);
-  return { value, expiresAt: Number(j?.expires_at ?? j?.client_secret?.expires_at ?? 0) || null };
+  return session;
 }
 
-/** ブラウザが SDP を送る先（短期資格情報で使う） */
-export const callsUrl = () => apiBase() + "/realtime/calls";
+/** 通話を作る：ブラウザの SDP（offer）を本人のキーで送り、SDP（answer）と通話ID を受け取る */
+export async function createCall(apiKey: string, sdp: string, o: SessionOptions): Promise<{ answer: string; callId: string | null }> {
+  if (!/^v=0\r?\n/.test(sdp) || sdp.length > 20000) throw new TutorError("bad_sdp", "音声の接続の準備に失敗しました。ページを開き直してもう一度お試しください。");
+  // 公式の例（curl -F "sdp=<offer.sdp;type=application/sdp" -F 'session={…};type=application/json'）と同じ形の multipart
+  const boundary = `----tutor${crypto.randomUUID().replace(/-/g, "")}`;
+  const body = [
+    `--${boundary}`, 'Content-Disposition: form-data; name="sdp"', "Content-Type: application/sdp", "", sdp,
+    `--${boundary}`, 'Content-Disposition: form-data; name="session"', "Content-Type: application/json", "", JSON.stringify(sessionConfig(o)),
+    `--${boundary}--`, "",
+  ].join("\r\n");
+  const res = await call(apiKey, "/realtime/calls", {
+    method: "POST",
+    headers: { "content-type": `multipart/form-data; boundary=${boundary}`, accept: "application/sdp" },
+    body,
+  });
+  if (!res.ok) throw await toError(res);
+  const location = res.headers.get("location") ?? "";
+  const callId = location.split("/").filter(Boolean).pop() ?? "";
+  return { answer: await res.text(), callId: /^[A-Za-z0-9_-]{1,100}$/.test(callId) ? callId : null };
+}
+
+/** 通話を切る（本人のキーで）。切れなかったときは false（呼び出し側は会話の記録を終えて、画面でも接続を閉じる） */
+export async function hangupCall(apiKey: string, callId: string): Promise<boolean> {
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(callId)) return false;
+  try {
+    const res = await call(apiKey, `/realtime/calls/${callId}/hangup`, { method: "POST" });
+    return res.ok || res.status === 404;   // 404：すでに終わっている
+  } catch {
+    return false;
+  }
+}

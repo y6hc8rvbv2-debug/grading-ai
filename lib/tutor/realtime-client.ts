@@ -1,14 +1,16 @@
 // チャッピー先生：ブラウザと OpenAI Realtime を WebRTC でつなぐ（ブラウザ専用）。
-//   - 使うのはサーバーが発行した短期の資格情報だけ（本人の長期キーはブラウザに置かない）
+//   - ブラウザは SDP（接続の申し込み）を作ってこのアプリのサーバーに渡すだけ。OpenAI との通話はサーバーが本人のキーで作り、
+//     返ってきた SDP（応答）でつなぐ。ブラウザにはキーも短期の資格情報も来ない
 //   - 音声：マイクの音声を送り、AI の声を再生する。文字：マイクを使わず、データチャネルで文字を送る
 //   - 終了・切断・画面を閉じる・バックグラウンドに回したときは、マイク・接続を必ず止める
-// イベント名は 2026-10 時点の公式仕様（GA）と、以前の名前（beta）の両方を受け付ける。実機で要確認。
+// イベント名は公式 SDK 7.27.0（2026-10-01）の型定義で確認した GA の名前。以前の名前（beta）も受け付ける。
 
 export type TutorState = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "stopped" | "error";
 export type Line = { who: "ai" | "me"; text: string; final: boolean };
 export type Usage = { input_tokens: number; output_tokens: number; input_audio_tokens: number; output_audio_tokens: number };
 
-export type StartOptions = { clientSecret: string; callsUrl: string; model: string; mode: "voice" | "text" };
+/** exchange：SDP（申し込み）をサーバーへ送り、SDP（応答）を受け取る */
+export type StartOptions = { mode: "voice" | "text"; exchange: (offerSdp: string) => Promise<string> };
 
 export class RealtimeTutor {
   state: TutorState = "idle";
@@ -56,16 +58,14 @@ export class RealtimeTutor {
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    const res = await fetch(o.callsUrl, {
-      method: "POST",
-      body: offer.sdp,
-      headers: { authorization: `Bearer ${o.clientSecret}`, "content-type": "application/sdp" },
-    });
-    if (!res.ok) {
+    let answer: string;
+    try {
+      answer = await o.exchange(offer.sdp ?? "");
+    } catch (e) {
       this.stop();
-      throw new Error(`OpenAI に接続できませんでした（HTTP ${res.status}）。キーの残高・権限を確かめてください。`);
+      throw e;
     }
-    await pc.setRemoteDescription({ type: "answer", sdp: await res.text() });
+    await pc.setRemoteDescription({ type: "answer", sdp: answer });
   }
 
   private push(who: Line["who"], text: string, final: boolean) {
