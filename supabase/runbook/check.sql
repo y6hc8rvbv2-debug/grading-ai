@@ -20,7 +20,9 @@ from (values
   ('0010', 'result_releases 表',               to_regclass('public.result_releases') is not null),
   ('0011', 'publish_submission_result 関数',   exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'publish_submission_result')),
   ('0012', 'tutor_sessions 表',                to_regclass('public.tutor_sessions') is not null),
-  ('0013', 'tutor_call_secrets 表',            to_regclass('public.tutor_call_secrets') is not null)
+  ('0013', 'tutor_call_secrets 表',            to_regclass('public.tutor_call_secrets') is not null),
+  -- 0014 は権限だけを付ける。「自動で公開」がオンの環境では 0014 の前から true になる（それで正しい）
+  ('0014', 'authenticated が grading_jobs を読める権限', to_regclass('public.grading_jobs') is not null and has_table_privilege('authenticated', 'public.grading_jobs', 'SELECT'))
 ) as m(no, what, applied)
 order by 1;
 

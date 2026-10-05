@@ -16,7 +16,7 @@
   デモモードはプロトタイプと同じデモデータで全機能を試せるが、何も保存しない（画面上部に「デモモード（保存されません）」と出る）。
 - 採点AI: サーバーの `ANTHROPIC_API_KEY` があれば、「新規採点」は画像を保存して続けて AI 採点する。
   保存済み（AI採点待ち）の答案も「採点中」画面・答案詳細から採点できる。キーが無ければ画像の保存だけ。
-- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004〜0013 はまだ**（0005 はモデル比較試験、0006 は採点方式と AI採点の記録、0009 は赤ペンの位置、0010・0011 は返却、0012 は返却の版・受信箱とチャッピー先生、0013 はチャッピー先生の見回り）。
+- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004〜0014 はまだ**（0005 はモデル比較試験、0006 は採点方式と AI採点の記録、0009 は赤ペンの位置、0010・0011 は返却、0012 は返却の版・受信箱とチャッピー先生、0013 はチャッピー先生の見回り、0014 は明示的な GRANT）。
   Vercel の Preview で、ログイン・名簿表示・答案画像の保存まで動作確認済み（ユーザー報告）。
 - **本物の Claude API での採点はまだ一度も実行していない**（開発環境にキーが無い）。
   E2E はリクエストの形を検査する代役サーバー（`tests/e2e/mock-anthropic.mjs`）で検証している。
@@ -27,7 +27,7 @@
 
 ### 1. 本番で AI 採点を動かす ← ユーザー作業待ち
 
-- **順序（ユーザーの決定）：検証環境 → 本番は後回し**。`docs/DB-RUNBOOK.md` 第1部：本番とは別の Supabase プロジェクトに 0001〜0013 を適用 →
+- **順序（ユーザーの決定）：検証環境 → 本番は後回し**。`docs/DB-RUNBOOK.md` 第1部：本番とは別の Supabase プロジェクト（saiten-verify、東京、Automatically expose new tables はオフ）に 0001〜0014 を適用 →
   Vercel の Preview（Preview だけの環境変数）をそこへつなぐ → 見回り（`docs/TUTOR-SWEEP.md`）→ OpenAI の実接続（`docs/TUTOR-LIVE-CHECK.md`）→ 実機（`docs/TUTOR-DEVICE-CHECK.md`）。
   本番（第2部：バックアップ2種 → check.sql → 1ファイルずつ → check.sql）は第1部が終わり、ユーザーが決めてから。戻すときは drop せず、機能停止・Instant Rollback・新しい番号のファイルで
 - 本物の OpenAI：`npm run tutor:live-check` は `GET /v1/models` の1回だけ（料金がかからないことは料金表で未確認なので「無料」と書かない）。`-- --paid`・Preview での会話・実機は**ユーザーの指示があってから**
@@ -52,7 +52,7 @@
   root 環境では `su postgres -c "bash supabase/tests/run.sh"`
 - `npm run test:e2e` … Supabase CLI のローカル環境（Docker）にアプリを繋ぎ、ブラウザで教員の作業を通しで検証（`tests/e2e/`）。
   採点AIは代役サーバー（本物の API は呼ばない）。ECR に届かない環境では `SUPABASE_INTERNAL_IMAGE_REGISTRY=docker.io` を付ける
-- `npm run test:db` には `supabase/tests/workflow_test.sql`（返却）・`tutor_test.sql`（受信箱・チャッピー先生）・`tutor_sweep_test.sql`（見回り）・`upgrade_test.sh`（0001〜0003＋既存データの DB に 0004〜0013 を足す：途中失敗で何も残らない・2回目はエラー・件数と合計が変わらない）も含まれる
+- `npm run test:db` には `supabase/tests/workflow_test.sql`（返却）・`tutor_test.sql`（受信箱・チャッピー先生）・`tutor_sweep_test.sql`（見回り）・`upgrade_test.sh`（0001〜0003＋既存データの DB に 0004〜0014 を足す：途中失敗で何も残らない・2回目はエラー・件数と合計が変わらない）も含まれる
 - `npm run test:e2e` は `tests/e2e/tutor.mjs`（返却・チャッピー先生）→ `scenario.mjs`（教員の作業）→ `fullflow.mjs`（答案登録→採点→教師確認→返却→復習を画面で1本に）→ `tutor-sweep.mjs`（ブラウザが来なくても見回りが通話を切る。アプリを再起動するので最後）の順。
   ローカルの Supabase に pg_cron（5秒ごと）→ pg_net → `http://host.docker.internal:3200/api/tutor/sweep` を登録して、本番と同じ経路で動かす
 - `npm run test:unit` … チャッピー先生（管理者のキーを使わない・依存関係の分離・暗号化）・赤ペンの置き場所（罫線の検出・表への割り当て。実物の写真は REDPEN_REAL_DIR があるときだけ）・採点AIの出力の後処理（`normalizeResult`）・3モデル併用の振り分けと料金の目安・比較試験・HEIC 変換（`tests/fixtures/sample.heic` は合成画像）の単体テスト
@@ -321,6 +321,8 @@ Haiku 4.5 / Sonnet 5.5 / Opus 5 に同じ答案を1回ずつ採点させて比�
 
 Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを追加する。
 既存のマイグレーションファイルは書き換えない。
+**新しい表・関数には、必ず明示的な GRANT を書く**（検証用 saiten-verify は「Automatically expose new tables」がオフで、自動の権限が付かない）。
+0014_explicit_grants.sql は 0001〜0013 の権限を、オンの環境（本番）と同じになるよう明示したもの（`supabase/runbook/acl-snapshot.sql` で生成・照合。オフを再現した E2E も通過）
 
 ---
 
@@ -336,7 +338,7 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
    見回りはローカルの Supabase の pg_cron → アプリでのみ検証（クラウドの pg_cron → pg_net → Vercel の経路、Preview の保護の越え方は検証環境で確かめる）。
    OpenAI が通話を作ってから通話ID を DB に記録するまでのごく短い間にサーバーが落ちると、その通話は切れない（残る隙間）
 19. **（解決）既存の通しテスト `tests/e2e/scenario.mjs`** — テスト登録（正答の入力・すべて確認）・新規採点の4手順・3モデル併用（上のモデルには問題の設問だけ）・コメント欄の絞り込みに合わせて直した
-2. **0004〜0013 が本番 Supabase に未適用**（「次にやること」1。先に検証環境で行う）
+2. **0004〜0014 が本番 Supabase に未適用**（「次にやること」1。先に検証環境で行う）
 16. **模範解答からの自動入力は代役 API でのみ検証** — 本物の模範解答での読み取り精度（特に配点表・作図・PDF の bbox）は Preview で確かめる。PDF の資料は該当箇所の枠を表示できない（ページを開くだけ）。作図の模範図は採点AIには送っていない（採点条件の文章だけ）
 15. **3モデル併用は代役 API でのみ検証** — 本物の Haiku / Sonnet での読み取り精度・振り分けの割合・費用は未確認。正答との照合（`normAnswer`）は表記ゆれで誤検知しうる（誤検知は上のモデル・要確認に回るので、精度側に倒れる）
 14. **モデル比較試験は未実行** — Preview で管理者が実行する準備まで完了（代役サーバーでの E2E のみ検証済み）
