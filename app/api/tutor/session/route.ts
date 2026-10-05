@@ -1,12 +1,15 @@
 // チャッピー先生：会話を始める。
 //   1. 本人の返却済みの問題か・機能が有効か・同意があるか・利用の制限内かを DB で確かめ、会話の記録を作る
 //   2. ブラウザの SDP（offer）を、本人のキーで OpenAI に送って通話を作る（POST /v1/realtime/calls）
-//   3. ブラウザへは SDP（answer）だけを返す。本人のキーも短期の資格情報も渡さない。通話ID はサーバーが記録し、
-//      上限時間・同意の撤回・機能の停止・キーの削除・終了のときにサーバーから通話を切る
+//   3. 通話ID と、通話を切るためだけの資格情報（本人のキーを暗号化したもの。会話ごと）を DB に置く
+//      （tutor_call_secrets。誰も読めない。切り終えたら消し、遅くとも「1回の上限時間＋30分」で消す）。
+//      ブラウザが来なくなっても、見回り（/api/tutor/sweep）がこれで通話を切れる
+//   4. ブラウザへは SDP（answer）だけを返す。本人のキーも短期の資格情報も渡さない
 // どこで失敗しても、別のキー（管理者のキーなど）へ切り替えない。
-import { TutorError, createCall, listModels, looksLikeKey } from "@/lib/tutor/openai";
+import { TutorError, createCall, hangupCall, listModels, looksLikeKey } from "@/lib/tutor/openai";
 import { buildContext, buildInstructions, type ReleasedItem } from "@/lib/tutor/prompt";
-import { activeConsent, fail, hangupSessions, json, releasedItem, requireStudent, secureTransport, sessionRefusal, studentKey } from "@/lib/tutor/server";
+import { canStoreKeys, encryptKey } from "@/lib/tutor/crypto";
+import { activeConsent, fail, json, releasedItem, requireStudent, secureTransport, sessionRefusal, studentKey } from "@/lib/tutor/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +26,13 @@ export async function POST(req: Request) {
   const slow = b.slow === true;
   const sdp = typeof b.sdp === "string" ? b.sdp : "";
   if (!sdp) return fail("音声の接続の準備ができていません。ページを開き直してください。", 400, "bad_sdp");
+
+  // 通話を確実に切れる準備ができていなければ、会話を始めない
+  //   - 暗号鍵が無いと、通話を切るための資格情報を置けない
+  //   - 見回り（定期処理）が止まっていると、ブラウザが来なくなったときに切れない
+  if (!canStoreKeys()) return fail("学校の設定（暗号鍵）がまだのため、会話を始められません。先生に伝えてください。", 503, "tutor_not_ready");
+  const { data: sweeperOk } = await ctx.db.rpc("tutor_sweeper_ok");
+  if (sweeperOk !== true) return fail("会話を確実に終わらせる仕組み（見回り）が止まっているため、会話を始められません。先生に伝えてください。", 503, "tutor_no_sweeper");
 
   const { payload, item } = await releasedItem(ctx, releaseId, qno);
   if (!payload || !item) return fail("この問題は、あなたに返却された答案に見つかりません。", 404, "not_found");
@@ -62,11 +72,17 @@ export async function POST(req: Request) {
       transcribeModel: mode === "voice" ? models.transcribe : null,
     });
     if (!callId) {
-      // 通話ID が無いと、サーバーから切れない。会話を続けさせない
-      await hangupSessions(ctx, "no_call_id", { sessionId, key: apiKey });
+      // 通話ID が無いと、サーバーから切れない。会話を続けさせない（ブラウザにも SDP を返さないので、接続は成り立たない）
+      await ctx.db.rpc("end_tutor_session", { p_id: sessionId, p_reason: "no_call_id", p_seconds: 0, p_usage: {} });
       return fail("OpenAI から通話の番号を受け取れなかったため、会話を始めませんでした。時間をおいてお試しください。", 502, "no_call_id");
     }
-    await ctx.db.rpc("set_tutor_call", { p_id: sessionId, p_call: callId });
+    const { data: recorded, error: recErr } = await ctx.db.rpc("set_tutor_call", { p_id: sessionId, p_call: callId, p_secret: encryptKey(apiKey, sessionId) });
+    if (recErr || recorded !== true) {
+      // 記録できなければ、手元のキーでその場で切る（記録の無い通話を残さない）
+      await hangupCall(apiKey, callId);
+      await ctx.db.rpc("end_tutor_session", { p_id: sessionId, p_reason: "record_failed", p_seconds: 0, p_usage: {} });
+      return fail("会話の記録に失敗したため、会話を始めませんでした。時間をおいてお試しください。", 500, "record_failed");
+    }
     return json({ sessionId, maxSeconds, model, mode, answer, captions: mode === "voice" && !!models.transcribe });
   } catch (e) {
     await ctx.db.rpc("end_tutor_session", { p_id: sessionId, p_reason: "provider_error", p_seconds: 0, p_usage: {} });

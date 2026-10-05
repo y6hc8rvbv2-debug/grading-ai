@@ -27,8 +27,7 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   const ctx = await requireStudent(req, { write: true, evenIfOff: true });
   if (ctx instanceof Response) return ctx;
-  const b = await req.json().catch(() => null) as { apiKey?: unknown } | null;
-  await hangupSessions(ctx, "consent_revoked", { apiKey: b?.apiKey });
+  await hangupSessions(ctx, "consent_revoked");
   const { error } = await ctx.db.from("tutor_consents").update({ revoked_at: new Date().toISOString() }).eq("student_id", ctx.studentId);
   if (error) return fail("同意を撤回できませんでした。時間をおいてお試しください。", 500, "revoke_failed");
   await ctx.db.rpc("tutor_log", { p_action: "consent_revoked" });

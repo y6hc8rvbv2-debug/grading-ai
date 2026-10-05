@@ -1,18 +1,28 @@
 // チャッピー先生：本人の OpenAI API キーで、本物の Realtime API に接続できるかを手元で確かめる（開発・導入担当者用）。
 //
-//   npm run tutor:live-check              … 無料の確認だけ（GET /v1/models：キーが有効か・音声会話に使えるモデル）
-//   npm run tutor:live-check -- --paid    … 有料の確認（通話を1回作り、文字で1往復して、サーバー側から切る）
+//   npm run tutor:live-check              … モデル一覧の確認（キーが有効か・音声会話に使えるモデル）
+//   npm run tutor:live-check -- --paid    … 通話の確認（通話を1回作り、文字で1往復して、サーバー側から切る。課金される）
+//
+// 呼ぶ API（これ以外は呼ばない。tests/unit/tutor-live-check.test.ts で代役のサーバーに対して確かめている）
+//   モデル一覧の確認：GET https://api.openai.com/v1/models の1回だけ
+//     → モデルの一覧を返すだけで、生成（トークン）を伴わない。ただし「料金がかからない」ことは公式の料金表で
+//       まだ確認できていない（開発環境から料金表のページを開けない）。そのため画面でも「無料」とは書かない
+//   通話の確認（--paid）：上の GET /v1/models に加えて
+//     POST /v1/realtime/calls（通話を作る。Realtime の利用として課金される）
+//     データチャネルで conversation.item.create と response.create を1回ずつ（応答の生成。トークンとして課金される）
+//     POST /v1/realtime/calls/{call_id}/hangup（通話を切る）
 //
 // 安全のための決まり（docs/TUTOR-LIVE-CHECK.md）
 //   - キーは画面に表示しない入力（打った文字が出ない）でだけ受け取る。ファイル・環境変数・引数・ログには書かない
 //   - 使うのは入力したキーだけ。OPENAI_API_KEY などの環境変数のキーは読まない（アプリと同じ lib/tutor/openai.ts を使う）
-//   - 有料の確認は --paid を付け、確認の文を打ったときだけ。会話は文字で1往復・最大60秒。終わったら必ず通話を切る
+//   - 通話の確認は --paid を付け、確認の文を打ったときだけ。会話は文字で1往復・最大60秒。終わったら必ず通話を切る
 //   - 結果（イベント名・モデル・所要時間）は画面に出すだけ。キーの末尾4文字以外は出さない
 import { createInterface } from "node:readline";
 import { createCall, hangupCall, listModels, TutorError } from "@/lib/tutor/openai";
 
 const PAID = process.argv.includes("--paid");
 const CONFIRM = "有料で実行します";
+const CONFIRM_MODELS = "モデル一覧を取得します";
 
 /** 打った文字を表示しない入力 */
 function askHidden(prompt: string): Promise<string> {
@@ -53,20 +63,26 @@ const tail = (k: string) => `…${k.slice(-4)}`;
 
 async function main() {
   console.log("チャッピー先生：本物の OpenAI Realtime への接続確認");
-  console.log(PAID ? "（有料の確認：通話を1回作り、文字で1往復します）" : "（無料の確認だけ：キーの確認とモデルの一覧。料金はかかりません）");
+  console.log("呼ぶ API：GET /v1/models（モデルの一覧。生成は伴わない。料金がかからないことは公式の料金表で未確認）");
+  if (PAID) {
+    console.log("          POST /v1/realtime/calls（通話を作る：課金される）");
+    console.log("          データチャネルで conversation.item.create・response.create を1回（応答の生成：課金される）");
+    console.log("          POST /v1/realtime/calls/{id}/hangup（通話を切る）");
+  }
+  if ((await ask(`上の API を呼んでよければ「${CONFIRM_MODELS}」と入力してください: `)) !== CONFIRM_MODELS) { console.log("中止しました（API は呼んでいません）"); return; }
   const key = await askHidden("OpenAI API キー（入力した文字は表示されません）: ");
   if (!key) { console.log("キーが入力されませんでした"); process.exit(1); }
 
-  // 1. 無料：キーの確認と、音声会話に使えるモデル
+  // 1. キーの確認と、音声会話に使えるモデル（GET /v1/models だけ）
   const t0 = Date.now();
   const models = await listModels(key);
   console.log(`✓ キー（${tail(key)}）は有効です（GET /v1/models・${Date.now() - t0}ms）`);
   console.log(`  音声会話に使えるモデル：${models.voice.join(", ") || "（なし）"}`);
   console.log(`  字幕に使う文字起こしのモデル：${models.transcribe ?? "（なし：字幕は出ません）"}`);
-  if (!PAID) { console.log("\n無料の確認は終わりました。有料の確認は --paid を付けて実行してください。"); return; }
-  if (!models.voice.length) { console.log("音声会話に使えるモデルが無いので、有料の確認はできません"); process.exit(1); }
+  if (!PAID) { console.log("\nモデル一覧の確認は終わりました（呼んだのは GET /v1/models の1回だけ）。OpenAI の Usage に記録が出ていないかも確かめてください。"); return; }
+  if (!models.voice.length) { console.log("音声会話に使えるモデルが無いので、通話の確認はできません"); process.exit(1); }
 
-  // 2. 有料：確認の文を打ったときだけ
+  // 2. 通話の確認（課金される）：確認の文を打ったときだけ
   const model = models.voice.includes("gpt-realtime-mini") ? "gpt-realtime-mini" : models.voice[0];
   console.log(`\nこれから、あなたのキーで「${model}」の通話を1回作り、文字で1往復します（料金がかかります。最大60秒）。`);
   if ((await ask(`続けるときは「${CONFIRM}」と入力してください: `)) !== CONFIRM) { console.log("中止しました（料金はかかっていません）"); return; }

@@ -4,13 +4,15 @@
 //   POST /v1/realtime/calls/{id}/hangup      通話を切る（記録する）
 //   GET  /__requests                         受けた要求（キーは末尾4文字と「登録済みか」だけを記録）
 //   POST /__revoke {key} / __quota {key}     そのキーを失効・残高不足にする
+//   POST /__unrevoke                         失効・残高不足を元に戻す（後のテストのため）
+//   POST /__hangup_fail {count}              次の count 回の hangup を 500 で失敗させる（再試行の確認）
 import http from "node:http";
 
 const PORT = Number(process.env.MOCK_OPENAI_PORT || 4011);
 const VALID = new Set((process.env.MOCK_OPENAI_KEYS || "").split(",").filter(Boolean));
 const revoked = new Set(), noQuota = new Set();
 const requests = [];
-let seq = 0;
+let seq = 0, hangupFail = 0;
 
 const server = http.createServer(async (req, res) => {
   let raw = "";
@@ -22,6 +24,8 @@ const server = http.createServer(async (req, res) => {
     (req.url === "/__revoke" ? revoked : noQuota).add(key);
     return send(200, { ok: true });
   }
+  if (req.method === "POST" && req.url === "/__unrevoke") { revoked.clear(); noQuota.clear(); return send(200, { ok: true }); }
+  if (req.method === "POST" && req.url === "/__hangup_fail") { hangupFail = Number(JSON.parse(raw || "{}").count) || 0; return send(200, { ok: true }); }
   const key = String(req.headers.authorization || "").replace(/^Bearer\s+/, "");
   const entry = { method: req.method, url: req.url, keyTail: key.slice(-4), known: VALID.has(key), contentType: req.headers["content-type"] || "", origin: req.headers.origin || "", body: raw.slice(0, 20000) };
   requests.push(entry);
@@ -38,7 +42,10 @@ const server = http.createServer(async (req, res) => {
     return res.end("v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\n");
   }
   const hang = req.url.match(/^\/v1\/realtime\/calls\/([A-Za-z0-9_-]+)\/hangup$/);
-  if (req.method === "POST" && hang) { entry.hangup = hang[1]; return send(200, {}); }
+  if (req.method === "POST" && hang) {
+    if (hangupFail > 0) { hangupFail--; entry.hangupFailed = hang[1]; return send(500, { error: { message: "server error" } }); }
+    entry.hangup = hang[1]; return send(200, {});
+  }
   return send(404, { error: { message: "not found" } });
 });
 server.listen(PORT, "127.0.0.1", () => console.log(`mock openai listening on ${PORT}`));

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# 本番と同じ「0001〜0003 が適用済みでデータがある DB」に 0004〜0012 を足す手順を、手元の PostgreSQL で確かめる（docs/DB-RUNBOOK.md）。
+# 本番と同じ「0001〜0003 が適用済みでデータがある DB」に 0004〜0013 を足す手順を、手元の PostgreSQL で確かめる（docs/DB-RUNBOOK.md）。
 #   - 途中でエラーになったファイルは何も残さない（各ファイルが1つのトランザクション）
 #   - 同じファイルを2回流すと2回目はエラーになり、何も変わらない
-#   - 0004〜0012 を足しても、既存データの件数・合計が変わらない（supabase/runbook/check.sql で比べる）
+#   - 0004〜0013 を足しても、既存データの件数・合計が変わらない（supabase/runbook/check.sql で比べる）
 #   使い方: bash supabase/tests/upgrade_test.sh（supabase/tests/run.sh から呼ぶ）
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -35,7 +35,7 @@ SQL
 before=$("${PSQL_APP[@]}" -A -t -f supabase/runbook/check.sql)
 echo "$before" | grep -q "^0003|v_qtype_mastery ビュー|t$" || fail "check.sql：0003 が適用済みと出ない"
 echo "$before" | grep -q "^0004|save_ai_grading 関数|f$" || fail "check.sql：0004 が未適用と出ない"
-echo "✓ 適用前の確認（check.sql）：0001〜0003 は適用済み、0004〜0012 は未適用"
+echo "✓ 適用前の確認（check.sql）：0001〜0003 は適用済み、0004〜0013 は未適用"
 
 # 2. 途中でエラーになったファイルは何も残さない（0005 の commit の直前でわざと失敗させる）
 "${PSQL_APP[@]}" -f supabase/migrations/0004_ai_grading.sql
@@ -51,11 +51,11 @@ if "${PSQL_APP[@]}" -f supabase/migrations/0005_model_compare.sql >/dev/null 2>&
 echo "✓ 同じファイルを2回流すと2回目はエラーになり、重複しない"
 
 # 4. 残りを順に適用し、既存データが変わらないこと
-for f in supabase/migrations/000[6-9]*.sql supabase/migrations/001[0-2]*.sql; do "${PSQL_APP[@]}" -f "$f"; done
+for f in supabase/migrations/000[6-9]*.sql supabase/migrations/001[0-3]*.sql; do "${PSQL_APP[@]}" -f "$f"; done
 after=$("${PSQL_APP[@]}" -A -t -f supabase/runbook/check.sql)
-[ "$(echo "$after" | grep -c '^00[01][0-9]|.*|t$')" = "12" ] || fail "check.sql：0001〜0012 がすべて適用済みと出ない"
+[ "$(echo "$after" | grep -c '^00[01][0-9]|.*|t$')" = "13" ] || fail "check.sql：0001〜0013 がすべて適用済みと出ない"
 counts() { echo "$1" | grep -E '^(学校|教職員|クラス|生徒|テスト|設問|採点基準|答案|答案の設問|監査ログ)\|'; }
 [ "$(counts "$before")" = "$(counts "$after")" ] || { echo "$(counts "$before")"; echo "---"; echo "$(counts "$after")"; fail "既存データの件数・合計が変わった"; }
 echo "$after" | grep -E '^[a-z_]+\|f\|' && fail "RLS が無効の表がある"
-echo "✓ 0004〜0012 を足しても、既存データの件数・合計は同じ。すべての表で RLS が有効"
+echo "✓ 0004〜0013 を足しても、既存データの件数・合計は同じ。すべての表で RLS が有効"
 "${PSQL_SU[@]}" -d postgres -c "drop database $DB"

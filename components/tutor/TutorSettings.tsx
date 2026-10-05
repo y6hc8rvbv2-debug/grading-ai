@@ -79,7 +79,7 @@ export function TutorSettings({ status, reload, ephemeral, setEphemeral }: {
           {c && <button style={btn} disabled={busy} onClick={() => run(async () => {
             if (!window.confirm("同意を撤回すると、アプリ内でチャッピー先生と話せなくなり、保存した会話の文字起こしも消えます。撤回しますか？")) return;
             // 進行中の会話があれば、サーバーが通話を切る（保存しないキーのときは、そのキーで切る）
-            await call("DELETE", "/api/tutor/consent", ephemeral ? { apiKey: ephemeral.apiKey } : {}); await reload(); setMsg("同意を撤回しました。");
+            await call("DELETE", "/api/tutor/consent", {}); await reload(); setMsg("同意を撤回しました。");
           })}>同意を撤回する</button>}
         </div>
         {c && <p style={{ fontSize: 13 }}>同意済み（支払う人：{c.payer === "self" ? "本人" : "保護者"}）</p>}
@@ -110,12 +110,18 @@ export function TutorSettings({ status, reload, ephemeral, setEphemeral }: {
           <input aria-label="OpenAI API キー" type="password" autoComplete="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)}
             placeholder="sk- で始まるキーを貼り付け" style={{ width: "100%", boxSizing: "border-box", padding: 10, fontSize: 15, borderRadius: 8, border: "1px solid #9aa3ad" }} />
           <div style={{ fontSize: 14, lineHeight: 2 }}>
-            <label><input type="radio" name="store" checked={!store} onChange={() => setStore(false)} /> 保存しない（この画面を閉じるまで使う）</label><br />
+            <label><input type="radio" name="store" checked={!store} onChange={() => setStore(false)} /> 保存しない（この画面を閉じるまで使う。アカウントには保存しない）</label><br />
             <label style={{ opacity: status.canStoreKeys ? 1 : 0.5 }}><input type="radio" name="store" disabled={!status.canStoreKeys} checked={store} onChange={() => setStore(true)} /> 暗号化して保存する（使うのはあなたの会話だけ。先生・管理者もアプリの画面では見られません）</label>
           </div>
-          <div style={{ fontSize: 12.5, color: "#555", lineHeight: 1.7, marginBottom: 6 }}>
-            ご注意：保存したキーは暗号化していますが、アプリのサーバーを管理する人（学校が契約するサーバーの運用者）は、技術的には元に戻せます。
-            「保存しない」でも、会話のたびにキーはサーバーを通ります（記録はしません）。心配なときは、予算の上限を決めた専用のキーを作り、使い終わったら OpenAI の画面で無効にしてください。
+          <div data-testid="key-handling" style={{ fontSize: 12.5, color: "#555", lineHeight: 1.7, marginBottom: 6 }}>
+            <b>キーの扱い</b>
+            <ul style={{ margin: "4px 0", paddingInlineStart: 18 }}>
+              <li>「保存しない」：キーはこの画面の中（ブラウザのメモリ）にだけあり、画面を閉じると消えます。会話を始めるときに1回だけサーバーへ送ります。</li>
+              <li>どちらの場合も、会話を始めると、<b>通話を確実に切るためだけに</b>、キーを暗号化してサーバーに一時保管します。
+                画面を閉じた・通信が切れたときも、サーバーがこれで通話を切ります。<b>通話を切り終えたらすぐ消し、切れないときも遅くとも「1回の上限時間＋30分」で消します。</b></li>
+              <li>保存したキー・一時保管したキーは暗号化していますが、アプリのサーバーを管理する人（学校が契約するサーバーの運用者）は、技術的には元に戻せます。</li>
+              <li>心配なときは、予算の上限を決めた専用のキーを作り、使い終わったら OpenAI の画面で無効にしてください。</li>
+            </ul>
           </div>
           <button style={primary} disabled={busy || !key || !c}>キーを確かめて登録</button>
           {!c && <span style={{ fontSize: 13, marginInlineStart: 8 }}>先に上で同意してください。</span>}

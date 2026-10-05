@@ -187,7 +187,10 @@ export default function StudentPage() {
     const db = createClient();
     const {
       data: { user },
+      error: authError,
     } = await db.auth.getUser();
+    // 通信が一時的に切れただけ（ログアウトではない）なら、画面をそのままにする（会話中の画面を閉じない）
+    if (!user && authError && /fetch|network/i.test(`${authError.name} ${authError.message}`)) return;
     setUser(user?.email || "");
     if (user) {
       const [{ data, error }, { data: ib }] = await Promise.all([

@@ -16,7 +16,7 @@
   デモモードはプロトタイプと同じデモデータで全機能を試せるが、何も保存しない（画面上部に「デモモード（保存されません）」と出る）。
 - 採点AI: サーバーの `ANTHROPIC_API_KEY` があれば、「新規採点」は画像を保存して続けて AI 採点する。
   保存済み（AI採点待ち）の答案も「採点中」画面・答案詳細から採点できる。キーが無ければ画像の保存だけ。
-- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004〜0012 はまだ**（0005 はモデル比較試験、0006 は採点方式と AI採点の記録、0009 は赤ペンの位置、0010・0011 は返却、0012 は返却の版・受信箱とチャッピー先生）。
+- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004〜0013 はまだ**（0005 はモデル比較試験、0006 は採点方式と AI採点の記録、0009 は赤ペンの位置、0010・0011 は返却、0012 は返却の版・受信箱とチャッピー先生、0013 はチャッピー先生の見回り）。
   Vercel の Preview で、ログイン・名簿表示・答案画像の保存まで動作確認済み（ユーザー報告）。
 - **本物の Claude API での採点はまだ一度も実行していない**（開発環境にキーが無い）。
   E2E はリクエストの形を検査する代役サーバー（`tests/e2e/mock-anthropic.mjs`）で検証している。
@@ -27,9 +27,10 @@
 
 ### 1. 本番で AI 採点を動かす ← ユーザー作業待ち
 
-- **`docs/DB-RUNBOOK.md` の手順で** 0004〜0012 を適用する（バックアップ2種 → `supabase/runbook/check.sql`（読み取り専用）→ 1ファイルずつ順に → 再び check.sql で件数・合計が同じか）。
-  各ファイルは1つのトランザクション（0004〜0009 にも begin/commit を追加済み）。戻すときは drop せず、機能停止・Vercel の Instant Rollback・新しい番号のファイルで
-- チャッピー先生の本物の OpenAI での確認：`docs/TUTOR-LIVE-CHECK.md`（無料の `npm run tutor:live-check` → **依頼者の指示があってから** `-- --paid`）、実機は `docs/TUTOR-DEVICE-CHECK.md`（全項目未確認）
+- **順序（ユーザーの決定）：検証環境 → 本番は後回し**。`docs/DB-RUNBOOK.md` 第1部：本番とは別の Supabase プロジェクトに 0001〜0013 を適用 →
+  Vercel の Preview（Preview だけの環境変数）をそこへつなぐ → 見回り（`docs/TUTOR-SWEEP.md`）→ OpenAI の実接続（`docs/TUTOR-LIVE-CHECK.md`）→ 実機（`docs/TUTOR-DEVICE-CHECK.md`）。
+  本番（第2部：バックアップ2種 → check.sql → 1ファイルずつ → check.sql）は第1部が終わり、ユーザーが決めてから。戻すときは drop せず、機能停止・Instant Rollback・新しい番号のファイルで
+- 本物の OpenAI：`npm run tutor:live-check` は `GET /v1/models` の1回だけ（料金がかからないことは料金表で未確認なので「無料」と書かない）。`-- --paid`・Preview での会話・実機は**ユーザーの指示があってから**
 - Preview で誤登録の模擬テスト（1問・満点4点・採点済0枚）をごみ箱から削除する（ユーザー作業）
 - Preview で模範解答（20問・100点・5・5・1・3・1・3・2）から自動入力し、読み取り精度を確かめる
 - Preview で「3モデル併用」を試し、Sonnet・Opus に回った割合（目安 20%・5%）と実際の費用を「AI採点の記録」で確かめる
@@ -51,8 +52,9 @@
   root 環境では `su postgres -c "bash supabase/tests/run.sh"`
 - `npm run test:e2e` … Supabase CLI のローカル環境（Docker）にアプリを繋ぎ、ブラウザで教員の作業を通しで検証（`tests/e2e/`）。
   採点AIは代役サーバー（本物の API は呼ばない）。ECR に届かない環境では `SUPABASE_INTERNAL_IMAGE_REGISTRY=docker.io` を付ける
-- `npm run test:db` には `supabase/tests/workflow_test.sql`（返却）・`tutor_test.sql`（受信箱・チャッピー先生）・`upgrade_test.sh`（0001〜0003＋既存データの DB に 0004〜0012 を足す：途中失敗で何も残らない・2回目はエラー・件数と合計が変わらない）も含まれる
-- `npm run test:e2e` は `tests/e2e/tutor.mjs`（返却・チャッピー先生）→ `scenario.mjs`（教員の作業）→ `fullflow.mjs`（答案登録→採点→教師確認→返却→復習を画面で1本に）の順
+- `npm run test:db` には `supabase/tests/workflow_test.sql`（返却）・`tutor_test.sql`（受信箱・チャッピー先生）・`tutor_sweep_test.sql`（見回り）・`upgrade_test.sh`（0001〜0003＋既存データの DB に 0004〜0013 を足す：途中失敗で何も残らない・2回目はエラー・件数と合計が変わらない）も含まれる
+- `npm run test:e2e` は `tests/e2e/tutor.mjs`（返却・チャッピー先生）→ `scenario.mjs`（教員の作業）→ `fullflow.mjs`（答案登録→採点→教師確認→返却→復習を画面で1本に）→ `tutor-sweep.mjs`（ブラウザが来なくても見回りが通話を切る。アプリを再起動するので最後）の順。
+  ローカルの Supabase に pg_cron（5秒ごと）→ pg_net → `http://host.docker.internal:3200/api/tutor/sweep` を登録して、本番と同じ経路で動かす
 - `npm run test:unit` … チャッピー先生（管理者のキーを使わない・依存関係の分離・暗号化）・赤ペンの置き場所（罫線の検出・表への割り当て。実物の写真は REDPEN_REAL_DIR があるときだけ）・採点AIの出力の後処理（`normalizeResult`）・3モデル併用の振り分けと料金の目安・比較試験・HEIC 変換（`tests/fixtures/sample.heic` は合成画像）の単体テスト
 
 検証中に見つけて直したもの（0001/0002 は未適用だったので直接修正、0003 で追加修正）:
@@ -135,6 +137,10 @@
   - 接続：ブラウザは SDP を作るだけ。**サーバーが本人のキーで `POST /v1/realtime/calls`**（multipart）を呼んで通話を作り、`tutor_sessions.call_id` に記録。
     上限時間・学校/クラスの停止・同意の撤回・キーの削除・`TUTOR_FEATURE=off`・終了で、サーバーが `/v1/realtime/calls/{id}/hangup` を呼ぶ（生存確認は20秒ごと、DB の `heartbeat_tutor_session` が理由を返す）。
     短期の資格情報（client_secrets）は使わない（期限は「会話を始められる期限」で会話の時間制限にならないと公式仕様に明記）
+  - **見回り（0013、`docs/TUTOR-SWEEP.md`）**：ブラウザが来なくても切る。Supabase の pg_cron（30秒ごと）→ pg_net → `/api/tutor/sweep`（`CRON_SECRET` で認証、`SUPABASE_SERVICE_ROLE_KEY` は見回りの2関数だけに使う）。
+    `tutor_sweep_due()` が上限時間・停止・撤回・緊急停止・生存確認の途絶（`TUTOR_STALE_SECONDS`、既定90秒）で会話を終え、切れていない通話を予約して返す → 本人のキーで hangup → `tutor_sweep_record()`（失敗は10秒・20秒…最大10分で再試行、監査ログ）。
+    会話ごとの資格情報 `tutor_call_secrets`（本人のキーを暗号化。AAD は会話ID。RLS で全拒否）は切り終えたらすぐ消し、遅くとも「上限時間＋30分」で消す（gave_up）。
+    そのため「保存しない」キーもブラウザから送るのは開始の1回だけ。暗号鍵が無い・見回りが3分止まっている（`tutor_sweeper_ok()`）なら会話を始めない。Vercel Cron は Hobby が1日1回なので使わない
   - モデルは `lib/tutor/models.ts`（公式 SDK 7.27.0 の `RealtimeSessionCreateRequest.model`）と本人のキーの `/v1/models` の両方にあるものだけ
   - キーを読めるのは：先生・管理者はアプリ・RLS では不可。ただし暗号文（Supabase）と `TUTOR_KEY_ENCRYPTION_KEY`（Vercel）の両方を扱える運用者は技術的に復号できる。画面・文書もこの区別で説明する
   - `lib/tutor/`（サーバー：`crypto.ts` AES-GCM・`openai.ts` 本人のキーだけ・`prompt.ts` 指導方針と1問分の資料・`server.ts` 本人確認/CSRF/HTTPS/`hangupSessions`）、`app/api/tutor/*`、
@@ -326,9 +332,11 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
    罫線の無い答案（問題用紙に直接書く形式）では表への割り当てが効かず、AI の位置に頼る（ずれは「位置の要確認」と手動調整で直す）
 18. **チャッピー先生は代役の OpenAI でのみ検証** — 接続方法・モデル・イベント名・hangup は公式の API 仕様（openai-openapi）と公式 SDK 7.27.0 の型定義で照合済み（developers.openai.com は開発環境から開けない）。
    本物の Realtime での動作（通話の作成・hangup で実際に切れるか・料金）と iPhone/iPad Safari・Android Chrome の実機は未検証（`docs/TUTOR-LIVE-CHECK.md`・`docs/TUTOR-DEVICE-CHECK.md`）。
-   E2E はブラウザの RTCPeerConnection を代役にしている。OpenAI の年齢・保護者の同意の条件と、1通話の最大時間は未確認。生存確認はブラウザが送るので、改造したブラウザが止めるとサーバーは次の要求まで切れない
+   E2E はブラウザの RTCPeerConnection を代役にしている。OpenAI の年齢・保護者の同意の条件と、1通話の最大時間は未確認。
+   見回りはローカルの Supabase の pg_cron → アプリでのみ検証（クラウドの pg_cron → pg_net → Vercel の経路、Preview の保護の越え方は検証環境で確かめる）。
+   OpenAI が通話を作ってから通話ID を DB に記録するまでのごく短い間にサーバーが落ちると、その通話は切れない（残る隙間）
 19. **（解決）既存の通しテスト `tests/e2e/scenario.mjs`** — テスト登録（正答の入力・すべて確認）・新規採点の4手順・3モデル併用（上のモデルには問題の設問だけ）・コメント欄の絞り込みに合わせて直した
-2. **0004〜0012 が本番 Supabase に未適用**（「次にやること」1）
+2. **0004〜0013 が本番 Supabase に未適用**（「次にやること」1。先に検証環境で行う）
 16. **模範解答からの自動入力は代役 API でのみ検証** — 本物の模範解答での読み取り精度（特に配点表・作図・PDF の bbox）は Preview で確かめる。PDF の資料は該当箇所の枠を表示できない（ページを開くだけ）。作図の模範図は採点AIには送っていない（採点条件の文章だけ）
 15. **3モデル併用は代役 API でのみ検証** — 本物の Haiku / Sonnet での読み取り精度・振り分けの割合・費用は未確認。正答との照合（`normAnswer`）は表記ゆれで誤検知しうる（誤検知は上のモデル・要確認に回るので、精度側に倒れる）
 14. **モデル比較試験は未実行** — Preview で管理者が実行する準備まで完了（代役サーバーでの E2E のみ検証済み）

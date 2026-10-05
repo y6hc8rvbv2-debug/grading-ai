@@ -13,6 +13,8 @@ export type TutorStatus = {
   consent: null | { payer: string; send_answer: boolean; send_comment: boolean; save_transcript: boolean; share_with_teacher: boolean };
   credential: null | { payer: string; key_hint: string; model: string; status: string };
   canStoreKeys: boolean;
+  /** 会話を確実に終わらせる準備（暗号鍵と見回り）がそろっているか */
+  ready?: boolean;
   prices: Record<string, { text_in?: number; text_out?: number; audio_in?: number; audio_out?: number }> | null;
 };
 /** 保存しないキー（この画面を閉じるまでメモリにだけ置く） */
@@ -27,6 +29,7 @@ const STOP_REASON: Record<string, string> = {
   disabled: "学校またはクラスでチャッピー先生が停止されたので、会話を終えました。",
   no_consent: "同意が撤回されたので、会話を終えました。",
   feature_off: "チャッピー先生が停止されたので、会話を終えました。",
+  no_heartbeat: "通信が途切れたため、会話を終えました。もう一度始められます。",
   ended: "会話は終わっています。",
 };
 const MARK_TEXT: Record<string, string> = { "○": "正解", "△": "部分点", "×": "不正解", "-": "無記入" };
@@ -86,11 +89,11 @@ export function TutorPanel({ releaseId, item, showModelAnswer, status, ephemeral
     session.current = null;
     tt?.stop();
     // 保存しないキーのときは、サーバーが通話を切るのに本人のキーが要るので、終了の要求にだけ添える（HTTPS・保存しない）
-    const body = JSON.stringify({ sessionId: s.id, reason, seconds: Math.round((Date.now() - s.started) / 1000), usage: tt?.usage ?? {}, transcript: status?.consent?.save_transcript ? tt?.transcript() ?? "" : "", ...(ephemeral ? { apiKey: ephemeral.apiKey } : {}) });
+    const body = JSON.stringify({ sessionId: s.id, reason, seconds: Math.round((Date.now() - s.started) / 1000), usage: tt?.usage ?? {}, transcript: status?.consent?.save_transcript ? tt?.transcript() ?? "" : ""});
     if (beacon && navigator.sendBeacon) navigator.sendBeacon("/api/tutor/session/end", new Blob([body], { type: "text/plain" }));
     else await fetch("/api/tutor/session/end", { method: "POST", headers: { "content-type": "text/plain" }, body, keepalive: true }).catch(() => {});
     force((n) => n + 1);
-  }, [status?.consent?.save_transcript, ephemeral]);
+  }, [status?.consent?.save_transcript]);
 
   // 画面を閉じた・別のアプリに切り替えた（バックグラウンド）ときは会話を止める
   useEffect(() => {
@@ -112,7 +115,7 @@ export function TutorPanel({ releaseId, item, showModelAnswer, status, ephemeral
       // 1秒ごとの処理は遅れて秒を飛ばすことがあるので、「前回から20秒以上たったか」で判定する
       if (sec - (s.lastBeat ?? 0) >= 20) {
         s.lastBeat = sec;
-        const r = await api("/api/tutor/session/heartbeat", { sessionId: s.id, seconds: sec, ...(ephemeral ? { apiKey: ephemeral.apiKey } : {}) }).catch(() => ({ continue: true }));
+        const r = await api("/api/tutor/session/heartbeat", { sessionId: s.id, seconds: sec }).catch(() => ({ continue: true }));
         if (!r.continue) {
           setMessage(STOP_REASON[String(r.reason)] ?? "会話を終えました。");
           await end(String(r.reason ?? "ended"));
@@ -120,12 +123,14 @@ export function TutorPanel({ releaseId, item, showModelAnswer, status, ephemeral
       }
     }, 1000);
     return () => clearInterval(id);
-  }, [end, ephemeral]);
+  }, [end]);
 
   const start = async (mode: "voice" | "text") => {
     setMessage("");
-    if (!status?.enabled) { setMessage("チャッピー先生は、学校またはクラスで有効になっていません。先生に確認してください。"); return; }
+    if (!status) { setMessage("チャッピー先生の状態を読み込んでいます。少し待ってから、もう一度押してください。"); return; }
+    if (!status.enabled) { setMessage("チャッピー先生は、学校またはクラスで有効になっていません。先生に確認してください。"); return; }
     if (!status.consent) { setMessage("先に「チャッピー先生の設定」で、送る内容を確認して同意してください。"); onOpenSettings(); return; }
+    if (status.ready === false) { setMessage("会話を確実に終わらせる仕組みの準備ができていないため、いまは会話を始められません。先生に伝えてください。外部の ChatGPT での復習は使えます。"); return; }
     if (!status.credential && !ephemeral) { setMessage("あなたの OpenAI API キーが登録されていません。「チャッピー先生の設定」で登録するか、下の「外部の ChatGPT で復習」を使ってください。"); return; }
     setBusy(true);
     let mic: MediaStream | null = null;
@@ -218,7 +223,7 @@ export function TutorPanel({ releaseId, item, showModelAnswer, status, ephemeral
       <h4 style={{ margin: "12px 0 4px" }}>アプリ内で話す（あなたの OpenAI の契約を使います）</h4>
       <p style={{ fontSize: 12.5, color: "#555", margin: "0 0 6px" }}>
         料金は、あなた（または保護者）が OpenAI に直接支払います。学校やアプリの管理者は払いません。
-        {status?.credential ? ` 登録したキー：…${status.credential.key_hint}・モデル：${status.credential.model || "未選択"}` : ephemeral ? " この画面を閉じるまで、入力したキーを使います（保存していません）。" : " キーが未登録です。"}
+        {status?.credential ? ` 登録したキー：…${status.credential.key_hint}・モデル：${status.credential.model || "未選択"}` : ephemeral ? " この画面を閉じるまで、入力したキーを使います（アカウントには保存していません。会話中だけ、通話を切るために暗号化してサーバーに一時保管します）。" : " キーが未登録です。"}
       </p>
       {!session.current && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>

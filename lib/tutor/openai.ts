@@ -65,7 +65,7 @@ async function call(apiKey: string, path: string, init: RequestInit = {}): Promi
   }
 }
 
-/** 本人のキーで使える、音声の会話に対応したモデルと、字幕用の文字起こしのモデル。キーの確認も兼ねる（料金はかからない） */
+/** 本人のキーで使える、音声の会話に対応したモデルと、字幕用の文字起こしのモデル。キーの確認も兼ねる（生成は伴わない。料金がかからないことは公式の料金表で未確認） */
 export async function listModels(apiKey: string): Promise<{ voice: string[]; transcribe: string | null }> {
   const res = await call(apiKey, "/models");
   if (!res.ok) throw await toError(res);
@@ -126,11 +126,17 @@ export async function createCall(apiKey: string, sdp: string, o: SessionOptions)
 
 /** 通話を切る（本人のキーで）。切れなかったときは false（呼び出し側は会話の記録を終えて、画面でも接続を閉じる） */
 export async function hangupCall(apiKey: string, callId: string): Promise<boolean> {
-  if (!/^[A-Za-z0-9_-]{1,100}$/.test(callId)) return false;
+  return (await hangupCallDetailed(apiKey, callId)).ok;
+}
+
+/** 通話を切り、失敗の理由も返す（キーの値は含めない）。404 は「すでに終わっている」ので成功として扱う */
+export async function hangupCallDetailed(apiKey: string, callId: string): Promise<{ ok: boolean; error: string }> {
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(callId)) return { ok: false, error: "通話IDの形が正しくない" };
   try {
-    const res = await call(apiKey, `/realtime/calls/${callId}/hangup`, { method: "POST" });
-    return res.ok || res.status === 404;   // 404：すでに終わっている
-  } catch {
-    return false;
+    const res = await call(apiKey, `/realtime/calls/${callId}/hangup`, { method: "POST", signal: AbortSignal.timeout(15000) });
+    if (res.ok || res.status === 404) return { ok: true, error: "" };
+    return { ok: false, error: `HTTP ${res.status}` };
+  } catch (e) {
+    return { ok: false, error: e instanceof TutorError ? e.code : "network" };
   }
 }

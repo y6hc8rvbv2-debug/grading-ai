@@ -13,6 +13,28 @@ import {
   type TutorReview, type TutorSettings,
 } from "@/lib/db/tutor";
 import type { Submission, Test } from "@/lib/types";
+import { createClient } from "@/lib/supabase/client";
+
+type SweeperStatus = { last_run_at: string | null; failed: number; gave_up: number; pending: number } | null;
+
+/** 見回り（ブラウザが来なくても通話を切る定期処理）の状態。止まっていると生徒は会話を始められない */
+function SweeperLine({ T }: { T: ReturnType<typeof useUI>["T"] }) {
+  const [st, setSt] = useState<SweeperStatus | "missing">(null);
+  useEffect(() => {
+    createClient().rpc("tutor_sweeper_status").then(({ data, error }) => setSt(error ? "missing" : (data as SweeperStatus)));
+  }, []);
+  if (st === "missing") return <div style={{ fontSize: 12.5, color: T.warn }}>会話を確実に終わらせる見回りが使えません。管理者が 0013_tutor_sweep.sql と定期処理を設定してください（docs/TUTOR-SWEEP.md）。</div>;
+  if (!st) return null;
+  const age = st.last_run_at ? Math.round((Date.now() - new Date(st.last_run_at).getTime()) / 1000) : null;
+  const ok = age !== null && age < 180;
+  return (
+    <div data-testid="sweeper-status" style={{ fontSize: 12.5, color: ok && !st.gave_up ? T.textSub : T.warn, lineHeight: 1.7 }}>
+      会話を終わらせる見回り：{age === null ? "まだ一度も動いていません（生徒は会話を始められません）" : ok ? `動いています（${age}秒前）` : `止まっています（最後は${Math.round(age / 60)}分前。生徒は会話を始められません）`}
+      {st.pending + st.failed > 0 && `／通話を切る処理の待ち・再試行中 ${st.pending + st.failed} 件`}
+      {st.gave_up > 0 && `／期限までに切れなかった通話 ${st.gave_up} 件（OpenAI 側で残っている可能性があります。生徒・保護者に確認してください）`}
+    </div>
+  );
+}
 
 const STATE: Record<string, string> = {
   untouched: "未着手", reviewing: "復習中", self_understood: "理解できた（自己申告）", verified: "理解確認済み（先生）", ask_teacher: "先生に質問",
@@ -36,6 +58,7 @@ export function TutorAdminCard() {
         採点・保存・通信などの費用はこれまでどおりです。年齢・保護者の同意など、提供元の利用条件を確かめてから、使ってよいクラスだけ有効にしてください。
       </div>
       {missing && <div style={{ fontSize: 12.5, color: T.warn }}>まだ使えません。管理者が Supabase で 0012_voice_tutor.sql を実行してください。</div>}
+      {s && <SweeperLine T={T} />}
       {s && (
         <div style={{ display: "grid", gap: 10, fontSize: 13 }}>
           <label><input type="checkbox" disabled={!isAdmin} checked={s.enabled} onChange={(e) => setS({ ...s, enabled: e.target.checked })} /> 学校で有効にする</label>

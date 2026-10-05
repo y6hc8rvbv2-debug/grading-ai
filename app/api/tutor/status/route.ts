@@ -8,17 +8,20 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const ctx = await requireStudent(req);
   if (ctx instanceof Response) return ctx;
-  const [{ data: status }, { data: consent }, { data: cred }] = await Promise.all([
+  const [{ data: status }, { data: consent }, { data: cred }, { data: sweeperOk }] = await Promise.all([
     ctx.db.rpc("tutor_status"),
     ctx.db.from("tutor_consents").select("payer, send_answer, send_comment, save_transcript, share_with_teacher, agreed_at, revoked_at").eq("student_id", ctx.studentId).maybeSingle(),
     // 暗号文は読まない（目印・モデル・状態だけ）
     ctx.db.from("tutor_credentials").select("payer, key_hint, model, status, updated_at").eq("student_id", ctx.studentId).maybeSingle(),
+    ctx.db.rpc("tutor_sweeper_ok"),
   ]);
   return json({
     ...(status ?? {}),
     consent: consent && !consent.revoked_at ? consent : null,
     credential: cred && cred.status === "active" ? cred : null,
     canStoreKeys: canStoreKeys(),
+    // 会話を確実に終わらせる準備（暗号鍵と見回り）。そろっていなければ会話を始めない
+    ready: canStoreKeys() && sweeperOk === true,
     prices: process.env.TUTOR_PRICES_JSON ? safePrices(process.env.TUTOR_PRICES_JSON) : null,
   });
 }

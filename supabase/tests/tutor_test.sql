@@ -120,7 +120,8 @@ begin
   exception when others then rejected := sqlerrm = 'tutor_busy'; end;
   assert rejected, '同時に2つの会話は断る';
   assert public.heartbeat_tutor_session((v->>'id')::uuid, 30) = 'ok', '会話中は続けられる';
-  perform public.set_tutor_call((v->>'id')::uuid, 'rtc_test_1');
+  assert public.set_tutor_call((v->>'id')::uuid, 'rtc_test_1', 'v1.secret-ciphertext'), '通話IDと、通話を切る資格情報を記録する';
+  assert not public.set_tutor_call((v->>'id')::uuid, 'rtc_test_2', 'v1.secret-ciphertext'), '通話IDは1回だけ記録できる';
   assert (select call_id from public.tutor_sessions where id = (v->>'id')::uuid) = 'rtc_test_1', '通話IDを記録する';
   perform public.end_tutor_session((v->>'id')::uuid, 'user', 45, '{"input_tokens": 10}'::jsonb);
   perform public.end_tutor_session((v->>'id')::uuid, 'again', 999, '{}'::jsonb);

@@ -19,11 +19,12 @@ from (values
   ('0009', 'mark_positions 表',                to_regclass('public.mark_positions') is not null),
   ('0010', 'result_releases 表',               to_regclass('public.result_releases') is not null),
   ('0011', 'publish_submission_result 関数',   exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'publish_submission_result')),
-  ('0012', 'tutor_sessions 表',                to_regclass('public.tutor_sessions') is not null)
+  ('0012', 'tutor_sessions 表',                to_regclass('public.tutor_sessions') is not null),
+  ('0013', 'tutor_call_secrets 表',            to_regclass('public.tutor_call_secrets') is not null)
 ) as m(no, what, applied)
 order by 1;
 
--- 2. 既存データの件数と合計（適用の前後で同じであること。0004〜0012 は既存の行を消さない・書き換えない）
+-- 2. 既存データの件数と合計（適用の前後で同じであること。0004〜0013 は既存の行を消さない・書き換えない）
 select '学校' as "表", count(*) as "件数", null::numeric as "合計" from public.schools
 union all select '教職員', count(*), null from public.profiles
 union all select 'クラス', count(*), null from public.classes

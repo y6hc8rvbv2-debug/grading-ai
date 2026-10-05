@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     p_id: sessionId, p_reason: String(b.reason ?? "user").slice(0, 40),
     p_seconds: Math.max(0, Math.round(Number(b.seconds) || 0)), p_usage: usage,
   });
-  await hangupSessions(ctx, "user", { sessionId, apiKey: b.apiKey });
+  await hangupSessions(ctx, "user", { sessionId });
   const transcript = typeof b.transcript === "string" ? b.transcript.slice(0, 20000) : "";
   if (transcript) {
     const consent = await activeConsent(ctx);

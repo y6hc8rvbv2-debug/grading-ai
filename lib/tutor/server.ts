@@ -7,7 +7,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { decryptKey } from "@/lib/tutor/crypto";
-import { hangupCall, looksLikeKey } from "@/lib/tutor/openai";
+import { hangupCallDetailed, looksLikeKey } from "@/lib/tutor/openai";
 
 export const featureOff = () => (process.env.TUTOR_FEATURE ?? "").toLowerCase() === "off";
 
@@ -89,19 +89,34 @@ export async function studentKey(ctx: StudentCtx, provided?: unknown): Promise<s
 
 /**
  * 本人の会話の通話をサーバーから切り、会話の記録を終える（sessionId を省くと、進行中の会話すべて）。
- * 通話は本人のキーでしか切れない。キーが無い・切れないときも記録は終え、画面にも接続を閉じさせる。
+ * 通話を切る資格情報は、会話を始めたときに暗号化して置いたもの（tutor_call_secrets。誰も読めない表）を使う。
+ * そのため「保存しない」で登録したキーでも、ブラウザからキーを受け取らずに切れる。
+ * 切れなかったときも記録は終え、結果を記録する（見回り /api/tutor/sweep が間隔を広げて再試行する）。
  */
-export async function hangupSessions(ctx: StudentCtx, reason: string, opts: { sessionId?: string; apiKey?: unknown; key?: string | null } = {}) {
-  let q = ctx.db.from("tutor_sessions").select("id, call_id, status").eq("student_id", ctx.studentId);
+export async function hangupSessions(ctx: StudentCtx, reason: string, opts: { sessionId?: string } = {}) {
+  let q = ctx.db.from("tutor_sessions").select("id, call_id, status, hangup_status").eq("student_id", ctx.studentId);
   q = opts.sessionId ? q.eq("id", opts.sessionId) : q.eq("status", "active");
   const { data: rows } = await q;
   let hungUp = 0, missed = 0;
-  const key = opts.key !== undefined ? opts.key : await studentKey(ctx, opts.apiKey);
   for (const r of rows ?? []) {
-    if (r.call_id) {
-      if (key && await hangupCall(key, r.call_id)) hungUp++; else missed++;
-    }
     if (r.status === "active") await ctx.db.rpc("end_tutor_session", { p_id: r.id, p_reason: reason, p_seconds: 0, p_usage: {} });
+    if (!r.call_id || r.hangup_status === "done" || r.hangup_status === "gave_up") continue;
+    const res = await hangupWithSecret(ctx, r.id, r.call_id);
+    if (res.ok) hungUp++; else missed++;
   }
   return { hungUp, missed };
+}
+
+/** 会話の資格情報で通話を切り、結果を記録する（生徒の要求の中） */
+async function hangupWithSecret(ctx: StudentCtx, sessionId: string, callId: string) {
+  const { data: secret } = await ctx.db.rpc("tutor_call_secret", { p_id: sessionId });
+  let res: { ok: boolean; error: string };
+  if (!secret) res = { ok: false, error: "資格情報が無い" };
+  else {
+    let key = "";
+    try { key = decryptKey(String(secret), sessionId); } catch { /* 下で失敗として記録 */ }
+    res = key ? await hangupCallDetailed(key, callId) : { ok: false, error: "復号できない" };
+  }
+  if (secret) await ctx.db.rpc("tutor_hangup_result", { p_id: sessionId, p_ok: res.ok, p_error: res.error });
+  return res;
 }
