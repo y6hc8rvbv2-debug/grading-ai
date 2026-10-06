@@ -27,6 +27,24 @@ Vercel の Preview だけをそちらへつなぐ。実在の生徒・答案の�
 - （任意）`supabase/runbook/acl-snapshot.sql` を実行し、結果の行数が開発環境の 548 行と同じか（オンの環境と同じ権限か）を見る
 - 本番と同じ「0001〜0003 にデータがある状態から足す」手順は、開発側で `supabase/tests/upgrade_test.sh` により確認済み
 
+### 1-2b. （任意）0008 以降をスクリプトで適用する（`npm run verify-db`）
+
+SQL Editor の代わりに、`scripts/verify-db/apply.mjs` が Supabase Management API（HTTPS。SQL Editor と同じ経路）で1ファイルずつ適用する。
+
+- 接続先は ref `cpfhsxbmzoyrlkynveqd`（saiten-verify・東京）に固定。名前・リージョンも確かめ、違えば止まる。本番には使えない
+- 適用の前に、DB の状態が「直前の番号の適用後」と完全に一致するかを確かめる（`supabase/runbook/verify-expected.json`。表・ビュー・関数・ポリシー・トリガー・列）。
+  一致しなければ何もせず止まる。適用済みのファイルは再実行しない。自動でやり直さない・データを消さない
+- 各ファイルはそのまま1回で送る（ファイルの `begin;`・`commit;` で1つのトランザクション）。エラーならそのファイルの変更は残らず、そこで止まる
+- 適用の後、期待と一致しなければ止まる。0014 の後は Data API の権限が本番と同じ 548 件か（`supabase/runbook/acl-expected.txt`）も確かめる
+- CLI の移行履歴（`supabase_migrations.schema_migrations`）は読むだけで書き換えない。`supabase db push` は使わない（SQL Editor で入れた 0001〜0007 が履歴に無いため、再実行の恐れがある）
+- 手元の PostgreSQL での確認：`supabase/tests/verify_db_test.sh`（`npm run test:db` に含まれる）。本物の Management API ではまだ実行していない
+
+準備（Claude Code のクラウド環境で実行する場合）
+1. 環境の設定（セッションのタイトルの環境メニュー → Edit）で、Network access を Custom にし、既定の一覧を残したまま **`api.supabase.com`** を Allowed domains に足す
+2. Supabase の管理画面 → Account → Access Tokens で、**有効期限を短く**したトークンを作る（このトークンはアカウント全体＝本番にも使えるので、作業が終わったら削除する）
+3. 同じ環境の設定で、環境変数 **`SUPABASE_ACCESS_TOKEN`** にトークンを入れる（チャットには貼らない）
+4. 新しいセッションを開き（環境変数は新しいセッションで読み込まれる）、`npm run verify-db -- --check` → `npm run verify-db -- --apply --to 0014 --confirm-ref cpfhsxbmzoyrlkynveqd`
+
 ### 1-3. 検証用のアカウントとデータ
 - `docs/SUPABASE-SETUP.md` のステップ3〜4 で、検証用の学校・管理者・クラス・生徒（架空の番号だけ）を作る
 - 生徒のアカウント（配信先）を1つ作る（`docs/WORKFLOW-SETUP.md`）。メールアドレスは検証用のもの

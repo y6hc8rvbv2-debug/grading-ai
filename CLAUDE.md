@@ -30,6 +30,8 @@
 - **順序（ユーザーの決定）：検証環境 → 本番は後回し**。`docs/DB-RUNBOOK.md` 第1部：本番とは別の Supabase プロジェクト（saiten-verify、東京、Automatically expose new tables はオフ）に 0001〜0014 を適用 →
   Vercel の Preview（Preview だけの環境変数）をそこへつなぐ → 見回り（`docs/TUTOR-SWEEP.md`）→ OpenAI の実接続（`docs/TUTOR-LIVE-CHECK.md`）→ 実機（`docs/TUTOR-DEVICE-CHECK.md`）。
   本番（第2部：バックアップ2種 → check.sql → 1ファイルずつ → check.sql）は第1部が終わり、ユーザーが決めてから。戻すときは drop せず、機能停止・Instant Rollback・新しい番号のファイルで
+- 検証用 DB（saiten-verify、ref `cpfhsxbmzoyrlkynveqd`）は 0001〜0007 を SQL Editor で適用済み（2026-10-06 ユーザー報告）。0008〜0014 は `npm run verify-db`（Management API・状態の指紋で前後を照合・db push は使わない。`docs/DB-RUNBOOK.md` 1-2b）か SQL Editor で。
+  このクラウド環境からは supabase.co / api.supabase.com がネットワーク方針で拒否され、DB の直結（IPv6・pooler）も届かない
 - 本物の OpenAI：`npm run tutor:live-check` は `GET /v1/models` の1回だけ（料金がかからないことは料金表で未確認なので「無料」と書かない）。`-- --paid`・Preview での会話・実機は**ユーザーの指示があってから**
 - Preview で誤登録の模擬テスト（1問・満点4点・採点済0枚）をごみ箱から削除する（ユーザー作業）
 - Preview で模範解答（20問・100点・5・5・1・3・1・3・2）から自動入力し、読み取り精度を確かめる
