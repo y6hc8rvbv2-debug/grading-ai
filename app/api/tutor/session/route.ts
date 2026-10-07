@@ -15,7 +15,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  const ctx = await requireStudent(req, { write: true });
+  const ctx = await requireStudent(req, { write: true, inApp: true });
   if (ctx instanceof Response) return ctx;
   const text = await req.text();
   if (text.length > 40000) return fail("要求が大きすぎます。", 400, "bad_request");

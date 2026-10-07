@@ -40,11 +40,13 @@ export async function GET() {
   const { error: e9 } = await supabase.from("mark_positions").select("id", { head: true, count: "exact" }).limit(1);
   // 0012：返却の版・受信箱とチャッピー先生（教職員にはキーの表は見えないので、設定の列で確かめる）
   const { error: e12 } = await supabase.from("schools").select("tutor_enabled").limit(1);
+  // 0015：「本人の ChatGPT で復習」の学校・クラスの設定
+  const { error: e15 } = await supabase.from("schools").select("review_copy_enabled").limit(1);
 
   return NextResponse.json({
     supabase: true,
     ai: aiConfig().enabled,
-    migrations: { "0004": !missing(e4), "0005": !missing(e5), "0006": !missing(e6), "0007": !missing(e7), "0008": !missing(e8), "0009": !missing(e9), "0012": !missing(e12) },
+    migrations: { "0004": !missing(e4), "0005": !missing(e5), "0006": !missing(e6), "0007": !missing(e7), "0008": !missing(e8), "0009": !missing(e9), "0012": !missing(e12), "0015": !missing(e15) },
     env: process.env.VERCEL_ENV ?? "local",
   });
 }

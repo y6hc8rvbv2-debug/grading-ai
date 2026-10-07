@@ -13,6 +13,8 @@ export type TutorStatus = {
   consent: null | { payer: string; send_answer: boolean; send_comment: boolean; save_transcript: boolean; share_with_teacher: boolean };
   credential: null | { payer: string; key_hint: string; model: string; status: string };
   canStoreKeys: boolean;
+  /** アプリ内の会話（A方式）を使う設定か（サーバーの TUTOR_INAPP=on）。false なら画面に出さない */
+  inapp?: boolean;
   /** 会話を確実に終わらせる準備（暗号鍵と見回り）がそろっているか */
   ready?: boolean;
   prices: Record<string, { text_in?: number; text_out?: number; audio_in?: number; audio_out?: number }> | null;

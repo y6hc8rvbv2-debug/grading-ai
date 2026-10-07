@@ -80,9 +80,12 @@ if grep -rq "$DUMMY_KEY" .next-e2e/static 2>/dev/null; then echo "✗ APIキー�
 mkdir -p tests/e2e/.out
 # アプリの環境変数（tests/e2e/tutor-sweep.mjs がアプリを再起動するときも同じものを使う）
 #   SUPABASE_SERVICE_ROLE_KEY・CRON_SECRET は見回り（/api/tutor/sweep）だけが使う。TUTOR_STALE_SECONDS は生存確認が途絶えたとみなす秒数（既定 90。テストは 45）
+#   TUTOR_INAPP=on：アプリ内の会話（A方式。いまの方針では使わない）を、休止中のコードの回帰確認のためにこのテストでだけ有効にする。
+#   B方式（本人の ChatGPT で復習）の確認は、A方式を無効にした状態で tests/e2e-lite（npm run test:e2e:lite）が行う
 export ANTHROPIC_API_KEY="$DUMMY_KEY" ANTHROPIC_BASE_URL="http://127.0.0.1:$MOCK_PORT" OPENAI_API_KEY="$DUMMY_KEY" \
   TUTOR_OPENAI_BASE_URL="http://127.0.0.1:$MOCK_OPENAI_PORT/v1" TUTOR_KEY_ENCRYPTION_KEY \
-  SUPABASE_SERVICE_ROLE_KEY="$SERVICE" CRON_SECRET TUTOR_STALE_SECONDS=45 E2E_PORT="$PORT"
+  SUPABASE_SERVICE_ROLE_KEY="$SERVICE" CRON_SECRET TUTOR_STALE_SECONDS=45 E2E_PORT="$PORT" \
+  TUTOR_INAPP=on
 node_modules/.bin/next start -p "$PORT" > tests/e2e/.out/app.log 2>&1 &
 APP=$!
 echo "$APP" > tests/e2e/.out/app.pid

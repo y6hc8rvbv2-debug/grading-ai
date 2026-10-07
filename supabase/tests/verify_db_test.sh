@@ -46,6 +46,10 @@ echo "✓ 0008〜0014 を番号順に適用し、各ファイルの前後の状�
 # 2. 2回目は何もしない（適用済みを再実行しない）
 out=$(run --apply --to 0014 --confirm-ref cpfhsxbmzoyrlkynveqd); echo "$out" | grep -q "適用するファイルはありません" || { echo "$out"; fail "2回目に何かを適用した"; }
 echo "✓ 2回目の実行は何もしない"
+# 2b. 0014 まで適用済みの DB（いまの検証用 saiten-verify と同じ）に、0015 だけを足せる
+out=$(run --apply --to 0015 --confirm-ref cpfhsxbmzoyrlkynveqd) || { echo "$out"; fail "0015 の適用に失敗"; }
+echo "$out" | grep -q "完了：0015" || { echo "$out"; fail "0015 だけを適用した表示が無い"; }
+echo "✓ 0014 まで適用済みの DB に、0015 だけを足し、前後の状態が期待と一致"
 # 3. 状態が期待と違う DB（0007 の後に余分な表がある）：何も適用せずに止まる
 fresh; apply_until 0007; "${PSQL[@]}" -c "create table public.extra_table (id int)" >/dev/null
 before=$(fp); out=$(run --apply --to 0014 --confirm-ref cpfhsxbmzoyrlkynveqd || true)

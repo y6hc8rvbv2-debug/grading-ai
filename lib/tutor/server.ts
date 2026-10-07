@@ -1,5 +1,7 @@
 // チャッピー先生の API で共通に使う確認（サーバー専用）。
 //   - 機能の停止スイッチ（環境変数 TUTOR_FEATURE=off）。既存の採点は止めない
+//   - アプリ内の会話（A方式：本人の API キーでの音声・文字の会話）は、環境変数 TUTOR_INAPP=on のときだけ。
+//     既定は無効（いまの方針は「本人の ChatGPT で復習」＝B方式だけ。B方式はブラウザだけで動き、この API を使わない）
 //   - 同じサイトからの要求か（CSRF 対策：Origin または Sec-Fetch-Site）
 //   - ログイン中の利用者が、配信先として登録された生徒か（生徒の ID はクライアントから受け取らない）
 //   - 応答はキャッシュさせない
@@ -9,7 +11,8 @@ import { createClient } from "@/lib/supabase/server";
 import { decryptKey } from "@/lib/tutor/crypto";
 import { hangupCallDetailed, looksLikeKey } from "@/lib/tutor/openai";
 
-export const featureOff = () => (process.env.TUTOR_FEATURE ?? "").toLowerCase() === "off";
+import { featureOff, inAppEnabled } from "@/lib/tutor/mode";
+export { featureOff, inAppEnabled };
 
 export function json(body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: { "cache-control": "no-store, private", "x-content-type-options": "nosniff" } });
@@ -37,9 +40,11 @@ export function secureTransport(req: Request) {
 export type StudentCtx = { db: Awaited<ReturnType<typeof createClient>>; userId: string; studentId: string };
 
 /** ログイン中の生徒。生徒でなければエラーの応答を返す */
-export async function requireStudent(req: Request, opts: { write?: boolean; evenIfOff?: boolean } = {}): Promise<StudentCtx | NextResponse> {
+export async function requireStudent(req: Request, opts: { write?: boolean; evenIfOff?: boolean; inApp?: boolean } = {}): Promise<StudentCtx | NextResponse> {
   // 停止中でも、会話を止める操作（生存確認・終了・同意の撤回・キーの削除）は受け付ける
   if (featureOff() && !opts.evenIfOff) return fail("チャッピー先生は現在停止しています。先生に確認してください。", 503, "feature_off");
+  // アプリ内の会話を始める・キーを登録する・同意する操作は、A方式を使う設定のときだけ
+  if (opts.inApp && !inAppEnabled()) return fail("アプリ内の AI との会話は使っていません。「ChatGPT で復習」を使ってください。", 403, "inapp_off");
   if (opts.write && !sameOrigin(req)) return fail("この画面からの操作ではありません。ページを開き直してください。", 403, "csrf");
   const db = await createClient();
   const { data: { user } } = await db.auth.getUser();

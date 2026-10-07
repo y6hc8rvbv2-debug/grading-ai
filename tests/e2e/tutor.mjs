@@ -306,7 +306,7 @@ ok(tutorItems1 === tutorItems2 && tutorItems0 !== "", "チャッピー先生で�
 await page.goto(BASE + "/history/" + rpSub.id); await settle(1500);
 await page.getByRole("button", { name: /^設問別採点/ }).click(); await settle(800);
 const tutorCard = page.locator("section", { hasText: "生徒への返却と復習" }).first();
-ok((await tutorCard.innerText()).includes("チャッピー先生 2 回") || (await tutorCard.innerText()).includes("チャッピー先生"), "先生は返却の版・復習の回数・時間を見られる（会話の中身は共有の同意が無いと見えない）");
+ok(/アプリ内の会話 \d+ 回/.test(await tutorCard.innerText()), "先生は返却の版・復習の回数・時間を見られる（会話の中身は共有の同意が無いと見えない）");
 await tutorCard.getByRole("button", { name: "理解確認済みにする" }).first().click(); await settle(800);
 await stuPage.reload(); await stuPage.waitForTimeout(800);
 await stuPage.locator('[data-testid="inbox"] li button').first().click();

@@ -1,16 +1,17 @@
 "use client";
-// チャッピー先生（生徒の音声復習）の教職員側の画面部品。
-//   - TutorAdminCard：設定画面。学校・クラスで有効にする、1回・1日の利用時間（管理者だけが変更）
+// 生徒の復習（返却した答案の間違えた問題）の、教職員側の画面部品。
+//   - ReviewCopyCard：設定画面。「本人の ChatGPT で復習」（B方式）を学校・クラスで有効にする（先生・管理者。既定は無効）
+//   - TutorAdminCard：設定画面。アプリ内の会話（A方式。チャッピー先生）の設定。サーバーで TUTOR_INAPP=on のときだけ表示
 //   - TestTutorFields：テストの設問の問題文（生徒の復習用）と、正答・解説を返却時に生徒へ見せるか
-//   - TutorReviewCard：答案詳細。返却の版・生徒の復習の状態・利用時間。共有に同意した振り返り・文字起こし。理解確認済みにする
-// AI の利用料は生徒本人（または保護者）が AI 提供元に払う。学校・管理者のキーは使わない。
+//   - TutorReviewCard：答案詳細。返却の版・生徒の復習の状態（自己申告／先生の確認）。理解確認済みにする
+// いまの方針は B方式だけ。アプリは AI を呼ばず、学校・管理者のキーも生徒のキーも使わない。
 import React, { useEffect, useState } from "react";
 import { FONT_UI } from "@/lib/ui/theme";
 import { useUI } from "@/components/ui-context";
 import { Badge, Btn, Card } from "@/components/ui";
 import {
-  loadTestTutorFields, loadTutorReview, loadTutorSettings, saveTestTutorFields, saveTutorSettings, setVerified,
-  type TutorReview, type TutorSettings,
+  loadReviewCopySettings, loadTestTutorFields, loadTutorReview, loadTutorSettings, saveReviewCopySettings, saveTestTutorFields, saveTutorSettings, setVerified,
+  type ReviewCopySettings, type TutorReview, type TutorSettings,
 } from "@/lib/db/tutor";
 import type { Submission, Test } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
@@ -37,19 +38,78 @@ function SweeperLine({ T }: { T: ReturnType<typeof useUI>["T"] }) {
 }
 
 const STATE: Record<string, string> = {
-  untouched: "未着手", reviewing: "復習中", self_understood: "理解できた（自己申告）", verified: "理解確認済み（先生）", ask_teacher: "先生に質問",
+  untouched: "未記録", reviewing: "復習中（自己申告）", self_understood: "理解できた（自己申告）", verified: "理解確認済み（先生）", ask_teacher: "先生に質問したい（自己申告）",
 };
 
-export function TutorAdminCard() {
-  const { T, ds, isAdmin, ws, toast } = useUI();
-  const [s, setS] = useState<TutorSettings | null>(null);
+/** アプリ内の会話（A方式）を使う設定か（サーバーの TUTOR_INAPP=on）。分からないあいだ・失敗したときは使わない扱い */
+function useInAppMode() {
+  const [inapp, setInapp] = useState(false);
+  useEffect(() => {
+    fetch("/api/tutor/mode", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((j) => setInapp(j?.inapp === true)).catch(() => setInapp(false));
+  }, []);
+  return inapp;
+}
+
+/** 「本人の ChatGPT で復習」（B方式）の設定。先生・管理者が学校とクラスで有効・無効にする（既定は無効） */
+export function ReviewCopyCard() {
+  const { T, ds, ws, toast, session } = useUI();
+  const [s, setS] = useState<ReviewCopySettings | null>(null);
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (ds.mode !== "supabase") return;
-    loadTutorSettings().then((v) => { if (v) setS(v); else setMissing(true); });
+    loadReviewCopySettings().then((v) => { if (v) setS(v); else setMissing(true); });
   }, [ds.mode]);
   if (ds.mode !== "supabase") return null;
+  const role = session?.profile?.role;
+  const canEdit = role === "admin" || role === "teacher";
+  return (
+    <Card title="生徒の復習：本人の ChatGPT で復習" sub="返却した答案の間違えた問題を、生徒が自分の ChatGPT に貼り付けて復習します">
+      <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.8, marginBottom: 10 }}>
+        生徒は、本人に返却された答案から間違えた問題を選び、送る内容（問題文・本人の解答・判定・先生のコメントと、ヒントから順に教える家庭教師への指示）を確かめてからコピーし、
+        自分の ChatGPT にログインして貼り付けます。正答と解説は、テストの設定で「返却時に生徒に見せる」にしたときだけ入ります。氏名・学校名・出席番号・答案画像は入りません。
+        <b>このアプリは AI を呼ばず、会話の内容や理解度も受け取りません</b>（復習の状態は生徒の自己申告。「理解確認済み」は先生が付けます）。
+        ChatGPT の利用条件（年齢・保護者の同意など）を確かめてから、使ってよいクラスだけ有効にしてください。
+      </div>
+      {missing && <div style={{ fontSize: 12.5, color: T.warn }}>まだ使えません。管理者が Supabase で 0015_review_copy.sql を実行してください。</div>}
+      {s && (
+        <div style={{ display: "grid", gap: 10, fontSize: 13 }} data-testid="review-copy-settings">
+          <label><input type="checkbox" disabled={!canEdit} checked={s.enabled} onChange={(e) => setS({ ...s, enabled: e.target.checked })} /> 学校で有効にする</label>
+          <div>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>使えるクラス</div>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              {ws.classes.map((c) => (
+                <label key={c.id}><input type="checkbox" disabled={!canEdit} checked={s.classIds.includes(c.id)}
+                  onChange={(e) => setS({ ...s, classIds: e.target.checked ? [...s.classIds, c.id] : s.classIds.filter((x) => x !== c.id) })} /> {c.label}</label>
+              ))}
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: T.textFaint }}>学校とクラスの両方で有効なときだけ、生徒の画面に「ChatGPT で復習」が出ます。アプリ内の AI との会話の設定とは別です。</div>
+          {canEdit ? (
+            <div><Btn variant="primary" disabled={busy} onClick={async () => {
+              setBusy(true);
+              try { await saveReviewCopySettings(s); toast("ChatGPT での復習の設定を保存しました"); } catch (e) { toast((e as Error).message, "ng"); }
+              setBusy(false);
+            }}>設定を保存</Btn></div>
+          ) : <div style={{ fontSize: 12, color: T.textSub }}>変更できるのは、この学校の先生・管理者です。</div>}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+export function TutorAdminCard() {
+  const { T, ds, isAdmin, ws, toast } = useUI();
+  const inapp = useInAppMode();
+  const [s, setS] = useState<TutorSettings | null>(null);
+  const [missing, setMissing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (ds.mode !== "supabase" || !inapp) return;
+    loadTutorSettings().then((v) => { if (v) setS(v); else setMissing(true); });
+  }, [ds.mode, inapp]);
+  // アプリ内の会話（A方式）を使わない設定では、キー・モデル・料金・時間の設定を出さない
+  if (ds.mode !== "supabase" || !inapp) return null;
   return (
     <Card title="チャッピー先生（生徒の音声復習）" sub="返却した答案の間違えた問題を、生徒が AI と復習します">
       <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.8, marginBottom: 10 }}>
@@ -100,9 +160,9 @@ export function TestTutorFields({ test }: { test: Test }) {
   if (ds.mode !== "supabase" || !v) return null;
   return (
     <details style={{ marginTop: 12, border: `1px solid ${T.line}`, borderRadius: 10, padding: 10 }}>
-      <summary style={{ font: `700 13px ${FONT_UI}`, color: T.text, cursor: "pointer" }}>チャッピー先生（生徒の復習）用の設定</summary>
+      <summary style={{ font: `700 13px ${FONT_UI}`, color: T.text, cursor: "pointer" }}>生徒の復習（ChatGPT で復習）用の設定</summary>
       <div style={{ fontSize: 12, color: T.textSub, lineHeight: 1.7, margin: "6px 0" }}>
-        ここで入力した問題文は、返却したときに生徒の画面に出て、生徒が同意すれば生徒本人の契約の AI に送られます。氏名などの個人情報は書かないでください。
+        ここで入力した問題文は、返却したときに生徒の画面に出て、生徒が確かめてコピーすれば、生徒本人の ChatGPT に貼り付けられます。氏名などの個人情報は書かないでください。
         変更は、次に返却（返し直し）したときから生徒に反映されます。
       </div>
       <label style={{ fontSize: 13 }}><input type="checkbox" checked={v.releaseModelAnswer} onChange={(e) => setV({ ...v, releaseModelAnswer: e.target.checked })} /> 返却時に、正答・解説（模範解答）を生徒に見せる</label>
@@ -117,7 +177,7 @@ export function TestTutorFields({ test }: { test: Test }) {
       </div>
       <Btn size="sm" variant="primary" disabled={busy} onClick={async () => {
         setBusy(true);
-        try { await saveTestTutorFields(test.id, v.releaseModelAnswer, v.prompts); toast("チャッピー先生用の設定を保存しました"); } catch (e) { toast((e as Error).message, "ng"); }
+        try { await saveTestTutorFields(test.id, v.releaseModelAnswer, v.prompts); toast("生徒の復習用の設定を保存しました"); } catch (e) { toast((e as Error).message, "ng"); }
         setBusy(false);
       }}>保存</Btn>
     </details>
@@ -126,6 +186,7 @@ export function TestTutorFields({ test }: { test: Test }) {
 
 export function TutorReviewCard({ sub }: { sub: Submission }) {
   const { T, ds, toast, session } = useUI();
+  const inapp = useInAppMode();
   const [r, setR] = useState<TutorReview | null>(null);
   const [done, setDone] = useState(false);
   const reload = () => loadTutorReview(sub.id).then((v) => { setR(v); setDone(true); });
@@ -134,11 +195,11 @@ export function TutorReviewCard({ sub }: { sub: Submission }) {
     loadTutorReview(sub.id).then((v) => { setR(v); setDone(true); });
   }, [ds.mode, sub.id]);
   if (ds.mode !== "supabase" || !done) return null;
-  if (!r) return <Card title="生徒への返却と復習"><div style={{ fontSize: 12.5, color: T.textSub }}>まだ生徒に返却していません。確認後に「返却」すると、生徒の受信箱に届きます（チャッピー先生で復習できます）。</div></Card>;
+  if (!r) return <Card title="生徒への返却と復習"><div style={{ fontSize: 12.5, color: T.textSub }}>まだ生徒に返却していません。確認後に「返却」すると、生徒の受信箱に届きます（「ChatGPT で復習」を有効にしていれば、生徒が間違えた問題を復習できます）。</div></Card>;
   const by = new Map(r.progress.map((p) => [p.qno, p]));
   return (
-    <Card title="生徒への返却と復習" sub={`返却 第${r.version}版・チャッピー先生 ${r.sessions.count} 回・${Math.round(r.sessions.seconds / 60)} 分`}>
-      <div style={{ fontSize: 12, color: T.textSub, marginBottom: 8 }}>復習しても、点数・赤ペン・コメントは変わりません。「理解確認済み」は先生だけが付けられます（生徒は自己申告まで）。</div>
+    <Card title="生徒への返却と復習" sub={inapp || r.sessions.count > 0 ? `返却 第${r.version}版・アプリ内の会話 ${r.sessions.count} 回・${Math.round(r.sessions.seconds / 60)} 分` : `返却 第${r.version}版`}>
+      <div style={{ fontSize: 12, color: T.textSub, marginBottom: 8 }}>復習の状態は生徒の自己申告です（ChatGPT での会話の内容や理解度は、アプリには届きません）。復習しても、点数・赤ペン・コメントは変わりません。「理解確認済み」は先生だけが付けられます。</div>
       <div style={{ display: "grid", gap: 6 }}>
         {sub.result.items.filter((i) => i.mark !== "○").map((i) => {
           const p = by.get(i.qno);

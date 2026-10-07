@@ -7,6 +7,7 @@ import { layoutMarks } from "@/lib/redpen/layout";
 import { RedPenOverlay } from "@/components/RedPenOverlay";
 import { TutorPanel, type EphemeralKey, type TutorStatus } from "@/components/tutor/TutorPanel";
 import { TutorSettings } from "@/components/tutor/TutorSettings";
+import { ReviewCopyPanel } from "@/components/tutor/ReviewCopyPanel";
 import type { ReleasedItem as TutorItem } from "@/lib/tutor/prompt";
 import type { Submission, Test, Item, MarkPos } from "@/lib/types";
 type ReleasedItem = Item & { big: number };
@@ -23,8 +24,11 @@ type Release = {
     positions: MarkPos[];
     showModelAnswer?: boolean;
     subject?: string;
+    grade?: number | null;
   };
 };
+/** 「本人の ChatGPT で復習」（B方式）を、自分の学校・クラスで使えるか（0015 の review_copy_status）。missing は 0015 が未適用 */
+type CopyStatus = { student: boolean; enabled: boolean; missing?: boolean };
 type InboxRow = { id: string; release_id: string; version: number; kind: string; created_at: string; read_at: string | null };
 function ReleasedAnswer({ r, tutor }: { r: Release; tutor?: React.ReactNode }) {
   const [pages, setPages] = useState<
@@ -130,24 +134,42 @@ function ReleasedAnswer({ r, tutor }: { r: Release; tutor?: React.ReactNode }) {
     </article>
   );
 }
-/** 返却されたテスト1件：原本の赤ペンと、間違えた問題ごとの「チャッピー先生に聞く」 */
-function ReleaseDetail({ r, status, ephemeral, openSettings }: { r: Release; status: TutorStatus | null; ephemeral: EphemeralKey; openSettings: () => void }) {
-  const [open, setOpen] = useState<number | null>(null);
+/** 返却されたテスト1件：原本の赤ペンと、間違えた問題ごとの「ChatGPT で復習」（アプリ内の会話を使う設定のときだけ「チャッピー先生に聞く」も） */
+function ReleaseDetail({ r, copy, status, ephemeral, openSettings }: { r: Release; copy: CopyStatus | null; status: TutorStatus | null; ephemeral: EphemeralKey; openSettings: () => void }) {
+  const [open, setOpen] = useState<{ qno: number; mode: "copy" | "inapp" } | null>(null);
   const wrong = r.payload.items.filter((i) => i.mark !== "○");
+  const inapp = status?.inapp === true;
+  const meta = { grade: r.payload.grade ?? null, subject: r.payload.subject ?? "", showModelAnswer: r.payload.showModelAnswer === true };
+  const toggle = (qno: number, mode: "copy" | "inapp") => setOpen(open?.qno === qno && open.mode === mode ? null : { qno, mode });
+  const pill = (active: boolean): React.CSSProperties => ({ padding: "8px 12px", minHeight: 40, borderRadius: 10, border: "1px solid #1E3A5F", background: active ? "#1E3A5F" : "#fff", color: active ? "#fff" : "#1E3A5F", fontSize: 14 });
   return (
     <ReleasedAnswer r={r} tutor={
       <section>
         <h3>間違えた問題（{wrong.length}問）</h3>
         {!wrong.length && <p>全問正解です。</p>}
+        {wrong.length > 0 && copy && !copy.enabled && (
+          <p data-testid="review-copy-off" style={{ fontSize: 13.5, color: "#555" }}>ChatGPT での復習は、先生が学校・クラスで有効にすると使えます。</p>
+        )}
         {wrong.map((i) => (
           <div key={i.qno} data-testid="wrong-question" style={{ borderTop: "1px solid #e1e4e8", padding: "10px 0" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <b>{i.label}</b><span>{i.mark}</span><span>{i.earned}／{i.points}点</span>
-              <button style={{ padding: "8px 12px", minHeight: 40, borderRadius: 10, border: "1px solid #1E3A5F", background: open === i.qno ? "#1E3A5F" : "#fff", color: open === i.qno ? "#fff" : "#1E3A5F", fontSize: 14 }}
-                onClick={() => setOpen(open === i.qno ? null : i.qno)}>{open === i.qno ? "閉じる" : "チャッピー先生に聞く"}</button>
+              {copy?.enabled && (
+                <button style={pill(open?.qno === i.qno && open.mode === "copy")} onClick={() => toggle(i.qno, "copy")}>
+                  {open?.qno === i.qno && open.mode === "copy" ? "閉じる" : "ChatGPT で復習"}
+                </button>
+              )}
+              {inapp && (
+                <button style={pill(open?.qno === i.qno && open.mode === "inapp")} onClick={() => toggle(i.qno, "inapp")}>
+                  {open?.qno === i.qno && open.mode === "inapp" ? "閉じる" : "チャッピー先生に聞く"}
+                </button>
+              )}
             </div>
             {i.comment && <p style={{ margin: "4px 0", color: "#B3261E" }}>{i.comment}</p>}
-            {open === i.qno && (
+            {open?.qno === i.qno && open.mode === "copy" && copy?.enabled && (
+              <ReviewCopyPanel releaseId={r.id} item={i} meta={meta} />
+            )}
+            {open?.qno === i.qno && open.mode === "inapp" && inapp && (
               <TutorPanel releaseId={r.id} item={i as TutorItem} showModelAnswer={!!r.payload.showModelAnswer}
                 status={status} ephemeral={ephemeral} onOpenSettings={openSettings} />
             )}
@@ -172,10 +194,15 @@ export default function StudentPage() {
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<"list" | "settings" | string>("list");
   const [status, setStatus] = useState<TutorStatus | null>(null);
+  const [copy, setCopy] = useState<CopyStatus | null>(null);
   // 保存しないキー：この画面を閉じるまでメモリにだけ置く（ブラウザの保存領域には置かない）
   const [ephemeral, setEphemeral] = useState<EphemeralKey>(null);
 
+  // B方式：DB の設定だけで決まる（サーバーの環境変数・API キー・見回りに依存しない）。
+  // A方式（アプリ内の会話）：サーバーが使う設定のときだけ画面に出す（status.inapp）
   const loadStatus = async () => {
+    const { data, error } = await createClient().rpc("review_copy_status");
+    setCopy(error ? { student: false, enabled: false, missing: true } : (data as CopyStatus));
     const res = await fetch("/api/tutor/status", { cache: "no-store" }).catch(() => null);
     setStatus(res && res.ok ? await res.json() : null);
   };
@@ -250,6 +277,7 @@ export default function StudentPage() {
     setRows([]);
     setInbox([]);
     setStatus(null);
+    setCopy(null);
   };
   const openRelease = async (r: Release) => {
     setView(r.id);
@@ -319,9 +347,9 @@ export default function StudentPage() {
             <button style={tab(view === "list" || !!current)} onClick={() => setView("list")}>
               受信箱{inbox.some((x) => !x.read_at) ? `（新着 ${inbox.filter((x) => !x.read_at).length}）` : ""}
             </button>
-            {status?.student && <button style={tab(view === "settings")} onClick={() => setView("settings")}>チャッピー先生の設定</button>}
+            {status?.student && status.inapp === true && <button style={tab(view === "settings")} onClick={() => setView("settings")}>チャッピー先生の設定</button>}
           </nav>
-          {view === "settings" && (
+          {view === "settings" && status?.inapp === true && (
             <TutorSettings status={status} reload={loadStatus} ephemeral={ephemeral} setEphemeral={setEphemeral} />
           )}
           {view === "list" && (
@@ -356,7 +384,7 @@ export default function StudentPage() {
           {current && (
             <>
               <button onClick={() => setView("list")}>← 受信箱に戻る</button>
-              <ReleaseDetail key={current.id} r={current} status={status} ephemeral={ephemeral} openSettings={() => setView("settings")} />
+              <ReleaseDetail key={current.id} r={current} copy={copy} status={status} ephemeral={ephemeral} openSettings={() => setView("settings")} />
             </>
           )}
         </>

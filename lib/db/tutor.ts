@@ -87,7 +87,30 @@ export async function setVerified(review: TutorReview, studentSchool: { schoolId
         school_id: studentSchool.schoolId, student_id: studentSchool.studentId, release_id: review.releaseId, qno,
         state: "verified", source: "teacher", updated_at: new Date().toISOString(),
       }, { onConflict: "release_id,qno" })
-    : await sb.from("tutor_progress").update({ state: "reviewing", source: "self", updated_at: new Date().toISOString() })
-        .eq("release_id", review.releaseId).eq("qno", qno);
+    // 取り消しは行を消す（「未記録」に戻す）。生徒の自己申告に見せかけない
+    : await sb.from("tutor_progress").delete().eq("release_id", review.releaseId).eq("qno", qno).eq("source", "teacher");
   if (error) throw new Error("復習の状態を保存できませんでした。");
+}
+
+/** 「本人の ChatGPT で復習」（B方式。0015）：学校で有効か・使えるクラス。0015 を実行する前の DB では null */
+export type ReviewCopySettings = { enabled: boolean; classIds: string[] };
+
+export async function loadReviewCopySettings(): Promise<ReviewCopySettings | null> {
+  const sb = createClient();
+  const [{ data: school, error }, { data: classes, error: e2 }] = await Promise.all([
+    sb.from("schools").select("review_copy_enabled").maybeSingle(),
+    sb.from("classes").select("id, review_copy_enabled"),
+  ]);
+  if (error || e2 || !school) return null;
+  return { enabled: !!school.review_copy_enabled, classIds: (classes ?? []).filter((c) => c.review_copy_enabled).map((c) => c.id) };
+}
+
+export async function saveReviewCopySettings(s: ReviewCopySettings) {
+  const { error } = await createClient().rpc("set_review_copy_settings", { p_enabled: s.enabled, p_class_ids: s.classIds });
+  if (error) {
+    if (/set_review_copy_settings/.test(error.message) || error.code === "PGRST202") {
+      throw new Error("ChatGPT での復習の設定がまだ使えません。管理者が Supabase で 0015_review_copy.sql を実行してください。");
+    }
+    throw new Error(error.code === "42501" ? "この設定を変えられるのは、この学校の先生・管理者だけです。" : "設定を保存できませんでした。時間をおいてお試しください。");
+  }
 }

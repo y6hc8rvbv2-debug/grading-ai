@@ -9,6 +9,7 @@
     "lint": "next lint",
     "test:db": "bash supabase/tests/run.sh",
     "test:e2e": "bash tests/e2e/run.sh",
+    "test:e2e:lite": "bash tests/e2e-lite/run.sh",
     "test:unit": "node --conditions=react-server --import tsx --test tests/unit/*.test.ts",
     "compare:models": "node --conditions=react-server --import tsx scripts/model-compare/run.ts",
     "test:db:memory": "node tests/db/pglite.mjs",

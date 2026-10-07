@@ -16,7 +16,7 @@ async function body(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const ctx = await requireStudent(req, { write: true });
+  const ctx = await requireStudent(req, { write: true, inApp: true });
   if (ctx instanceof Response) return ctx;
   if (!secureTransport(req)) return fail("キーは HTTPS の画面からだけ登録できます。", 400, "insecure");
   const b = await body(req);
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
 
 /** 使うモデルを選ぶ（保存したキーのとき） */
 export async function PATCH(req: Request) {
-  const ctx = await requireStudent(req, { write: true });
+  const ctx = await requireStudent(req, { write: true, inApp: true });
   if (ctx instanceof Response) return ctx;
   const b = await body(req);
   const model = typeof b?.model === "string" ? b.model.trim().slice(0, 100) : "";

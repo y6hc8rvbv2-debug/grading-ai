@@ -1,6 +1,6 @@
 // チャッピー先生：使えるか・同意・登録済みのキー（末尾4文字だけ）・今日の利用時間
 import { canStoreKeys } from "@/lib/tutor/crypto";
-import { json, requireStudent } from "@/lib/tutor/server";
+import { inAppEnabled, json, requireStudent } from "@/lib/tutor/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +17,8 @@ export async function GET(req: Request) {
   ]);
   return json({
     ...(status ?? {}),
+    // アプリ内の会話（A方式）を使う設定か。false なら画面に出さない（キーの登録・モデル・料金も出さない）
+    inapp: inAppEnabled(),
     consent: consent && !consent.revoked_at ? consent : null,
     credential: cred && cred.status === "active" ? cred : null,
     canStoreKeys: canStoreKeys(),

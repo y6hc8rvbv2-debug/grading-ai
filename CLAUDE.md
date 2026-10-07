@@ -16,7 +16,9 @@
   デモモードはプロトタイプと同じデモデータで全機能を試せるが、何も保存しない（画面上部に「デモモード（保存されません）」と出る）。
 - 採点AI: サーバーの `ANTHROPIC_API_KEY` があれば、「新規採点」は画像を保存して続けて AI 採点する。
   保存済み（AI採点待ち）の答案も「採点中」画面・答案詳細から採点できる。キーが無ければ画像の保存だけ。
-- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004〜0014 はまだ**（0005 はモデル比較試験、0006 は採点方式と AI採点の記録、0009 は赤ペンの位置、0010・0011 は返却、0012 は返却の版・受信箱とチャッピー先生、0013 はチャッピー先生の見回り、0014 は明示的な GRANT）。
+- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004〜0015 はまだ**（0005 はモデル比較試験、0006 は採点方式と AI採点の記録、0009 は赤ペンの位置、0010・0011 は返却、0012 は返却の版・受信箱とチャッピー先生、0013 はチャッピー先生の見回り、0014 は明示的な GRANT、0015 は「本人の ChatGPT で復習」の設定）。
+- **生徒の復習は「本人の ChatGPT で復習」（B方式）だけを使う方針**（2026-10-07 ユーザーの決定。`docs/REVIEW-CHATGPT.md`）。
+  アプリ内の AI との会話（A方式「チャッピー先生」）は `TUTOR_INAPP=on` のときだけ動き、既定は画面に出さずサーバーでも断る（コード・DB の表・追加済みの環境変数は消していない）。
   Vercel の Preview で、ログイン・名簿表示・答案画像の保存まで動作確認済み（ユーザー報告）。
 - **本物の Claude API での採点はまだ一度も実行していない**（開発環境にキーが無い）。
   E2E はリクエストの形を検査する代役サーバー（`tests/e2e/mock-anthropic.mjs`）で検証している。
@@ -28,9 +30,11 @@
 ### 1. 本番で AI 採点を動かす ← ユーザー作業待ち
 
 - **順序（ユーザーの決定）：検証環境 → 本番は後回し**。`docs/DB-RUNBOOK.md` 第1部：本番とは別の Supabase プロジェクト（saiten-verify、東京、Automatically expose new tables はオフ）に 0001〜0014 を適用 →
-  Vercel の Preview（Preview だけの環境変数）をそこへつなぐ → 見回り（`docs/TUTOR-SWEEP.md`）→ OpenAI の実接続（`docs/TUTOR-LIVE-CHECK.md`）→ 実機（`docs/TUTOR-DEVICE-CHECK.md`）。
+  Vercel の Preview（Preview だけの環境変数。B方式は NEXT_PUBLIC_SUPABASE_URL・ANON_KEY だけ）をそこへつなぐ → B方式の確認と実機（`docs/REVIEW-CHATGPT.md`）。
+  見回り・OpenAI の実接続・A方式の実機（`docs/TUTOR-SWEEP.md`・`TUTOR-LIVE-CHECK.md`・`TUTOR-DEVICE-CHECK.md`）は A方式を使うと決めた場合だけ。
   本番（第2部：バックアップ2種 → check.sql → 1ファイルずつ → check.sql）は第1部が終わり、ユーザーが決めてから。戻すときは drop せず、機能停止・Instant Rollback・新しい番号のファイルで
-- 検証用 DB（saiten-verify、ref `cpfhsxbmzoyrlkynveqd`）は 0001〜0007 を SQL Editor で適用済み（2026-10-06 ユーザー報告）。0008〜0014 は `npm run verify-db`（Management API・状態の指紋で前後を照合・db push は使わない。`docs/DB-RUNBOOK.md` 1-2b）か SQL Editor で。
+- 検証用 DB（saiten-verify、ref `cpfhsxbmzoyrlkynveqd`）は 0001〜0014 を SQL Editor で適用済み・確認済み（2026-10-06 ユーザー報告。0014 の後の権限 548 件・md5 一致）。
+  **0015 はまだ**（SQL Editor か `npm run verify-db -- --apply --to 0015 --confirm-ref cpfhsxbmzoyrlkynveqd`）。次は検証用アカウントの準備（`docs/DB-RUNBOOK.md` 1-3。手1「学校を作る」まで案内済み）
   このクラウド環境からは supabase.co / api.supabase.com がネットワーク方針で拒否され、DB の直結（IPv6・pooler）も届かない
 - 本物の OpenAI：`npm run tutor:live-check` は `GET /v1/models` の1回だけ（料金がかからないことは料金表で未確認なので「無料」と書かない）。`-- --paid`・Preview での会話・実機は**ユーザーの指示があってから**
 - Preview で誤登録の模擬テスト（1問・満点4点・採点済0枚）をごみ箱から削除する（ユーザー作業）
@@ -54,10 +58,13 @@
   root 環境では `su postgres -c "bash supabase/tests/run.sh"`
 - `npm run test:e2e` … Supabase CLI のローカル環境（Docker）にアプリを繋ぎ、ブラウザで教員の作業を通しで検証（`tests/e2e/`）。
   採点AIは代役サーバー（本物の API は呼ばない）。ECR に届かない環境では `SUPABASE_INTERNAL_IMAGE_REGISTRY=docker.io` を付ける
-- `npm run test:db` には `supabase/tests/workflow_test.sql`（返却）・`tutor_test.sql`（受信箱・チャッピー先生）・`tutor_sweep_test.sql`（見回り）・`upgrade_test.sh`（0001〜0003＋既存データの DB に 0004〜0014 を足す：途中失敗で何も残らない・2回目はエラー・件数と合計が変わらない）も含まれる
-- `npm run test:e2e` は `tests/e2e/tutor.mjs`（返却・チャッピー先生）→ `scenario.mjs`（教員の作業）→ `fullflow.mjs`（答案登録→採点→教師確認→返却→復習を画面で1本に）→ `tutor-sweep.mjs`（ブラウザが来なくても見回りが通話を切る。アプリを再起動するので最後）の順。
+- `npm run test:db` には `supabase/tests/workflow_test.sql`（返却）・`tutor_test.sql`（受信箱・チャッピー先生）・`tutor_sweep_test.sql`（見回り）・`review_copy_test.sql`（B方式の設定・他の生徒の拒否・自己申告の区別）・`upgrade_test.sh`（0001〜0003＋既存データの DB に 0004〜0015 を足す：途中失敗で何も残らない・2回目はエラー・件数と合計が変わらない）も含まれる
+- `npm run test:e2e` は A方式の休止中のコードの回帰確認のため `TUTOR_INAPP=on` で動かす。`tests/e2e/tutor.mjs`（返却・チャッピー先生）→ `scenario.mjs`（教員の作業）→ `fullflow.mjs`（答案登録→採点→教師確認→返却→復習を画面で1本に）→ `tutor-sweep.mjs`（ブラウザが来なくても見回りが通話を切る。アプリを再起動するので最後）の順。
   ローカルの Supabase に pg_cron（5秒ごと）→ pg_net → `http://host.docker.internal:3200/api/tutor/sweep` を登録して、本番と同じ経路で動かす
-- `npm run test:unit` … チャッピー先生（管理者のキーを使わない・依存関係の分離・暗号化）・赤ペンの置き場所（罫線の検出・表への割り当て。実物の写真は REDPEN_REAL_DIR があるときだけ）・採点AIの出力の後処理（`normalizeResult`）・3モデル併用の振り分けと料金の目安・比較試験・HEIC 変換（`tests/fixtures/sample.heic` は合成画像）の単体テスト
+- `npm run test:e2e:lite` … Docker なしの画面テスト（`tests/e2e-lite/`）。専用の PostgreSQL（一時フォルダ・ポート 5433）＋全マイグレーション＋本物の PostgREST（RLS は本物）＋ログイン・画像だけの代役（`gateway.mjs`）。
+  B方式をスマホ幅で通しで確認（既定は非表示→先生が有効化→確認してコピー→ChatGPT を開く→未公開の正答の除外→他の生徒の拒否→AI の宛先の罠に要求0件）。
+  アプリは暗号鍵・CRON_SECRET・service_role・API キーなしで起動。Playwright 同梱のブラウザが無い環境では `CHROMIUM_PATH=/opt/pw-browsers/chromium`
+- `npm run test:unit` … B方式のコピー内容と依存の分離（`review-copy.test.ts`）・チャッピー先生（管理者のキーを使わない・依存関係の分離・暗号化）・赤ペンの置き場所（罫線の検出・表への割り当て。実物の写真は REDPEN_REAL_DIR があるときだけ）・採点AIの出力の後処理（`normalizeResult`）・3モデル併用の振り分けと料金の目安・比較試験・HEIC 変換（`tests/fixtures/sample.heic` は合成画像）の単体テスト
 
 検証中に見つけて直したもの（0001/0002 は未適用だったので直接修正、0003 で追加修正）:
 - サインアップ時の `user_metadata` で任意校の管理者になれた → `app_metadata` から読むよう変更
@@ -134,7 +141,16 @@
   - 今後の採点では、指示文で bbox を「解答欄の枠全体（作図は描いた範囲）」と指定している（以前は「解答が書かれている場所」）
 - 「清書版」（`RedPenSheet`）は固定レイアウトのまま（原本の座標には使わない）
 
-- **チャッピー先生（0012。生徒の音声復習）**：返却した答案の間違えた問題を、生徒が AI と音声・文字で復習する。詳細は `docs/VOICE-TUTOR.md`
+- **本人の ChatGPT で復習（B方式。0015。いまの方針）**：詳細は `docs/REVIEW-CHATGPT.md`
+  - 生徒：返却された答案 → 間違えた問題 →「ChatGPT で復習」→ 送る内容を確認してチェック → コピー →「ChatGPT を開く」（`https://chatgpt.com/`）→ 本人がログイン・貼り付け・音声開始
+  - コピー内容はブラウザだけで作る（`lib/tutor/review-copy.ts`、画面 `components/tutor/ReviewCopyPanel.tsx`）。問題文・本人の解答・判定・先生のコメント・ヒントから順に教える家庭教師の指示。
+    正答・解説は返却内容の `showModelAnswer` が真のときだけ（DB の `result_releases_enrich` も未公開なら空にする）。氏名・学校名・クラス・出席番号・テスト名・画像は読まない
+  - AI・`/api`・環境変数に依存しない（`tests/unit/review-copy.test.ts` で静的に検査）。会話の開始・内容・理解度は受け取らない。復習の状態は自己申告（`source=external_self`）、「理解確認済み」は先生だけ（取り消しは行を消す）
+  - 設定：`schools.review_copy_enabled`・`classes.review_copy_enabled`（既定 false）。`set_review_copy_settings()`（先生・管理者、監査ログ）、生徒は `review_copy_status()`。
+    A方式の `tutor_enabled` とは別（B を変えても A は変わらない。A を無効にしても B は止まらない）。設定画面の「生徒の復習：本人の ChatGPT で復習」
+- **チャッピー先生（0012。A方式。いまは使わない：`TUTOR_INAPP=on` のときだけ）**：返却した答案の間違えた問題を、生徒が AI と音声・文字で復習する。詳細は `docs/VOICE-TUTOR.md`
+  - `TUTOR_INAPP` が無いと：生徒の「チャッピー先生に聞く」・キー/同意の設定タブ、先生の設定カード（時間・見回り）、答案詳細の会話の回数を出さない。
+    `/api/tutor/session`・`key`（登録・モデル）・`consent`（同意）・`context` は 403 `inapp_off`（終了・撤回・キーの削除・学習データの削除は受け付ける）
   - **AI 利用料は生徒本人または保護者が OpenAI と直接契約して支払う（BYOK）。管理者のキーへは、失敗・再試行を含めどの経路でもフォールバックしない**
   - 接続：ブラウザは SDP を作るだけ。**サーバーが本人のキーで `POST /v1/realtime/calls`**（multipart）を呼んで通話を作り、`tutor_sessions.call_id` に記録。
     上限時間・学校/クラスの停止・同意の撤回・キーの削除・`TUTOR_FEATURE=off`・終了で、サーバーが `/v1/realtime/calls/{id}/hangup` を呼ぶ（生存確認は20秒ごと、DB の `heartbeat_tutor_session` が理由を返す）。
@@ -235,7 +251,7 @@ Next.js 14 (App Router, TypeScript)
       └── supabase/{client,server}.ts
 
 Supabase
-  ├── PostgreSQL             17テーブル + RLS + トリガー + 分析ビュー + AI採点の保存関数（supabase/migrations/0001〜0009）
+  ├── PostgreSQL             31テーブル + RLS + トリガー + 分析ビュー + AI採点の保存関数（supabase/migrations/0001〜0015）
   ├── Storage                answer-sheets（非公開・署名付きURLのみ）。パスは {school_id}/{test_id}/{submission_id}/{page}.{ext}
   └── Auth                   教職員のみ。所属校と役割は app_metadata で付与（一般サインアップでは所属が付かない）
 ```
@@ -340,7 +356,9 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
    見回りはローカルの Supabase の pg_cron → アプリでのみ検証（クラウドの pg_cron → pg_net → Vercel の経路、Preview の保護の越え方は検証環境で確かめる）。
    OpenAI が通話を作ってから通話ID を DB に記録するまでのごく短い間にサーバーが落ちると、その通話は切れない（残る隙間）
 19. **（解決）既存の通しテスト `tests/e2e/scenario.mjs`** — テスト登録（正答の入力・すべて確認）・新規採点の4手順・3モデル併用（上のモデルには問題の設問だけ）・コメント欄の絞り込みに合わせて直した
-2. **0004〜0014 が本番 Supabase に未適用**（「次にやること」1。先に検証環境で行う）
+2. **0004〜0015 が本番 Supabase に未適用**（「次にやること」1。先に検証環境で行う。検証環境は 0014 まで適用済み）
+20. **B方式（本人の ChatGPT で復習）は Docker なしの画面テストでのみ検証** — 本物の Supabase（クラウド）・Vercel の Preview・実機（iPhone/iPad Safari・Android Chrome でのコピーと ChatGPT アプリへの受け渡し）は未確認。
+   ChatGPT の利用条件（年齢・保護者の同意）も未確認。先生のコメントに名前を書くとコピー内容に入る（画面で「送る前に消す」と案内）。Docker の E2E（`npm run test:e2e`）は今回の変更後に実行できていない（containerd が起動しない環境）
 16. **模範解答からの自動入力は代役 API でのみ検証** — 本物の模範解答での読み取り精度（特に配点表・作図・PDF の bbox）は Preview で確かめる。PDF の資料は該当箇所の枠を表示できない（ページを開くだけ）。作図の模範図は採点AIには送っていない（採点条件の文章だけ）
 15. **3モデル併用は代役 API でのみ検証** — 本物の Haiku / Sonnet での読み取り精度・振り分けの割合・費用は未確認。正答との照合（`normAnswer`）は表記ゆれで誤検知しうる（誤検知は上のモデル・要確認に回るので、精度側に倒れる）
 14. **モデル比較試験は未実行** — Preview で管理者が実行する準備まで完了（代役サーバーでの E2E のみ検証済み）

@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  const ctx = await requireStudent(req, { write: true });
+  const ctx = await requireStudent(req, { write: true, inApp: true });
   if (ctx instanceof Response) return ctx;
   const b = await req.json().catch(() => null) as { releaseId?: unknown; qno?: unknown } | null;
   const releaseId = String(b?.releaseId ?? ""), qno = Number(b?.qno);

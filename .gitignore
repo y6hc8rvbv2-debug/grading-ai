@@ -1,6 +1,7 @@
 node_modules/
 .next/
 .next-e2e/
+.next-lite/
 out/
 build/
 .env*.local
