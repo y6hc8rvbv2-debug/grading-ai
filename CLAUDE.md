@@ -9,6 +9,13 @@
 
 ## 現在地
 
+### 2026-10-09：料金・決済・採点枠・夜間予約（検証ブランチ）
+
+`codex/subscription-plans` / PR #2 に承認済みの個人・塾・学校料金、Stripe Checkout / Webhook、採点枠の原子的確保、個人・塾のOpus追加55円の支払いと失敗時返金、夜間キューを追加。新規マイグレーションは0016_billing_night.sql。導入と停止は docs/BILLING-NIGHT.md。
+既存データとschools.planを上書きしない。課金のDB設定とBILLING_ENABLEDは既定で停止、NIGHT_GRADING_ENABLEDも既定で停止。Stripe・Supabase・定期処理の設定とsandbox実接続確認が済むまでは本番利用完了と扱わない。
+採点の新しい端末既定は3モデル併用。課金中の採点はサーバーservice_roleで行い、入口で認証・教職員の所属校を確認する（通常の旧経路は従来のRLS）。service_roleをブラウザへ出さない。
+夜間処理は日本時間22時〜翌6時の通常API呼出し。Batch割引は未実装。予約は採点履歴へ保存し、返却は教師確認後の既存操作。自動通知・自動返却はしない。
+
 **Next.js 14 への移植・Supabase 接続・採点AI（Claude Vision）の実装が完了。**（2026-09-28）
 
 - 全15画面 + ログイン画面が `app/` 配下で動く。データは Supabase に保存され、再読み込みしても残る。

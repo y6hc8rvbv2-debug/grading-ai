@@ -231,6 +231,7 @@ export type AiStatus = {
 
 /** 採点AIの結果の要約（詳細は答案を読み直して得る） */
 export type AiGradeSummary = {
+  queued?: boolean; dueAt?: string;
   model: string; total: number; needReview: number; blank: boolean;
   mode?: GradingMode; finalStage?: GradingStage | null; stages?: GradingStage[]; costUsd?: number;
 };

@@ -37,7 +37,11 @@ export function currentPlanLabel(plan?: string) {
   // 旧契約を新しい料金・上限へ自動で置き換えない。
   if (plan === "school") return "学校プラン（既存契約）";
   if (plan === "board") return "教育委員会プラン（既存契約）";
-  const personal = PERSONAL_TIERS.find(p => p.id === plan);
-  if (personal) return `個人・塾${personal.name}`;
-  return SCHOOL_PLANS.find(p => p.id === plan)?.name ?? (plan === "personal" ? "個人・塾プラン" : "契約内容をご確認ください");
+  const base = plan.replace(/-night$/, "");
+  const suffix = plan.endsWith("-night") ? "（夜間）" : "";
+  const personal = PERSONAL_TIERS.find(p => p.id === base);
+  if (personal) return `個人・塾${personal.name}${suffix}`;
+  const school = SCHOOL_PLANS.find(p => p.id === base);
+  if (school) return `${school.name}${suffix}`;
+  return (plan === "personal" ? "個人・塾プラン" : "契約内容をご確認ください");
 }
