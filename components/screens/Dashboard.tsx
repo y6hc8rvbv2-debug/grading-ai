@@ -1,10 +1,11 @@
 "use client";
 // ダッシュボード。docs/prototype-v3.jsx から移植。
 import React, { useEffect, useState } from "react";
+import SubscriptionPlans from "@/components/SubscriptionPlans";
 import { FONT_UI, FONT_MONO, FONT_HAND } from "@/lib/ui/theme";
 import { download, pct } from "@/lib/util";
 import { useUI, type View } from "@/components/ui-context";
-import { Badge, Bar, Btn, Card, Field, Input, Modal, Section, Stat, grid, inputStyle } from "@/components/ui";
+import { Badge, Btn, Card, Field, Input, Modal, Section, Stat, grid, inputStyle } from "@/components/ui";
 
 const FX_BASE = [
   { pair: "USD/JPY", v: 152.4 }, { pair: "EUR/JPY", v: 166.8 }, { pair: "GBP/JPY", v: 195.2 },
@@ -15,12 +16,6 @@ const FX_BASE = [
 const SUPPORT_EMAIL = "support@example-grading.jp";
 const mailtoLink = (subject: string, body: string) =>
   `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-
-const PLANS = [
-  { id: "free", name: "Free", price: "¥0", per: "/月", limit: 30, quota: "月 30 枚まで", feats: ["自動採点", "赤ペン画像", "CSV出力"], cta: "利用中" },
-  { id: "school", name: "School", price: "¥9,800", per: "/月・1校", limit: 5000, quota: "月 5,000 枚", feats: ["クラス・生徒管理", "弱点分析レポート", "印刷機スキャン連携", "SSO"], cta: "アップグレード" },
-  { id: "board", name: "Board", price: "個別見積", per: "", limit: 0, quota: "無制限", feats: ["教育委員会向け統合管理", "監査ログ", "オンプレ／専用リージョン", "SLA 99.9%"], cta: "問い合わせる" },
-];
 
 const QA = [
   { q: "生徒の実名は保存されますか？", a: "保存しません。答案から氏名を読み取れた場合でも、表示・保存は出席番号／受験番号／イニシャル／匿名IDのいずれかに置き換えます。実名フィールドはデータベースに存在しません。" },
@@ -60,11 +55,6 @@ export default function Dashboard() {
     ? Math.round(graded.reduce((a, s) => a + pct(s.result.total, testById(s.testId)!.maxScore), 0) / graded.length * 10) / 10
     : 0;
   const savedMin = Math.round(done.length * 4.5);
-
-  // 今月の採点枚数（プランの上限と比べる）
-  const plan = PLANS.find((p) => p.id === (session.school?.plan ?? "free")) ?? PLANS[0];
-  const month = new Date().toISOString().slice(0, 7);
-  const usedThisMonth = subs.filter((s) => (s.uploadedAt || "").slice(0, 7) === month).length;
 
   return (
     <div>
@@ -169,45 +159,9 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      <div style={{ ...grid(320, 14), marginBottom: 18 }}>
-        {/* サブスクリプション */}
-        <Card title="サブスクリプション" sub={`現在のプラン：${plan.name}`}>
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: T.textSub, marginBottom: 5 }}>
-              <span>今月の採点枚数</span>
-              <span style={{ fontWeight: 700, color: T.text }}>
-                {usedThisMonth.toLocaleString()} / {plan.limit ? `${plan.limit.toLocaleString()} 枚` : "無制限"}
-              </span>
-            </div>
-            <Bar value={usedThisMonth} max={plan.limit || Math.max(1, usedThisMonth)} tone="accent" />
-          </div>
-          <div style={{ display: "grid", gap: 8 }}>
-            {PLANS.map((p) => (
-              <div key={p.id} style={{
-                border: `1px solid ${p.id === plan.id ? T.accent : T.line}`, borderRadius: 11, padding: 11,
-                background: p.id === plan.id ? T.accentSoft : T.panelAlt,
-              }}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 700, color: T.text }}>{p.name}</span>
-                  <span style={{ font: `700 16px ${FONT_MONO}`, color: T.accent }}>{p.price}</span>
-                  <span style={{ fontSize: 11, color: T.textSub }}>{p.per}</span>
-                  <span style={{ flex: 1 }} />
-                  <Btn size="sm" variant={p.id === plan.id ? "soft" : "default"}
-                    onClick={() => {
-                      if (p.id === plan.id) { toast("現在ご利用中のプランです"); return; }
-                      window.location.href = mailtoLink(`${p.name} プランの申し込み`, `学校名：${session.school?.name ?? ""}\n学校コード：${session.school?.code ?? ""}\n希望プラン：${p.name}\n`);
-                    }}>
-                    {p.id === plan.id ? "利用中" : p.id === "board" ? "問い合わせる" : "申し込む"}
-                  </Btn>
-                </div>
-                <div style={{ fontSize: 11.5, color: T.textSub, marginTop: 5 }}>{p.quota}・{p.feats.join(" / ")}</div>
-              </div>
-            ))}
-          </div>
-          {/* PROD-API: Stripe Billing Portal へのリダイレクト */}
-          <div style={{ fontSize: 11, color: T.textFaint, marginTop: 10 }}>請求書・支払い方法の変更はカスタマーポータルから行えます。</div>
-        </Card>
+      <div style={{ marginBottom: 18 }}><SubscriptionPlans /></div>
 
+      <div style={{ marginBottom: 18 }}>
         {/* 為替レート */}
         <Card title="リアルタイム為替レート" sub="海外校向け請求額の目安（3秒ごとに更新・参考値）">
           <div style={grid(140, 8)}>
