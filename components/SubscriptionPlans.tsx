@@ -50,9 +50,10 @@ export default function SubscriptionPlans() {
         <h3 style={{ marginTop: 0 }}>{p.name}</h3>
         <p style={{ fontSize: 13, color: T.textSub, lineHeight: 1.7 }}>{p.description}</p>
         <div style={{ fontSize: 28, fontWeight: 700 }}>{yen(p.price)}<span style={{ fontSize: 13 }}> /月（税別）</span></div>
+        <p style={{ fontWeight: 700 }}>月{p.limit.toLocaleString("ja-JP")}枚まで</p>
         {night(p.nightPrice)}
         {featureList(SCHOOL_FEATURES)}
-        <p style={{ fontSize: 12, color: T.textSub }}>月間採点枚数・教職員数・プラン間の利用条件は確認中です。</p>
+        <p style={{ fontSize: 12, color: T.textSub }}>採算試算は1枚＝生徒1人分（2ページ・20問）で計算しています。ページ・設問が多い答案の扱い、教職員数は別途設定します。枚数制限の自動適用は準備中です。</p>
         <Btn onClick={() => setSelected(p.name)}>契約前の確認事項</Btn>
       </article>)}
     </div>
