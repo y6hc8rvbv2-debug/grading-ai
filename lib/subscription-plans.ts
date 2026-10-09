@@ -1,10 +1,10 @@
 // ユーザー承認済みの料金・月間上限に基づく表示用カタログ。契約・請求・利用制限とは連動しない。
 // 個人・塾は税込月額。基本は3モデル併用、Opus単独は選択時の追加料金。
 export const PERSONAL_TIERS = [
-  { id: "personal-mini", name: "ミニ", sheets: 100, price: 1650 },
-  { id: "personal-light", name: "ライト", sheets: 200, price: 2750 },
-  { id: "personal-standard", name: "スタンダード", sheets: 300, price: 3850 },
-  { id: "personal-pro", name: "プロ", sheets: 1000, price: 12100 },
+  { id: "personal-mini", name: "ミニ", sheets: 100, price: 1650, nightPrice: 1320 },
+  { id: "personal-light", name: "ライト", sheets: 200, price: 2750, nightPrice: 2200 },
+  { id: "personal-standard", name: "スタンダード", sheets: 300, price: 3850, nightPrice: 3080 },
+  { id: "personal-pro", name: "プロ", sheets: 1000, price: 12100, nightPrice: 9680 },
 ] as const;
 export const PERSONAL_OPUS_SURCHARGE = 55;
 
