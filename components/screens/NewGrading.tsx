@@ -288,7 +288,7 @@ export default function NewGrading() {
         });
         if (r.ok) {
           const where = r.summary.mode === "cascade" && r.summary.finalStage ? `・${STAGE_LABEL[r.summary.finalStage]}で確定` : "";
-          addLog("AI採点", r.summary.blank
+          addLog("AI採点", r.summary.queued ? `${name}：採点予約を受け付けました。結果は採点履歴で確認してください` : r.summary.blank
             ? `${name}：全問白紙でした`
             : `${name}：${r.summary.total}点${where}${r.summary.needReview ? `（要確認 ${r.summary.needReview} 問）` : ""}`);
         } else {

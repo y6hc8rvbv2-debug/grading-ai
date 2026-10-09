@@ -112,7 +112,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [favs, setFavs] = usePref<string[]>("favs", ["new", "review"]);
   const [anonMode, setAnonMode] = usePref<boolean>("anonMode", false);
   // 採点方式（Opus単独 / 3モデル併用）。端末ごとに覚えておき、新規採点・採点中・答案詳細で使う
-  const [gradingMode, setGradingMode] = usePref<GradingMode>("gradingMode", "opus");
+  const [gradingMode, setGradingMode] = usePref<GradingMode>("gradingMode", "cascade");
   const [display, setDisplay] = usePref<DisplayMode>("display", "class");
   const [answerLang, setAnswerLang] = usePref<string>("answerLang", "ja");
   const [studentLang, setStudentLang] = usePref<string>("studentLang", "ja");
@@ -257,7 +257,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       const r = await ds.aiGrade(submissionId, { mode: opts.mode ?? gradingMode, onProgress: opts.onProgress });
       await refreshSub(submissionId);
       if (!opts.silent) {
-        toast(r.blank ? "全問白紙の答案でした。模範解答タブを確認してください"
+        toast(r.queued ? "採点を予約しました。画面を閉じても処理は続きます。結果は採点履歴で確認してください" : r.blank ? "全問白紙の答案でした。模範解答タブを確認してください"
           : r.needReview ? `AI採点が終わりました（${r.total}点・${modeNote(r)}）。要確認が ${r.needReview} 問あります`
           : `AI採点が終わりました（${r.total}点・${modeNote(r)}）`);
       }

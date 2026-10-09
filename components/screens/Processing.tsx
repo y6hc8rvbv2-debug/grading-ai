@@ -33,8 +33,8 @@ export default function Processing() {
       setBulk({ done: i + 1, total: targets.length });
     }
     setBulk(null);
-    if (ng) toast(`${targets.length - ng} 枚を採点し、${ng} 枚は採点できませんでした。1枚ずつ「AIで採点する」を押すと理由が表示されます`, "ng");
-    else toast(`${targets.length} 枚のAI採点が終わりました。返却前に結果を確認してください`);
+    if (ng) toast(`${targets.length - ng} 枚の採点・予約を受け付け、${ng} 枚は採点できませんでした。1枚ずつ「AIで採点する」を押すと理由が表示されます`, "ng");
+    else toast(`${targets.length} 枚の採点・予約を受け付けました。採点履歴で状態を確認してください`);
   };
 
   if (!list.length) {
