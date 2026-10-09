@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useUI } from "@/components/ui-context";
 import { Badge, Btn, Card, Modal } from "@/components/ui";
-import { currentPlanLabel, PERSONAL_FEATURES, PERSONAL_TIERS, SCHOOL_FEATURES, SCHOOL_PLANS } from "@/lib/subscription-plans";
+import { currentPlanLabel, PERSONAL_FEATURES, PERSONAL_OPUS_SURCHARGE, PERSONAL_TIERS, SCHOOL_FEATURES, SCHOOL_PLANS } from "@/lib/subscription-plans";
 
 const yen = (amount: number) => `¥${amount.toLocaleString("ja-JP")}`;
 
@@ -36,13 +36,20 @@ export default function SubscriptionPlans() {
         <Badge tone="accent">おすすめ</Badge>
         <h3>個人・塾プラン</h3>
         <p style={{ color: T.textSub, fontSize: 13 }}>塾講師・個人教師向け。赤ペンで確認し、生徒本人への返却と復習につなげます。</p>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <caption style={{ textAlign: "left", marginBottom: 8, fontWeight: 700 }}>月間枚数と月額料金</caption>
-          <thead><tr><th scope="col" style={{ textAlign: "left" }}>枚数</th><th scope="col" style={{ textAlign: "right" }}>通常</th><th scope="col" style={{ textAlign: "right" }}>深夜・準備中</th></tr></thead>
-          <tbody>{PERSONAL_TIERS.map(t => <tr key={t.sheets} style={{ borderTop: `1px solid ${T.line}` }}><th scope="row" style={{ textAlign: "left", padding: "10px 0" }}>{t.sheets.toLocaleString("ja-JP")}枚</th><td style={{ textAlign: "right" }}>{yen(t.price)}</td><td style={{ textAlign: "right" }}>{yen(t.nightPrice)}</td></tr>)}</tbody>
-        </table>
-        <p style={{ fontSize: 13 }}>1,001枚以上：¥8 /枚（適用範囲は契約時に確認）</p>
-        <p style={{ fontSize: 12, color: T.textSub }}>個人・塾プランの税区分は確認中です。深夜採点は20%OFFの予定で、提供準備中です。</p>
+        <p style={{ fontWeight: 700 }}>基本料金に3モデル併用の採点を含みます</p>
+        <p style={{ color: T.textSub, fontSize: 12, lineHeight: 1.7 }}>Haikuで採点し、追加確認が必要な答案をSonnet・Opusで点検します。毎回3モデルすべてを使う方式ではありません。</p>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <caption style={{ textAlign: "left", marginBottom: 8, fontWeight: 700 }}>月間答案数と月額料金（税込）</caption>
+            <thead><tr><th scope="col" style={{ textAlign: "left" }}>コース</th><th scope="col" style={{ textAlign: "right" }}>月間上限</th><th scope="col" style={{ textAlign: "right" }}>月額</th></tr></thead>
+            <tbody>{PERSONAL_TIERS.map(t => <tr key={t.id} style={{ borderTop: `1px solid ${T.line}` }}><th scope="row" style={{ textAlign: "left", padding: "10px 0" }}>{t.name}</th><td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{t.sheets.toLocaleString("ja-JP")}答案</td><td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{yen(t.price)}</td></tr>)}</tbody>
+          </table>
+        </div>
+        <div style={{ background: T.accentSoft, borderRadius: 10, padding: 12, marginTop: 12 }}>
+          <div style={{ fontWeight: 700 }}>Opus単独：1答案につき追加{yen(PERSONAL_OPUS_SURCHARGE)}（税込）</div>
+          <p style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 0 }}>Opus単独を選んだ答案は月間枠を1答案分使います。併用で採点した後にOpusで採点し直す場合も、追加1回につき{yen(PERSONAL_OPUS_SURCHARGE)}です。併用中の自動点検には、この追加料金はかかりません。</p>
+        </div>
+        <p style={{ fontSize: 12, color: T.textSub }}>1答案＝生徒1人分（2ページ・20問）を料金試算の基準にしています。ページ・設問が多い答案、上限超過の扱いは契約前に確認してください。月間上限・追加料金の自動適用は準備中です。</p>
         {featureList(PERSONAL_FEATURES)}
         <Btn onClick={() => setSelected("個人・塾プラン")}>契約前の確認事項</Btn>
       </article>
@@ -50,7 +57,8 @@ export default function SubscriptionPlans() {
         <h3 style={{ marginTop: 0 }}>{p.name}</h3>
         <p style={{ fontSize: 13, color: T.textSub, lineHeight: 1.7 }}>{p.description}</p>
         <div style={{ fontSize: 28, fontWeight: 700 }}>{yen(p.price)}<span style={{ fontSize: 13 }}> /月（税別）</span></div>
-        <p style={{ fontWeight: 700 }}>月{p.limit.toLocaleString("ja-JP")}枚まで</p>
+        <p style={{ fontWeight: 700 }}>月{p.limit.toLocaleString("ja-JP")}答案まで</p>
+        <p style={{ fontSize: 13 }}>Opus単独の採点を基本料金に含みます。3モデル併用も選べます。</p>
         {night(p.nightPrice)}
         {featureList(SCHOOL_FEATURES)}
         <p style={{ fontSize: 12, color: T.textSub }}>採算試算は1枚＝生徒1人分（2ページ・20問）で計算しています。ページ・設問が多い答案の扱い、教職員数は別途設定します。枚数制限の自動適用は準備中です。</p>
@@ -60,7 +68,7 @@ export default function SubscriptionPlans() {
     <p style={{ fontSize: 13, color: T.textSub, lineHeight: 1.8, marginBottom: 0 }}>「チャッピー先生」との復習は、生徒本人のChatGPTで行います。ChatGPTの契約・利用料はこのアプリの料金に含まれず、生徒本人または保護者が負担します。会話をアプリ内で開始する機能は含みません。</p>
     <Modal open={selected !== null} onClose={() => setSelected(null)} title={`${selected ?? ""}：契約前の確認事項`} footer={<Btn onClick={() => setSelected(null)}>閉じる</Btn>}>
       <p>この画面から契約・支払い・プラン変更は行われません。</p>
-      <ul style={{ paddingInlineStart: 20, lineHeight: 1.9 }}><li>採点枚数の数え方（複数ページ・再採点の扱い）</li><li>月間上限・超過料金・教職員数と利用できる機能</li><li>税区分・開始日・解約条件</li><li>深夜採点プランの提供開始時期</li></ul>
+      <ul style={{ paddingInlineStart: 20, lineHeight: 1.9 }}><li>採点枚数の数え方（複数ページ・再採点の扱い）</li><li>月間上限・超過料金・Opus単独の追加料金・教職員数と利用できる機能</li><li>税区分・開始日・解約条件</li><li>深夜採点プランの提供開始時期</li></ul>
       <p>既存の契約と保存済みの答案は、この料金表示で変更されません。</p>
     </Modal>
   </Card>;
