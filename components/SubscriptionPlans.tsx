@@ -15,7 +15,7 @@ export default function SubscriptionPlans() {
   const panel = { border: `1px solid ${T.line}`, borderRadius: 14, padding: 18, background: T.panelAlt, minWidth: 0 };
   const featureList = (features: string[]) => <ul style={{ paddingInlineStart: 20, color: T.textSub, fontSize: 13, lineHeight: 1.9 }}>{features.map(f => <li key={f}>{f}</li>)}</ul>;
   const night = (price: number) => <div style={{ background: T.accentSoft, borderRadius: 10, padding: 12, marginTop: 12 }}>
-    <div style={{ fontWeight: 700 }}>深夜採点・翌日結果プラン：20%OFF</div>
+    <div style={{ fontWeight: 700 }}>夜間採点・翌日結果プラン：20%OFF</div>
     <div style={{ fontSize: 20, fontWeight: 700, marginTop: 5 }}>{yen(price)}<span style={{ fontSize: 12 }}> /月（税別）</span></div>
     <div style={{ fontSize: 12, color: T.textSub, marginTop: 5 }}>提供準備中。現在は予約採点・翌日結果の提供を行っていません。</div>
   </div>;
@@ -41,13 +41,14 @@ export default function SubscriptionPlans() {
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <caption style={{ textAlign: "left", marginBottom: 8, fontWeight: 700 }}>月間答案数と月額料金（税込）</caption>
-            <thead><tr><th scope="col" style={{ textAlign: "left" }}>コース</th><th scope="col" style={{ textAlign: "right" }}>月間上限</th><th scope="col" style={{ textAlign: "right" }}>月額</th></tr></thead>
-            <tbody>{PERSONAL_TIERS.map(t => <tr key={t.id} style={{ borderTop: `1px solid ${T.line}` }}><th scope="row" style={{ textAlign: "left", padding: "10px 0" }}>{t.name}</th><td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{t.sheets.toLocaleString("ja-JP")}答案</td><td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{yen(t.price)}</td></tr>)}</tbody>
+            <thead><tr><th scope="col" style={{ textAlign: "left" }}>コース</th><th scope="col" style={{ textAlign: "right" }}>月間上限</th><th scope="col" style={{ textAlign: "right" }}>通常</th><th scope="col" style={{ textAlign: "right" }}>夜間</th></tr></thead>
+            <tbody>{PERSONAL_TIERS.map(t => <tr key={t.id} style={{ borderTop: `1px solid ${T.line}` }}><th scope="row" style={{ textAlign: "left", padding: "10px 0" }}>{t.name}</th><td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{t.sheets.toLocaleString("ja-JP")}答案</td><td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{yen(t.price)}</td><td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{yen(t.nightPrice)}</td></tr>)}</tbody>
           </table>
         </div>
+        <p style={{ fontSize: 12, color: T.textSub, lineHeight: 1.7 }}>夜間採点・翌日結果プランは月額20%OFF、月間上限は通常と同じです。提供準備中で、現在は予約採点・翌日結果の提供を行っていません。</p>
         <div style={{ background: T.accentSoft, borderRadius: 10, padding: 12, marginTop: 12 }}>
           <div style={{ fontWeight: 700 }}>Opus単独：1答案につき追加{yen(PERSONAL_OPUS_SURCHARGE)}（税込）</div>
-          <p style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 0 }}>Opus単独を選んだ答案は月間枠を1答案分使います。併用で採点した後にOpusで採点し直す場合も、追加1回につき{yen(PERSONAL_OPUS_SURCHARGE)}です。併用中の自動点検には、この追加料金はかかりません。</p>
+          <p style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 0 }}>Opus単独を選んだ答案は月間枠を1答案分使います。併用で採点した後にOpusで採点し直す場合も、追加1回につき{yen(PERSONAL_OPUS_SURCHARGE)}です。併用中の自動点検には、この追加料金はかかりません。夜間プランでも追加料金は同額です。</p>
         </div>
         <p style={{ fontSize: 12, color: T.textSub }}>1答案＝生徒1人分（2ページ・20問）を料金試算の基準にしています。ページ・設問が多い答案、上限超過の扱いは契約前に確認してください。月間上限・追加料金の自動適用は準備中です。</p>
         {featureList(PERSONAL_FEATURES)}
@@ -68,7 +69,7 @@ export default function SubscriptionPlans() {
     <p style={{ fontSize: 13, color: T.textSub, lineHeight: 1.8, marginBottom: 0 }}>「チャッピー先生」との復習は、生徒本人のChatGPTで行います。ChatGPTの契約・利用料はこのアプリの料金に含まれず、生徒本人または保護者が負担します。会話をアプリ内で開始する機能は含みません。</p>
     <Modal open={selected !== null} onClose={() => setSelected(null)} title={`${selected ?? ""}：契約前の確認事項`} footer={<Btn onClick={() => setSelected(null)}>閉じる</Btn>}>
       <p>この画面から契約・支払い・プラン変更は行われません。</p>
-      <ul style={{ paddingInlineStart: 20, lineHeight: 1.9 }}><li>採点枚数の数え方（複数ページ・再採点の扱い）</li><li>月間上限・超過料金・Opus単独の追加料金・教職員数と利用できる機能</li><li>税区分・開始日・解約条件</li><li>深夜採点プランの提供開始時期</li></ul>
+      <ul style={{ paddingInlineStart: 20, lineHeight: 1.9 }}><li>採点枚数の数え方（複数ページ・再採点の扱い）</li><li>月間上限・超過料金・Opus単独の追加料金・教職員数と利用できる機能</li><li>税区分・開始日・解約条件</li><li>夜間採点プランの提供開始時期</li></ul>
       <p>既存の契約と保存済みの答案は、この料金表示で変更されません。</p>
     </Modal>
   </Card>;
