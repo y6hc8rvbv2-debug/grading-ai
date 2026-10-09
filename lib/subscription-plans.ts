@@ -1,10 +1,12 @@
-// ユーザー提供の料金画像に基づく表示用カタログ。契約・請求・利用制限とは連動しない。
+// ユーザー承認済みの料金・月間上限に基づく表示用カタログ。契約・請求・利用制限とは連動しない。
+// 個人・塾は税込月額。基本は3モデル併用、Opus単独は選択時の追加料金。
 export const PERSONAL_TIERS = [
-  { sheets: 100, price: 1000, nightPrice: 800 },
-  { sheets: 200, price: 2000, nightPrice: 1600 },
-  { sheets: 300, price: 3000, nightPrice: 2400 },
-  { sheets: 1000, price: 10000, nightPrice: 8000 },
+  { id: "personal-mini", name: "ミニ", sheets: 100, price: 1650 },
+  { id: "personal-light", name: "ライト", sheets: 200, price: 2750 },
+  { id: "personal-standard", name: "スタンダード", sheets: 300, price: 3850 },
+  { id: "personal-pro", name: "プロ", sheets: 1000, price: 12100 },
 ] as const;
+export const PERSONAL_OPUS_SURCHARGE = 55;
 
 export const SCHOOL_PLANS = [
   { id: "school-mini", name: "学校ミニ", price: 40000, limit: 800, nightPrice: 32000, description: "小規模校・試験導入向け。クラスの答案をまとめて管理し、先生の確認後に生徒本人へ返却できます。" },
@@ -35,5 +37,7 @@ export function currentPlanLabel(plan?: string) {
   // 旧契約を新しい料金・上限へ自動で置き換えない。
   if (plan === "school") return "学校プラン（既存契約）";
   if (plan === "board") return "教育委員会プラン（既存契約）";
+  const personal = PERSONAL_TIERS.find(p => p.id === plan);
+  if (personal) return `個人・塾${personal.name}`;
   return SCHOOL_PLANS.find(p => p.id === plan)?.name ?? (plan === "personal" ? "個人・塾プラン" : "契約内容をご確認ください");
 }
