@@ -10,8 +10,8 @@ export const SCHOOL_PLANS = [
   { id: "school-mini", name: "学校ミニ", price: 40000, nightPrice: 32000, description: "小規模校・試験導入向け。クラスの答案をまとめて管理し、先生の確認後に生徒本人へ返却できます。" },
   { id: "school-light", name: "学校ライト", price: 120000, nightPrice: 96000, description: "中規模校向け。複数のクラス・教職員で、採点結果の確認と成績管理を進められます。" },
   { id: "school-standard", name: "学校スタンダード", price: 200000, nightPrice: 160000, description: "学校単位の導入向け。採点・本人限定の返却・単元別の弱点分析を日々の指導に活用できます。" },
-  // 最後の画像では名称が見切れているため、正式名を推測しない。
-  { id: "school-upper", name: "学校上位プラン（名称確認中）", price: 300000, nightPrice: 240000, description: "大規模な運用を検討する学校向け。採点枚数・教職員数・運用条件は契約時に確認します。" },
+  // 30万円プランの正式名称はユーザー確認済み。
+  { id: "school-upper", name: "学校プロ", price: 300000, nightPrice: 240000, description: "大規模な運用を検討する学校向け。採点枚数・教職員数・運用条件は契約時に確認します。" },
 ] as const;
 
 export const PERSONAL_FEATURES = [
