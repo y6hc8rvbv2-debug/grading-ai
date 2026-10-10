@@ -6,6 +6,7 @@ import { FONT_UI, FONT_HAND } from "@/lib/ui/theme";
 import { fmtDate, mulberry32, seedOf } from "@/lib/util";
 import { useUI } from "@/components/ui-context";
 import type { Mark, Submission, Test } from "@/lib/types";
+import { APP_NAME } from "@/lib/app-info";
 
 /* ---------------------------------------------------------------------------
  * 8. 赤ペン採点画像（清書版・固定レイアウト）
@@ -164,7 +165,7 @@ export function RedPenSheet({ test, sub, page = 0, showMarks = true, showComment
 
       <line x1="34" y1={H - 46} x2={W - 34} y2={H - 46} stroke="#C9C0AC" />
       <text x="34" y={H - 26} style={{ font: `10.5px ${FONT_UI}` }} fill="#9AA2AD">
-        テスト採点 ／ 生徒実名は保存されません ／ ページ {page + 1} / {Math.ceil(sub.result.items.length / perPage)}
+        {APP_NAME} ／ 生徒実名は保存されません ／ ページ {page + 1} / {Math.ceil(sub.result.items.length / perPage)}
       </text>
       {showMarks && (
         <text x={W - 34} y={H - 26} textAnchor="end" style={{ font: `600 10.5px ${FONT_UI}` }} fill={SHU}>

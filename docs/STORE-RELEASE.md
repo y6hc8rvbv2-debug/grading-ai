@@ -9,30 +9,27 @@
 
 | 項目 | 値 |
 |---|---|
-| アプリ名 | テスト採点 |
-| アプリID（Bundle ID・パッケージ名） | `jp.tesutosaiten.app`（**最初のアップロードの後は変えられない**） |
+| アプリ名 | テスト採点ver5 |
+| アプリID（Bundle ID・パッケージ名） | `jp.testgrade.app`（ご指定の「jp.Test Grade.app」は空白を含み、iOS・Android とも使えないため、この形にした。**最初のアップロードの後は変えられない**） |
 | 版 | 1.0（ビルド番号 1） |
-| 提供者 | 個人（開発者アカウントの名義） |
+| 提供者 | School-app1（個人の開発者アカウントで公開する場合、App Store の「販売元」には登録した氏名が出る） |
+| 問い合わせ先 | daikan12321@gmail.com（プライバシーポリシー・サポートのページ・ストアに公開される） |
+| 本番の URL | https://saiten.school-app1.com |
 | カテゴリ | 教育（Education） |
 | 価格・課金 | 無料・アプリ内課金なし・広告なし |
 | 対応 | iPhone・iPad（iOS 15 以上）、Android 7.0 以上（targetSdk 36） |
 | 利用者 | 先生（学校の管理者が作るアカウント）と生徒（小学生を含む。13歳未満は保護者の同意。「ChatGPT で復習」は13歳以上のクラスだけ） |
 
-## 1. あなたが入れる値（3つ。ここだけ）
+## 1. 提供者名・問い合わせ先・本番の URL
 
-| 環境変数 | 内容 | 例 |
-|---|---|---|
-| `NEXT_PUBLIC_APP_PROVIDER` | 提供者名。**開発者アカウント（Apple・Google）の名義と同じ** | 山田 太郎 |
-| `NEXT_PUBLIC_SUPPORT_EMAIL` | 問い合わせ用のメールアドレス（ストアのサポート欄と同じ） | support@example.jp |
-| `NEXT_PUBLIC_APP_URL` | 本番の URL（独自ドメイン。https:// から、末尾の / なし） | https://saiten.example.jp |
+上の3つの値は `lib/app-info.ts`（と `capacitor.config.ts` の URL）に入れてあり、環境変数を設定しなくても使われます。
+別の値で試すときだけ、環境変数 `NEXT_PUBLIC_APP_PROVIDER`・`NEXT_PUBLIC_SUPPORT_EMAIL`・`NEXT_PUBLIC_APP_URL` で上書きできます。
 
-- Vercel → Settings → Environment Variables で **Production** に設定し、再デプロイ
-- 手元のパソコンでアプリを作るときも同じ値を使う（下の 4.）
-- 確かめ方：`npm run store:check`（3つとも ✓ になる）。本番に出したあとは `STORE_CHECK_ONLINE=1 npm run store:check` で公開ページが開けるかも確かめる
+- 確かめ方：`npm run store:check`。本番に出したあとは `STORE_CHECK_ONLINE=1 npm run store:check` で公開ページが開けるかも確かめる
 
 ## 2. 本番の準備（ストアの審査の前に）
 
-1. **独自ドメイン**を取り、Vercel の Production に割り当てる（Vercel → Settings → Domains）
+1. **独自ドメイン** `saiten.school-app1.com` を Vercel の Production に割り当てる（Vercel → Settings → Domains。`school-app1.com` の DNS に、Vercel が示す CNAME などを登録）
 2. **本番の DB**：`docs/DB-RUNBOOK.md` 第2部で 0004〜0016 を適用（バックアップ → check.sql → 1ファイルずつ → check.sql）。
    0016 はアカウントの削除と保存期間の削除に必要
 3. **Vercel の Production の環境変数**（値はチャット・Git に書かない）
@@ -43,10 +40,9 @@
    | `ANTHROPIC_API_KEY` | AI 採点 |
    | `SUPABASE_SERVICE_ROLE_KEY` | **アカウントの削除**と保存期間の削除だけに使う（`NEXT_PUBLIC_` を付けない） |
    | `CRON_SECRET` | 保存期間の削除（毎日1回。`vercel.json`）。32文字以上の乱数 |
-   | 1. の3つ | 提供者名・問い合わせ先・本番の URL |
 
    `TUTOR_INAPP` は設定しない（アプリ内の AI との会話は使わない）
-4. **Supabase の Auth**：Authentication → URL Configuration の Site URL を本番の URL に、Redirect URLs に `https://（本番）/auth/callback` を入れる。
+4. **Supabase の Auth**：Authentication → URL Configuration の Site URL を本番の URL に、Redirect URLs に `https://saiten.school-app1.com/auth/callback` を入れる。
    生徒が自分でアカウントを作るので、「Allow new users to sign up」は**オンのまま**（一般の登録者は学校に所属しないので、先生の画面は使えない）
 5. 設定画面の「準備状況」がすべて「済」になることを確かめる（0016・アカウントの削除・保存期間の削除・公開の情報を含む）
 
@@ -65,13 +61,12 @@
 
 ```bash
 npm ci
-export NEXT_PUBLIC_APP_URL=https://saiten.example.jp     # 1. の本番の URL
-npm run mobile:sync                                      # ios/・android/ に設定を反映（URL が無いと止まる）
+npm run mobile:sync                                      # ios/・android/ に設定を反映（本番の URL は capacitor.config.ts に入っている）
 ```
 
 **iOS**
 1. `npm run mobile:open:ios`（Xcode が開く）
-2. App → Signing & Capabilities で Team（Apple Developer Program の名義）を選ぶ。Bundle Identifier は `jp.tesutosaiten.app`
+2. App → Signing & Capabilities で Team（Apple Developer Program の名義）を選ぶ。Bundle Identifier は `jp.testgrade.app`
 3. 実機で起動し、起動画面 → 先生でログイン → 「カメラで撮影」でカメラの許可の文が出る → 生徒でログイン、を確かめる
 4. Product → Archive → Distribute App → App Store Connect にアップロード
 
@@ -87,10 +82,10 @@ npm run mobile:sync                                      # ios/・android/ に�
 
 | 項目 | 入力 |
 |---|---|
-| 名前・サブタイトル | テスト採点／答案の写真から採点の下書きと赤ペン |
+| 名前・サブタイトル | テスト採点ver5／答案の写真から採点の下書きと赤ペン |
 | カテゴリ | 教育（サブ：仕事効率化） |
-| プライバシーポリシーの URL | `https://（本番）/privacy` |
-| サポートの URL | `https://（本番）/support` |
+| プライバシーポリシーの URL | `https://saiten.school-app1.com/privacy` |
+| サポートの URL | `https://saiten.school-app1.com/support` |
 | 年齢区分 | 質問に答える（暴力・ギャンブル・成人向けの内容なし。アプリ内に Web ブラウザは無い。外部のサイトは「ChatGPT を開く」で端末のブラウザが開く）。キッズカテゴリには入れない（先生の業務用アプリで、生徒の利用は学校の管理の下） |
 | 輸出コンプライアンス | 標準の暗号（HTTPS）だけ（Info.plist に `ITSAppUsesNonExemptEncryption = false` 済み） |
 | App のプライバシー（収集するデータ） | 連絡先情報：メールアドレス（アプリの機能・アカウント）／ユーザーコンテンツ：写真（答案）・その他のユーザーコンテンツ（採点結果・コメント）／識別子：ユーザー ID。いずれも「ユーザーに関連付けられる」「トラッキングに使わない」。広告・分析なし |
@@ -116,11 +111,11 @@ npm run mobile:sync                                      # ios/・android/ に�
 | コンテンツのレーティング | アンケートに答える（教育・ユーザー間のやり取りなし） |
 | ターゲット ユーザー | **13歳未満を含む**（小学生も使う）→ ファミリー ポリシーに従う：プライバシーポリシーの URL・広告なし・子どものデータは学校と保護者の同意の下で扱う |
 | データ セーフティ | 収集：メールアドレス（アカウント管理）・写真（答案）・その他のユーザー コンテンツ（採点結果）・ユーザー ID。第三者と共有：写真を AI の処理のため Anthropic に（サービスの提供のため）。転送は暗号化。削除の依頼：可（アプリ内と下の URL） |
-| アカウント削除の URL | `https://（本番）/account-deletion` |
+| アカウント削除の URL | `https://saiten.school-app1.com/account-deletion` |
 | ストアの掲載情報 | アイコン `store/icon-512.png`、フィーチャー グラフィック `store/feature-graphic.png`、スクリーンショット `store/screenshots/android-phone/` |
 
 - **個人の開発者アカウント（2023年11月以降に作成）は、製品版の前にクローズド テスト（12人以上・14日以上）が必要**。先生・保護者に協力を頼む
-- 1 の提供者名は、Play Console の開発者名と同じにする
+- Play Console の開発者名は School-app1 にする（プライバシーポリシーの提供者名と同じにする）
 
 ## 7. 掲載文（下書き）
 
@@ -128,7 +123,7 @@ npm run mobile:sync                                      # ios/・android/ に�
 
 **説明**
 ```
-「テスト採点」は、学校の先生のための採点支援アプリです。
+「テスト採点ver5」は、学校の先生のための採点支援アプリです。
 
 ■ 先生
 ・答案をカメラで撮影、または写真・PDF で取り込み

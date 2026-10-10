@@ -1,4 +1,4 @@
-package jp.tesutosaiten.app;
+package jp.testgrade.app;
 
 import com.getcapacitor.BridgeActivity;
 

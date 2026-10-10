@@ -16,9 +16,11 @@
   デモモードはプロトタイプと同じデモデータで全機能を試せるが、何も保存しない（画面上部に「デモモード（保存されません）」と出る）。
 - 採点AI: サーバーの `ANTHROPIC_API_KEY` があれば、「新規採点」は画像を保存して続けて AI 採点する。
   保存済み（AI採点待ち）の答案も「採点中」画面・答案詳細から採点できる。キーが無ければ画像の保存だけ。
-- **App Store・Google Play への申請の1次完成版**（2026-10-10。`docs/STORE-RELEASE.md`）：Capacitor 8 の殻（`ios/`・`android/`、アプリID `jp.tesutosaiten.app`、名前「テスト採点」）が本番の `/start` を開く。
+- **App Store・Google Play への申請の1次完成版**（2026-10-10。`docs/STORE-RELEASE.md`）：Capacitor 8 の殻（`ios/`・`android/`、アプリID `jp.testgrade.app`、名前「テスト採点ver5」）が本番の `/start` を開く。
+  提供者 School-app1・問い合わせ daikan12321@gmail.com・本番 https://saiten.school-app1.com（2026-10-10 ユーザー指定。`lib/app-info.ts` の初期値。環境変数で上書き可）。
+  アプリID はユーザー指定の「jp.Test Grade.app」が空白を含み使えないため `jp.testgrade.app` にした
   公開ページ（`/start`・`/privacy`・`/terms`・`/support`・`/account-deletion`）、本人によるアカウントの削除（0016）、AI に送る前の同意、保存期間の画像削除（Vercel Cron）、未完成の機能・架空の数値の削除。
-  残りはユーザー作業：提供者名・問い合わせ先・本番の URL（環境変数3つ）、本番 DB、ビルドと署名（Mac・Android Studio）、ストアの入力
+  残りはユーザー作業：独自ドメインの割り当て、本番 DB、ビルドと署名（Mac・Android Studio）、ストアの入力
 - 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004〜0016 はまだ**（0005 はモデル比較試験、0006 は採点方式と AI採点の記録、0009 は赤ペンの位置、0010・0011 は返却、0012 は返却の版・受信箱とチャッピー先生、0013 はチャッピー先生の見回り、0014 は明示的な GRANT、0015 は「本人の ChatGPT で復習」の設定、0016 はアカウントの削除と保存期間の削除）。
 - **生徒の復習は「本人の ChatGPT で復習」（B方式）だけを使う方針**（2026-10-07 ユーザーの決定。`docs/REVIEW-CHATGPT.md`）。
   アプリ内の AI との会話（A方式「チャッピー先生」）は `TUTOR_INAPP=on` のときだけ動き、既定は画面に出さずサーバーでも断る（コード・DB の表・追加済みの環境変数は消していない）。
@@ -187,9 +189,9 @@
   `result_releases_enrich()` を置き換え、返却者だけを空にする更新では返却内容・版を変えない（作り直すと未確認の修正が生徒に出るため）。画面：生徒「アカウント」タブ、先生「設定 → アカウント」（`components/AccountDeletion.tsx`）
 - **保存期間の削除**：`app/api/retention/purge`（Vercel Cron 毎日、`CRON_SECRET`）→ `lib/retention.ts`：期限切れの答案の画像を Storage API で消してから `purge_submissions(ids)`（0016）で削除済みに。成績の記録は残る
 - **AI に送る前の同意**（Apple 5.1.2(i)）：`lib/ai-consent.ts`・`components/AiConsentDialog.tsx`（AppShell）。採点・テストの読み取り・振り分け・比較試験の前。端末に保存し、設定画面で取り消せる
-- **公開の情報**：`lib/app-info.ts`（`NEXT_PUBLIC_APP_PROVIDER`・`NEXT_PUBLIC_SUPPORT_EMAIL`・`NEXT_PUBLIC_APP_URL`）。未設定は `npm run store:check` と準備状況が知らせる
+- **公開の情報**：`lib/app-info.ts`（初期値は School-app1・daikan12321@gmail.com・https://saiten.school-app1.com。`NEXT_PUBLIC_APP_PROVIDER`・`NEXT_PUBLIC_SUPPORT_EMAIL`・`NEXT_PUBLIC_APP_URL` で上書き可）。確認は `npm run store:check`
 - **13歳未満**：生徒の登録は規約・ポリシー（13歳未満は保護者）への同意が必要。「ChatGPT で復習」は先生がクラスの生徒が13歳以上と確認して有効にし、生徒も13歳以上をチェック
-- **ネイティブ**：`capacitor.config.ts`（`NEXT_PUBLIC_APP_URL` 必須、`server.url` = `/start`、通信できないときは `mobile/www/offline.html`）。カメラの権限の文、Android のバックアップ除外。アイコン・起動画面は `npm run mobile:icons`、ストアの画面写真は `scripts/mobile/screenshots.mjs`
+- **ネイティブ**：`capacitor.config.ts`（本番の URL は既定で https://saiten.school-app1.com、`server.url` = `/start`、通信できないときは `mobile/www/offline.html`）。カメラの権限の文、Android のバックアップ除外。アイコン・起動画面は `npm run mobile:icons`、ストアの画面写真は `scripts/mobile/screenshots.mjs`
 
 ---
 

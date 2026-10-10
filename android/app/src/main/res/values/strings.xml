@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">テスト採点</string>
-    <string name="title_activity_main">テスト採点</string>
-    <string name="package_name">jp.tesutosaiten.app</string>
-    <string name="custom_url_scheme">jp.tesutosaiten.app</string>
+    <string name="app_name">テスト採点ver5</string>
+    <string name="title_activity_main">テスト採点ver5</string>
+    <string name="package_name">jp.testgrade.app</string>
+    <string name="custom_url_scheme">jp.testgrade.app</string>
 </resources>

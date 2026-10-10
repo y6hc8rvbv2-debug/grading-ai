@@ -7,6 +7,7 @@ import { THEME, FONT_UI, FONT_HAND } from "@/lib/ui/theme";
 import { friendlyError } from "@/lib/errors";
 import { isSupabaseConfigured } from "@/lib/data/source";
 import { createClient } from "@/lib/supabase/client";
+import { APP_NAME } from "@/lib/app-info";
 
 const T = THEME.light;
 
@@ -56,7 +57,7 @@ export default function LoginPage() {
             display: "flex", alignItems: "center", justifyContent: "center", font: `700 21px ${FONT_HAND}`,
           }}>朱</div>
           <div>
-            <h1 style={{ margin: 0, font: `700 18px ${FONT_UI}` }}>テスト採点</h1>
+            <h1 style={{ margin: 0, font: `700 18px ${FONT_UI}` }}>{APP_NAME}</h1>
             <div style={{ fontSize: 11.5, color: T.textSub }}>教職員ログイン</div>
           </div>
         </div>
