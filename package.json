@@ -1,0 +1,52 @@
+{
+  "name": "test-saiten-v3",
+  "version": "0.3.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test:db": "bash supabase/tests/run.sh",
+    "test:e2e": "bash tests/e2e/run.sh",
+    "test:e2e:lite": "bash tests/e2e-lite/run.sh",
+    "test:unit": "node --conditions=react-server --import tsx --test tests/unit/*.test.ts",
+    "compare:models": "node --conditions=react-server --import tsx scripts/model-compare/run.ts",
+    "test:db:memory": "node tests/db/pglite.mjs",
+    "tutor:live-check": "node --conditions=react-server --import tsx scripts/tutor-live-check/run.ts",
+    "verify-db": "node scripts/verify-db/apply.mjs",
+    "store:check": "node scripts/mobile/store-check.mjs",
+    "mobile:icons": "node scripts/mobile/make-icons.mjs",
+    "mobile:sync": "cap sync",
+    "mobile:open:ios": "cap open ios",
+    "mobile:open:android": "cap open android"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/ios": "^8.5.3",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.117.2",
+    "heic-decode": "^2.1.0",
+    "heic-to": "^1.6.5",
+    "jpeg-js": "^0.4.4",
+    "next": "^14.2.35",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
+    "@electric-sql/pglite": "0.5.8",
+    "@types/node": "^20.19.43",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.35",
+    "playwright": "^1.63.0",
+    "supabase": "^2.118.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}
