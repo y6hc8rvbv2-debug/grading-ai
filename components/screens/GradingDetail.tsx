@@ -638,15 +638,14 @@ export default function GradingDetail({ subId }: { subId: string }) {
               {fb.teacher.map((s, i) => <p key={i} style={{ margin: "0 0 9px" }}>{s}</p>)}
             </div>
             <div style={{ marginTop: 10, borderTop: `1px solid ${T.line}`, paddingTop: 11, fontSize: 11.5, color: T.textFaint, lineHeight: 1.7 }}>
-              {/* PROD-API: 文面は生成AIで学級・単元の文脈に合わせて再生成する */}
-              文面はテンプレートとAI生成の組み合わせです。返却前に内容をご確認ください。
+              文面は採点結果と単元をもとに、定型文から作成しています。返却前に内容をご確認ください。
             </div>
           </Card>
         </div>
       )}
 
       {tab === "model" && (
-        <Card title="模範解答（自動生成）" sub="全問白紙と判定されたため、採点をスキップして模範解答と解説を生成しました"
+        <Card title="模範解答（登録した正答から作成）" sub="全問白紙と判定されたため採点せず、テストに登録した正答と解説を表示しています"
           right={<Btn size="sm" onClick={() => {
             const csv = toCSV(modelAns, [
               { label: "設問", key: "label" }, { label: "単元", key: "unit" }, { label: "配点", key: "points" },

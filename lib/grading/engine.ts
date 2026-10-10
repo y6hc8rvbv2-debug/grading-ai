@@ -36,11 +36,8 @@ export const PRAISE = [
 ];
 
 /**
- * 1枚の答案を採点する。
- * PROD-API: 実運用では画像を Claude API (vision) に送り、
- *   ①手書き文字認識 ②配点に沿った採点 ③部分点判定 を実行して results を受け取る。
- *   例) POST https://api.anthropic.com/v1/messages
- *       model: "claude-sonnet-4-6", content: [{type:"image", source:{...}}, {type:"text", text: rubricPrompt}]
+ * デモモードと「仮採点」（採点AIが無い環境で、明示して選んだときだけ）の採点。答案は読まない（乱数）。
+ * 本物の採点は採点AI（lib/ai/grade.ts・app/api/grade）が行う。
  */
 export type GradeOptions = { forceBlank?: boolean; reviewThreshold?: number };
 
@@ -109,7 +106,7 @@ export function gradeSubmission(test: Test, _student: unknown, seed: number, opt
   return { items, total, blank, weakUnit };
 }
 
-/** 画像品質チェック（PROD-API: 実運用では前処理サーバ or Vision でスコアリング） */
+/** 画像品質の値（デモ・仮採点用の乱数。AI採点では採点AIが画質を判定する） */
 export function checkQuality(seed: number, forceIssue = false): Quality {
   const rnd = mulberry32(seed);
   const v = (base) => Math.round(clamp(base + rnd() * 0.25, 0, 1) * 100);
@@ -149,7 +146,7 @@ export function analyze(_test: Test, result: { items: Item[] }) {
   return { units, types, topMistakes };
 }
 
-/** 生徒向けフィードバック / 教師向け指導提案（PROD-API: 生成AIで文面生成） */
+/** 生徒向けフィードバック / 教師向け指導提案（採点結果と単元から、定型文で作る） */
 export function buildFeedback(test: Test, result: { items: Item[]; total: number }, ana: ReturnType<typeof analyze>) {
   const rate = pct(result.total, test.maxScore);
   const weakest = ana.units[0];
@@ -172,7 +169,7 @@ export function buildFeedback(test: Test, result: { items: Item[]; total: number
   return { student, teacher, nextStep, rate };
 }
 
-/** 全問白紙のときの模範解答生成（PROD-API: 生成AIで解説文を作成） */
+/** 全問白紙のときの模範解答（テストに登録した正答・解説から、定型文で作る） */
 export function buildModelAnswers(test: Test) {
   return test.questions.map((q) => ({
     qno: q.no, label: q.label, unit: q.unit, points: q.points,

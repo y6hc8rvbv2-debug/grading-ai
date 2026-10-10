@@ -8,10 +8,8 @@ import { useUI } from "@/components/ui-context";
 import type { Mark, Submission, Test } from "@/lib/types";
 
 /* ---------------------------------------------------------------------------
- * 8. 赤ペン採点画像（signature element）
- *    答案画像の上に丸・バツ・三角・得点・コメントを重ねて描画する。
- *    PROD-API: 実運用では原本画像を <image> として敷き、
- *              Vision が返した座標(bbox)にこのマークを重ねる。
+ * 8. 赤ペン採点画像（清書版・固定レイアウト）
+ *    丸・バツ・三角・得点・コメントを手描き風に描く。原本の写真に重ねる版は RedPenOverlay（lib/redpen/layout.ts）。
  * -------------------------------------------------------------------------*/
 export function wobblePath(cx: number, cy: number, rx: number, ry: number, seed: number) {
   const rnd = mulberry32(seed);
@@ -166,7 +164,7 @@ export function RedPenSheet({ test, sub, page = 0, showMarks = true, showComment
 
       <line x1="34" y1={H - 46} x2={W - 34} y2={H - 46} stroke="#C9C0AC" />
       <text x="34" y={H - 26} style={{ font: `10.5px ${FONT_UI}` }} fill="#9AA2AD">
-        テスト採点ver.3 ／ 生徒実名は保存されません ／ ページ {page + 1} / {Math.ceil(sub.result.items.length / perPage)}
+        テスト採点 ／ 生徒実名は保存されません ／ ページ {page + 1} / {Math.ceil(sub.result.items.length / perPage)}
       </text>
       {showMarks && (
         <text x={W - 34} y={H - 26} textAnchor="end" style={{ font: `600 10.5px ${FONT_UI}` }} fill={SHU}>

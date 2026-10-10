@@ -7,6 +7,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import zlib from "node:zlib";
+import { execFileSync } from "node:child_process";
 
 const PORT = Number(process.env.GATEWAY_PORT || 54399);
 const REST = process.env.POSTGREST_URL || "http://127.0.0.1:54398";
@@ -75,6 +76,16 @@ http.createServer(async (req, res) => {
     return send(res, 200, userJson(c.sub, c.email));
   }
   if (url.pathname === "/auth/v1/logout") return send(res, 204);
+  // 管理 API：利用者の削除（アカウントの削除。service_role のトークンだけ）。本物と同じく auth.users を消す（関連は on delete で消える）
+  const del = url.pathname.match(/^\/auth\/v1\/admin\/users\/([0-9a-f-]{36})$/);
+  if (del && req.method === "DELETE") {
+    if (verify(bearer)?.role !== "service_role") return send(res, 403, { msg: "service_role が必要です" });
+    try {
+      execFileSync("psql", [process.env.PG_URL, "-X", "-q", "-v", "ON_ERROR_STOP=1", "-c", `delete from auth.users where id = '${del[1]}'`]);
+    } catch (e) { return send(res, 500, { msg: String(e.stderr ?? e.message).slice(0, 300) }); }
+    for (const [email, u] of Object.entries(USERS)) if (u.id === del[1]) delete USERS[email];
+    return send(res, 200, {});
+  }
   if (url.pathname.startsWith("/storage/v1/object/sign/")) {
     if (req.method === "POST") {
       if (!verify(bearer)) return send(res, 400, { statusCode: "403", error: "Unauthorized", message: "invalid token" });

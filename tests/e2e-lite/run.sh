@@ -68,6 +68,7 @@ for _ in $(seq 1 30); do curl -sf -o /dev/null "http://127.0.0.1:$REST_PORT/" &&
 echo "== ログイン・画像の代役と、AI の宛先の罠を起動"
 LITE_USERS='{"admin@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000001","password":"pass-lite-123"},"stu-a@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000002","password":"pass-lite-123"},"stu-b@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000003","password":"pass-lite-123"}}'
 GATEWAY_PORT="$GW_PORT" POSTGREST_URL="http://127.0.0.1:$REST_PORT" JWT_SECRET="$JWT_SECRET" LITE_USERS="$LITE_USERS" \
+  PG_URL="postgresql://postgres@127.0.0.1:$PG_PORT/lite" \
   node tests/e2e-lite/gateway.mjs > "$WORK/gateway.log" 2>&1 &
 PIDS+=($!)
 node -e "
@@ -77,20 +78,30 @@ node -e "
 PIDS+=($!)
 for _ in $(seq 1 20); do curl -sf -o /dev/null "http://127.0.0.1:$GW_PORT/__requests" && curl -sf -o /dev/null "http://127.0.0.1:$TRAP_PORT/__hits" && break; sleep 0.5; done
 
-echo "== アプリをビルドして起動（.next-lite。暗号鍵・CRON_SECRET・service_role・API キーは渡さない）"
+echo "== アプリをビルドして起動（.next-lite。暗号鍵・CRON_SECRET・API キーは渡さない。service_role はアカウントの削除だけに使う）"
 ANON=$(JWT_SECRET="$JWT_SECRET" node -e "
   const c = require('crypto'); const b = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
   const h = b({ alg: 'HS256', typ: 'JWT' }), p = b({ role: 'anon', exp: Math.floor(Date.now() / 1000) + 86400 });
   console.log(h + '.' + p + '.' + c.createHmac('sha256', process.env.JWT_SECRET).update(h + '.' + p).digest('base64url'));")
+SERVICE=$(JWT_SECRET="$JWT_SECRET" node -e "
+  const c = require('crypto'); const b = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const h = b({ alg: 'HS256', typ: 'JWT' }), p = b({ role: 'service_role', exp: Math.floor(Date.now() / 1000) + 86400 });
+  console.log(h + '.' + p + '.' + c.createHmac('sha256', process.env.JWT_SECRET).update(h + '.' + p).digest('base64url'));")
 CLEAN_ENV=(env -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TUTOR_KEY_ENCRYPTION_KEY -u CRON_SECRET -u SUPABASE_SERVICE_ROLE_KEY -u TUTOR_INAPP -u TUTOR_FEATURE)
-"${CLEAN_ENV[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
+# 公開の情報（ストアに出すときの設定と同じ形。値は架空）
+PUBLIC_INFO=(NEXT_PUBLIC_APP_PROVIDER="検証用の提供者" NEXT_PUBLIC_SUPPORT_EMAIL="support@example.com" NEXT_PUBLIC_APP_URL="https://saiten.example.com")
+"${CLEAN_ENV[@]}" "${PUBLIC_INFO[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
   node_modules/.bin/next build >/dev/null
-"${CLEAN_ENV[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
-  ANTHROPIC_BASE_URL="http://127.0.0.1:$TRAP_PORT" TUTOR_OPENAI_BASE_URL="http://127.0.0.1:$TRAP_PORT/v1" \
+"${CLEAN_ENV[@]}" "${PUBLIC_INFO[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
+  SUPABASE_SERVICE_ROLE_KEY="$SERVICE" ANTHROPIC_BASE_URL="http://127.0.0.1:$TRAP_PORT" TUTOR_OPENAI_BASE_URL="http://127.0.0.1:$TRAP_PORT/v1" \
   node_modules/.bin/next start -p "$APP_PORT" > "$WORK/app.log" 2>&1 &
 PIDS+=($!)
 for _ in $(seq 1 40); do curl -sf -o /dev/null "http://localhost:$APP_PORT/login" && break; sleep 1; done
 
 echo "== シナリオ（tests/e2e-lite/review-copy.mjs）"
+# STORE_SHOT_DIR（例 $PWD/store/screenshots）を指定すると、ストア用の生徒の画面の写真も撮る
 BASE_URL="http://localhost:$APP_PORT" GATEWAY_URL="http://127.0.0.1:$GW_PORT" TRAP_URL="http://127.0.0.1:$TRAP_PORT" \
   node tests/e2e-lite/review-copy.mjs || { echo "--- app.log"; tail -40 "$WORK/app.log"; echo "--- postgrest.log"; tail -20 "$WORK/postgrest.log"; exit 1; }
+echo "== シナリオ（tests/e2e-lite/store.mjs：ストアの要件）"
+BASE_URL="http://localhost:$APP_PORT" GATEWAY_URL="http://127.0.0.1:$GW_PORT" TRAP_URL="http://127.0.0.1:$TRAP_PORT" \
+  node tests/e2e-lite/store.mjs || { echo "--- app.log"; tail -40 "$WORK/app.log"; echo "--- gateway.log"; tail -20 "$WORK/gateway.log"; exit 1; }

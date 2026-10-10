@@ -1,7 +1,7 @@
 "use client";
-// 教職員のログイン画面。生徒はログインしない設計。
-// アカウントは学校の管理者が作成・招待する（一般の新規登録は受け付けない）。
-import React, { useState } from "react";
+// 教職員のログイン画面。生徒は /student から自分のアカウントでログインする。
+// 教職員のアカウントは学校の管理者が作成・招待する（一般の新規登録は受け付けない）。
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { THEME, FONT_UI, FONT_HAND } from "@/lib/ui/theme";
 import { friendlyError } from "@/lib/errors";
@@ -17,6 +17,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [deleted, setDeleted] = useState(false);
+  // アカウントを削除した直後（/login?deleted=1）
+  useEffect(() => { setDeleted(new URLSearchParams(window.location.search).get("deleted") === "1"); }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,11 +56,16 @@ export default function LoginPage() {
             display: "flex", alignItems: "center", justifyContent: "center", font: `700 21px ${FONT_HAND}`,
           }}>朱</div>
           <div>
-            <h1 style={{ margin: 0, font: `700 18px ${FONT_UI}` }}>テスト採点ver.3</h1>
+            <h1 style={{ margin: 0, font: `700 18px ${FONT_UI}` }}>テスト採点</h1>
             <div style={{ fontSize: 11.5, color: T.textSub }}>教職員ログイン</div>
           </div>
         </div>
 
+        {deleted && (
+          <div role="status" style={{ background: T.okSoft, color: T.ok, borderRadius: 9, padding: "9px 11px", fontSize: 12.5, marginBottom: 12 }}>
+            アカウントを削除しました。
+          </div>
+        )}
         {!configured ? (
           <div style={{ fontSize: 13, color: T.textSub, lineHeight: 1.85 }}>
             <p style={{ marginTop: 0 }}>
@@ -94,10 +102,15 @@ export default function LoginPage() {
             }}>{busy ? "ログインしています…" : "ログイン"}</button>
             <div style={{ fontSize: 11.5, color: T.textFaint, marginTop: 14, lineHeight: 1.75 }}>
               アカウントは学校の管理者が発行します。パスワードを忘れた場合は管理者に再設定を依頼してください。
-              生徒の方はログインせず、先生から配られた提出リンクを使います。
             </div>
           </form>
         )}
+        <div style={{ fontSize: 12, marginTop: 14, lineHeight: 2, display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <a href="/student" style={{ color: T.accent }}>生徒の方はこちら</a>
+          <a href="/privacy" style={{ color: T.textSub }}>プライバシーポリシー</a>
+          <a href="/terms" style={{ color: T.textSub }}>利用規約</a>
+          <a href="/support" style={{ color: T.textSub }}>お問い合わせ</a>
+        </div>
       </div>
     </main>
   );

@@ -16,7 +16,10 @@
   デモモードはプロトタイプと同じデモデータで全機能を試せるが、何も保存しない（画面上部に「デモモード（保存されません）」と出る）。
 - 採点AI: サーバーの `ANTHROPIC_API_KEY` があれば、「新規採点」は画像を保存して続けて AI 採点する。
   保存済み（AI採点待ち）の答案も「採点中」画面・答案詳細から採点できる。キーが無ければ画像の保存だけ。
-- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004〜0015 はまだ**（0005 はモデル比較試験、0006 は採点方式と AI採点の記録、0009 は赤ペンの位置、0010・0011 は返却、0012 は返却の版・受信箱とチャッピー先生、0013 はチャッピー先生の見回り、0014 は明示的な GRANT、0015 は「本人の ChatGPT で復習」の設定）。
+- **App Store・Google Play への申請の1次完成版**（2026-10-10。`docs/STORE-RELEASE.md`）：Capacitor 8 の殻（`ios/`・`android/`、アプリID `jp.tesutosaiten.app`、名前「テスト採点」）が本番の `/start` を開く。
+  公開ページ（`/start`・`/privacy`・`/terms`・`/support`・`/account-deletion`）、本人によるアカウントの削除（0016）、AI に送る前の同意、保存期間の画像削除（Vercel Cron）、未完成の機能・架空の数値の削除。
+  残りはユーザー作業：提供者名・問い合わせ先・本番の URL（環境変数3つ）、本番 DB、ビルドと署名（Mac・Android Studio）、ストアの入力
+- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004〜0016 はまだ**（0005 はモデル比較試験、0006 は採点方式と AI採点の記録、0009 は赤ペンの位置、0010・0011 は返却、0012 は返却の版・受信箱とチャッピー先生、0013 はチャッピー先生の見回り、0014 は明示的な GRANT、0015 は「本人の ChatGPT で復習」の設定、0016 はアカウントの削除と保存期間の削除）。
 - **生徒の復習は「本人の ChatGPT で復習」（B方式）だけを使う方針**（2026-10-07 ユーザーの決定。`docs/REVIEW-CHATGPT.md`）。
   アプリ内の AI との会話（A方式「チャッピー先生」）は `TUTOR_INAPP=on` のときだけ動き、既定は画面に出さずサーバーでも断る（コード・DB の表・追加済みの環境変数は消していない）。
   Vercel の Preview で、ログイン・名簿表示・答案画像の保存まで動作確認済み（ユーザー報告）。
@@ -33,8 +36,8 @@
   Vercel の Preview（Preview だけの環境変数。B方式は NEXT_PUBLIC_SUPABASE_URL・ANON_KEY だけ）をそこへつなぐ → B方式の確認と実機（`docs/REVIEW-CHATGPT.md`）。
   見回り・OpenAI の実接続・A方式の実機（`docs/TUTOR-SWEEP.md`・`TUTOR-LIVE-CHECK.md`・`TUTOR-DEVICE-CHECK.md`）は A方式を使うと決めた場合だけ。
   本番（第2部：バックアップ2種 → check.sql → 1ファイルずつ → check.sql）は第1部が終わり、ユーザーが決めてから。戻すときは drop せず、機能停止・Instant Rollback・新しい番号のファイルで
-- 検証用 DB（saiten-verify、ref `cpfhsxbmzoyrlkynveqd`）は 0001〜0014 を SQL Editor で適用済み・確認済み（2026-10-06 ユーザー報告。0014 の後の権限 548 件・md5 一致）。
-  **0015 はまだ**（SQL Editor か `npm run verify-db -- --apply --to 0015 --confirm-ref cpfhsxbmzoyrlkynveqd`）。次は検証用アカウントの準備（`docs/DB-RUNBOOK.md` 1-3。手1「学校を作る」まで案内済み）
+- 検証用 DB（saiten-verify、ref `cpfhsxbmzoyrlkynveqd`）は 0001〜0015 を SQL Editor で適用済み・確認済み（0015 は 2026-10-08 ユーザー報告。B方式は無効のまま）。
+  検証用の学校・管理者・クラス・生徒2人・配信先・Vercel Preview の接続も完了（ユーザー報告）。**0016 はまだ**
   このクラウド環境からは supabase.co / api.supabase.com がネットワーク方針で拒否され、DB の直結（IPv6・pooler）も届かない
 - 本物の OpenAI：`npm run tutor:live-check` は `GET /v1/models` の1回だけ（料金がかからないことは料金表で未確認なので「無料」と書かない）。`-- --paid`・Preview での会話・実機は**ユーザーの指示があってから**
 - Preview で誤登録の模擬テスト（1問・満点4点・採点済0枚）をごみ箱から削除する（ユーザー作業）
@@ -58,13 +61,13 @@
   root 環境では `su postgres -c "bash supabase/tests/run.sh"`
 - `npm run test:e2e` … Supabase CLI のローカル環境（Docker）にアプリを繋ぎ、ブラウザで教員の作業を通しで検証（`tests/e2e/`）。
   採点AIは代役サーバー（本物の API は呼ばない）。ECR に届かない環境では `SUPABASE_INTERNAL_IMAGE_REGISTRY=docker.io` を付ける
-- `npm run test:db` には `supabase/tests/workflow_test.sql`（返却）・`tutor_test.sql`（受信箱・チャッピー先生）・`tutor_sweep_test.sql`（見回り）・`review_copy_test.sql`（B方式の設定・他の生徒の拒否・自己申告の区別）・`upgrade_test.sh`（0001〜0003＋既存データの DB に 0004〜0015 を足す：途中失敗で何も残らない・2回目はエラー・件数と合計が変わらない）も含まれる
+- `npm run test:db` には `supabase/tests/workflow_test.sql`（返却）・`tutor_test.sql`（受信箱・チャッピー先生）・`tutor_sweep_test.sql`（見回り）・`review_copy_test.sql`（B方式の設定・他の生徒の拒否・自己申告の区別）・`account_deletion_test.sql`（アカウントの削除・保存期間の削除）・`upgrade_test.sh`（0001〜0003＋既存データの DB に 0004〜0016 を足す：途中失敗で何も残らない・2回目はエラー・件数と合計が変わらない）も含まれる
 - `npm run test:e2e` は A方式の休止中のコードの回帰確認のため `TUTOR_INAPP=on` で動かす。`tests/e2e/tutor.mjs`（返却・チャッピー先生）→ `scenario.mjs`（教員の作業）→ `fullflow.mjs`（答案登録→採点→教師確認→返却→復習を画面で1本に）→ `tutor-sweep.mjs`（ブラウザが来なくても見回りが通話を切る。アプリを再起動するので最後）の順。
   ローカルの Supabase に pg_cron（5秒ごと）→ pg_net → `http://host.docker.internal:3200/api/tutor/sweep` を登録して、本番と同じ経路で動かす
-- `npm run test:e2e:lite` … Docker なしの画面テスト（`tests/e2e-lite/`）。専用の PostgreSQL（一時フォルダ・ポート 5433）＋全マイグレーション＋本物の PostgREST（RLS は本物）＋ログイン・画像だけの代役（`gateway.mjs`）。
+- `npm run test:e2e:lite` … Docker なしの画面テスト（`tests/e2e-lite/`。`review-copy.mjs` → `store.mjs`：公開ページ・未完成の表示が無い・AI に送る前の同意・アカウントの削除・登録の同意）。専用の PostgreSQL（一時フォルダ・ポート 5433）＋全マイグレーション＋本物の PostgREST（RLS は本物）＋ログイン・画像だけの代役（`gateway.mjs`）。
   B方式をスマホ幅で通しで確認（既定は非表示→先生が有効化→確認してコピー→ChatGPT を開く→未公開の正答の除外→他の生徒の拒否→AI の宛先の罠に要求0件）。
   アプリは暗号鍵・CRON_SECRET・service_role・API キーなしで起動。Playwright 同梱のブラウザが無い環境では `CHROMIUM_PATH=/opt/pw-browsers/chromium`
-- `npm run test:unit` … B方式のコピー内容と依存の分離（`review-copy.test.ts`）・チャッピー先生（管理者のキーを使わない・依存関係の分離・暗号化）・赤ペンの置き場所（罫線の検出・表への割り当て。実物の写真は REDPEN_REAL_DIR があるときだけ）・採点AIの出力の後処理（`normalizeResult`）・3モデル併用の振り分けと料金の目安・比較試験・HEIC 変換（`tests/fixtures/sample.heic` は合成画像）の単体テスト
+- `npm run test:unit` … B方式のコピー内容と依存の分離（`review-copy.test.ts`）・保存期間の削除（`retention.test.ts`）・チャッピー先生（管理者のキーを使わない・依存関係の分離・暗号化）・赤ペンの置き場所（罫線の検出・表への割り当て。実物の写真は REDPEN_REAL_DIR があるときだけ）・採点AIの出力の後処理（`normalizeResult`）・3モデル併用の振り分けと料金の目安・比較試験・HEIC 変換（`tests/fixtures/sample.heic` は合成画像）の単体テスト
 
 検証中に見つけて直したもの（0001/0002 は未適用だったので直接修正、0003 で追加修正）:
 - サインアップ時の `user_metadata` で任意校の管理者になれた → `app_metadata` から読むよう変更
@@ -173,17 +176,20 @@
 - `buildFeedback`（生徒向けフィードバック・教師向け指導提案）/ `buildModelAnswers`（白紙時の模範解答）… テンプレート文面のまま。`model_answer_sets` は未使用
 - 為替レート・請求（Stripe）… デモ表示のまま
 
-### 3. 生徒モバイル提出（Edge Function）
+### 3. 生徒モバイル提出・複合機の直接取り込み（未実装。画面からは外した）
 
-`submission_links` テーブルにトークンを発行し、Edge Function（service_role）が検証してアップロードを代行する。
-**生徒はログインしない設計。** 提出時に氏名を入力させず、出席番号だけで受け付ける。
-画面側は「新規採点」の「生徒モバイル提出」が「準備中」になっている。
+ストアの審査（未完成の機能を出さない）のため、「新規採点」・設定画面・ダッシュボードから「準備中」の項目を外した（2026-10-10）。
+複合機のスキャンは PDF に保存して「PDF一括」で取り込む。作るときは `submission_links`（0002）にトークンを発行し、service_role のサーバー処理で受け付ける
 
-### 4. 保存期間による画像の削除
+### 4. ストアの申請（1次完成。`docs/STORE-RELEASE.md`）
 
-`purge_expired_submissions()` は DB 上で論理削除して `image_paths` を空にするだけで、**Storage の画像ファイルは消えない**。
-現在の Supabase Storage は SQL での `storage.objects` 削除を禁止している（Storage API を使えというエラーになる）。
-service_role のサーバー処理（Edge Function など）で、期限切れ答案の画像を Storage API で削除する処理が必要。
+- **本人によるアカウントの削除（0016）**：`app/api/account/delete` が本人のセッションで `prepare_account_deletion()`（最後の管理者は不可・返却者/作成者の参照を空にする・生徒の自己申告を消す・監査ログ）→ Auth の管理 API（service_role）で auth.users を削除。
+  `result_releases_enrich()` を置き換え、返却者だけを空にする更新では返却内容・版を変えない（作り直すと未確認の修正が生徒に出るため）。画面：生徒「アカウント」タブ、先生「設定 → アカウント」（`components/AccountDeletion.tsx`）
+- **保存期間の削除**：`app/api/retention/purge`（Vercel Cron 毎日、`CRON_SECRET`）→ `lib/retention.ts`：期限切れの答案の画像を Storage API で消してから `purge_submissions(ids)`（0016）で削除済みに。成績の記録は残る
+- **AI に送る前の同意**（Apple 5.1.2(i)）：`lib/ai-consent.ts`・`components/AiConsentDialog.tsx`（AppShell）。採点・テストの読み取り・振り分け・比較試験の前。端末に保存し、設定画面で取り消せる
+- **公開の情報**：`lib/app-info.ts`（`NEXT_PUBLIC_APP_PROVIDER`・`NEXT_PUBLIC_SUPPORT_EMAIL`・`NEXT_PUBLIC_APP_URL`）。未設定は `npm run store:check` と準備状況が知らせる
+- **13歳未満**：生徒の登録は規約・ポリシー（13歳未満は保護者）への同意が必要。「ChatGPT で復習」は先生がクラスの生徒が13歳以上と確認して有効にし、生徒も13歳以上をチェック
+- **ネイティブ**：`capacitor.config.ts`（`NEXT_PUBLIC_APP_URL` 必須、`server.url` = `/start`、通信できないときは `mobile/www/offline.html`）。カメラの権限の文、Android のバックアップ除外。アイコン・起動画面は `npm run mobile:icons`、ストアの画面写真は `scripts/mobile/screenshots.mjs`
 
 ---
 
@@ -223,7 +229,8 @@ service_role のサーバー処理（Edge Function など）で、期限切れ�
 Next.js 14 (App Router, TypeScript)
   ├── middleware.ts              セッション維持 + 未ログインを /login へ（Supabase 未設定なら素通し＝デモモード）
   ├── app/
-  │   ├── login/                 教職員ログイン（生徒はログインしない）
+  │   ├── login/                 教職員ログイン（生徒は /student から自分のアカウントでログイン）
+  │   ├── start/ privacy/ terms/ support/ account-deletion/   ログインなしの公開ページ（ストアの起動画面・ポリシー）
   │   ├── api/grade/             採点AIの Route Handler（サーバー専用。ANTHROPIC_API_KEY を使う）
   │   └── (dashboard)/           15画面。各 page.tsx は components/screens/* を表示するだけ
   │       └── history/[id]/      採点結果の詳細（赤ペン画像・修正・分析）
@@ -356,14 +363,17 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
    見回りはローカルの Supabase の pg_cron → アプリでのみ検証（クラウドの pg_cron → pg_net → Vercel の経路、Preview の保護の越え方は検証環境で確かめる）。
    OpenAI が通話を作ってから通話ID を DB に記録するまでのごく短い間にサーバーが落ちると、その通話は切れない（残る隙間）
 19. **（解決）既存の通しテスト `tests/e2e/scenario.mjs`** — テスト登録（正答の入力・すべて確認）・新規採点の4手順・3モデル併用（上のモデルには問題の設問だけ）・コメント欄の絞り込みに合わせて直した
-2. **0004〜0015 が本番 Supabase に未適用**（「次にやること」1。先に検証環境で行う。検証環境は 0014 まで適用済み）
+2. **0004〜0016 が本番 Supabase に未適用**（「次にやること」1。先に検証環境で行う。検証環境は 0015 まで適用済み）
+21. **ストアの申請は、iOS・Android のビルド・実機・審査を未実施**（開発環境に Xcode・Android SDK が無い。dl.google.com へも届かない）。
+   本物の Supabase でのアカウントの削除（Auth の管理 API）・Vercel Cron の保存期間の削除も未確認。Apple 4.2（Web を包んだだけのアプリ）で断られる可能性がある。
+   `npm audit` が Next.js 14 系に重大な警告（修正は Next.js 16 への更新。next/image の外部画像・rewrites は使っていない）
 20. **B方式（本人の ChatGPT で復習）は Docker なしの画面テストでのみ検証** — 本物の Supabase（クラウド）・Vercel の Preview・実機（iPhone/iPad Safari・Android Chrome でのコピーと ChatGPT アプリへの受け渡し）は未確認。
    ChatGPT の利用条件（年齢・保護者の同意）も未確認。先生のコメントに名前を書くとコピー内容に入る（画面で「送る前に消す」と案内）。Docker の E2E（`npm run test:e2e`）は今回の変更後に実行できていない（containerd が起動しない環境）
 16. **模範解答からの自動入力は代役 API でのみ検証** — 本物の模範解答での読み取り精度（特に配点表・作図・PDF の bbox）は Preview で確かめる。PDF の資料は該当箇所の枠を表示できない（ページを開くだけ）。作図の模範図は採点AIには送っていない（採点条件の文章だけ）
 15. **3モデル併用は代役 API でのみ検証** — 本物の Haiku / Sonnet での読み取り精度・振り分けの割合・費用は未確認。正答との照合（`normAnswer`）は表記ゆれで誤検知しうる（誤検知は上のモデル・要確認に回るので、精度側に倒れる）
 14. **モデル比較試験は未実行** — Preview で管理者が実行する準備まで完了（代役サーバーでの E2E のみ検証済み）
-3. **生徒モバイル提出・複合機スキャン連携は「準備中」** — 画面に準備中と表示し、代わりの取り込み方法を案内している
-4. **保存期間による自動削除で Storage の画像が消えない**（「次にやること」4）
+3. **生徒モバイル提出・複合機スキャン連携は未実装** — 画面からは外した（複合機は PDF に保存して「PDF一括」）
+4. **（解決）保存期間による自動削除で Storage の画像が消えない** — 0016 と `app/api/retention/purge`（Vercel Cron）で画像も消す
 5. **他校のIDを外部キーに指定できる** — 例: 学校Aの教員が学校Bの `test_id` を参照する `submissions` を作れる。読み取りはRLSで防がれるが整合性は崩れる。複合外部キー `(school_id, id)` で塞ぐのが本筋（未対応）。AI採点の保存（0004）は設問ID を DB 側で決めるので影響しない
 6. **役割（role）の変更・教職員の招待画面がない** — 招待は SUPABASE-SETUP.md のサーバー側コード、役割変更は SQL で行う
 7. **クラス・生徒の登録画面がない** — 名簿は SQL で登録する（SUPABASE-SETUP.md ステップ4）。テストは画面から登録できる
@@ -371,5 +381,5 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
 9. **（解決）複数ページの答案** — 1人分を複数枚で取り込み、原本の各ページに赤ペンを重ねられる。合計点の表示は1ページ目だけ
 10. **AI採点は1枚ずつ順番に実行** — 40枚で数十分かかりうる。画面を閉じると残りは「AI採点待ち」のまま（「まとめてAI採点」で再開できる）。サーバー側のキュー処理は未実装
 11. **多言語は主要12言語のみ実翻訳** — ナビゲーション等のみ。画面本文は日本語のまま（残りは英語フォールバック）
-12. **ダッシュボードの為替レート・ユーザーの声の評価数はデモ値** — プロトタイプから引き継いだ表示。問い合わせはメールソフトを開く方式
+12. **（解決）ダッシュボードの架空の表示** — 為替レート・料金表・利用者の声・準拠の印を外し、規約・プライバシーと問い合わせ（メールソフトを開く）にした
 13. **要件の「GPT5.6以上」との差** — Anthropic 以外のモデルは呼べないため Claude の Vision を使う（依頼元に確認が必要なら確認する）

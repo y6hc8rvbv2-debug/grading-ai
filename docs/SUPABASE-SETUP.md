@@ -103,7 +103,9 @@ on conflict (id) do update
 >
 > **user_metadata（`signUp` の `options.data` や `inviteUserByEmail` の `data`）には入れないでください。** user_metadata はブラウザから誰でも書けるため、トリガーはそこを読みません。
 >
-> あわせて **Authentication → Sign In / Providers** で「Allow new users to sign up」を **オフ** にしてください。教職員は招待のみで作る運用です。
+> 教職員は招待のみで作る運用です。生徒は `/student` から自分でアカウントを作る（返却を受け取るため）ので、
+> **Authentication → Sign In / Providers** の「Allow new users to sign up」は**オンのまま**にします。
+> 一般の登録者は app_metadata に学校が無いので profiles が作られず、教職員の画面のデータは何も見えません（RLS）。
 
 ---
 

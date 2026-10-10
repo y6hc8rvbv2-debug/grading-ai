@@ -26,6 +26,7 @@ await mkdir(OUT, { recursive: true });
 }
 const img = (i) => `${OUT}answer${i}.png`;
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
+await ctx.addInitScript(() => { try { localStorage.setItem("ai-consent:2026-10-10", "yes"); } catch {} });   // AI への送信の同意（lib/ai-consent.ts）は済んだものとする
 const page = await ctx.newPage();
 const errors = [];
 page.on("console", (m) => { if (["error", "warning"].includes(m.type())) errors.push(`[${m.type()}] ${new URL(page.url()).pathname} ${m.text()}`); });
@@ -618,6 +619,7 @@ const viewports = [
 const importBefore = (await importReqs()).length;
 for (const vp of viewports) {
   const c = await browser.newContext(vp.opts);
+  await c.addInitScript(() => { try { localStorage.setItem("ai-consent:2026-10-10", "yes"); } catch {} });   // AI への送信の同意（lib/ai-consent.ts）は済んだものとする
   const p = await c.newPage();
   const errs = [];
   p.on("pageerror", (e) => errs.push(e.message));
@@ -687,6 +689,7 @@ await page.evaluate(() => new Promise((r) => { const q = indexedDB.deleteDatabas
 const moveBefore = (await importReqs()).length;
 const freshPage = async () => {
   const c = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: true });
+  await c.addInitScript(() => { try { localStorage.setItem("ai-consent:2026-10-10", "yes"); } catch {} });   // AI への送信の同意（lib/ai-consent.ts）は済んだものとする
   const p = await c.newPage();
   await p.goto(BASE + "/login");
   await p.getByLabel("メールアドレス").fill("admin@a.example");
@@ -956,6 +959,7 @@ const stack = await mp.locator('[data-layout="stack"]').count();
 const mobWide = await mp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
 await ok(near(r1280, rMob) && stack === 1 && mobWide, `スマホ（幅390・拡大率3）でも同じ位置。コメント欄は原本の下（${rMob.map((v) => v.toFixed(3))}）`);
 const z2 = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 });
+await z2.addInitScript(() => { try { localStorage.setItem("ai-consent:2026-10-10", "yes"); } catch {} });   // AI への送信の同意（lib/ai-consent.ts）は済んだものとする
 const zp = await z2.newPage();
 await zp.goto(BASE + "/login");
 await zp.getByLabel("メールアドレス").fill("admin@a.example");

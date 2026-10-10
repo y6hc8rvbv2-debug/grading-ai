@@ -20,6 +20,7 @@ const rest = async (path) => (await fetch(`${process.env.SUPABASE_URL}/rest/v1/$
 
 // ---------------------------------------------------------------- 先生（PC）
 const tCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+await tCtx.addInitScript(() => { try { localStorage.setItem("ai-consent:2026-10-10", "yes"); } catch {} });   // AI への送信の同意（lib/ai-consent.ts）は済んだものとする
 const page = await tCtx.newPage();
 page.on("console", (m) => { if (["error", "warning"].includes(m.type())) errors.push(`[teacher ${m.type()}] ${m.text()}`); });
 page.on("pageerror", (e) => errors.push(`[teacher pageerror] ${e.message}`));

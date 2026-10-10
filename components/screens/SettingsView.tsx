@@ -2,8 +2,10 @@
 // 設定。docs/prototype-v3.jsx から移植。
 // 表示の設定は端末に、保存期間は学校（schools.retention）に保存する。
 import { ReviewCopyCard, TutorAdminCard } from "@/components/tutor/TeacherTutor";
+import { AccountDeletion } from "@/components/AccountDeletion";
+import { hasAiConsent, setAiConsent } from "@/lib/ai-consent";
 import React, { useEffect, useState } from "react";
-import { FONT_UI, FONT_MONO } from "@/lib/ui/theme";
+import { FONT_UI } from "@/lib/ui/theme";
 import { LANGS } from "@/lib/i18n";
 import { download, fmtDateTime, toCSV } from "@/lib/util";
 import { friendlyError } from "@/lib/errors";
@@ -18,9 +20,10 @@ export default function SettingsView() {
   } = useUI();
   const demo = ds.mode === "demo";
   const [q, setQ] = useState("");
-  const [code] = useState("MFP-8F3K-2026");
   const [retention, setRetentionState] = useState<Retention>(session.school?.retention ?? "year");
   const [auditBusy, setAuditBusy] = useState(false);
+  const [aiConsent, setAiConsentState] = useState(false);
+  useEffect(() => { setAiConsentState(hasAiConsent()); }, []);
 
   const setRetention = async (v: string) => {
     const before = retention;
@@ -133,7 +136,7 @@ export default function SettingsView() {
           <Select value={retention} onChange={setRetention} style={isAdmin ? undefined : { opacity: 0.6 }} options={[
             { value: "30", label: "30日で自動削除" },
             { value: "180", label: "180日で自動削除" },
-            { value: "year", label: "学年度末＋1年（既定）" },
+            { value: "year", label: "取り込みから15か月（学年度末＋1年の目安・既定）" },
             { value: "manual", label: "手動削除のみ" },
           ]} />
         </Field>
@@ -149,50 +152,18 @@ export default function SettingsView() {
         </div>
       </Card>
 
-      {!demo ? (
-      <Card title="複合機・印刷機との連携" sub="スキャンした答案をそのまま採点キューへ" right={<Badge tone="mute">準備中</Badge>}>
-        <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.85 }}>
-          複合機からのスキャンを直接受け取る機能は準備中です。それまでは、複合機で PDF にスキャンして PC に保存し、
-          「新規採点」の「PDF一括」または「PCから選択」で取り込んでください。
-        </div>
-      </Card>
-      ) : (
-      <Card title="複合機・印刷機との連携" sub="スキャンした答案をそのまま採点キューへ">
-        <div style={{ background: T.panelAlt, border: `1px dashed ${T.lineStrong}`, borderRadius: 11, padding: 13, marginBottom: 12 }}>
-          <div style={{ fontSize: 11.5, color: T.textSub, marginBottom: 5 }}>連携コード</div>
-          <div style={{ font: `700 18px ${FONT_MONO}`, color: T.accent, letterSpacing: ".06em" }}>{code}</div>
-        </div>
-        <ol style={{ margin: 0, paddingInlineStart: 20, fontSize: 12.5, color: T.textSub, lineHeight: 2 }}>
-          <li>複合機の管理画面で「スキャン送信先」を追加します。</li>
-          <li>送信先アドレスに <span style={{ font: `12px ${FONT_MONO}`, color: T.text }}>scan@grade.example.jp</span> を入力します。</li>
-          <li>件名に上の連携コードを入れると、対応するクラスの採点キューに入ります。</li>
-          <li>両面スキャンとADFに対応しています。ページ抜けは自動で検出します。</li>
-        </ol>
-        <div style={{ display: "flex", gap: 8, marginTop: 13 }}>
-          <Btn size="sm" onClick={() => { navigator.clipboard && navigator.clipboard.writeText(code); toast("連携コードをコピーしました"); }}>コードをコピー</Btn>
-          <Btn size="sm" variant="soft" onClick={() => toast("接続テストに成功しました（デモ）")}>接続テスト</Btn>
-        </div>
-      </Card>
+      {!demo && (
+        <Card title="アカウント" sub={session.email ? `ログイン中：${session.email}` : "ログイン中のアカウント"}>
+          <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.8, marginBottom: 10 }}>
+            <a href="/privacy">プライバシーポリシー</a>　<a href="/terms">利用規約</a>　<a href="/support">お問い合わせ</a>
+          </div>
+          <AccountDeletion kind="staff" onDeleted={() => { window.location.href = "/login?deleted=1"; }} />
+        </Card>
       )}
-
-      {demo && <Card title="通知" sub="デモ表示です（通知の送信は準備中）">
-        {[
-          ["採点が完了したら通知する", true],
-          ["要確認が10件を超えたら通知する", true],
-          ["画質不良で採点できない答案があったら通知する", true],
-          ["生徒の提出が締切を過ぎたら通知する", false],
-          ["月次の利用レポートをメールで受け取る", false],
-        ].map(([label, def], i) => (
-          <label key={i} style={{ display: "flex", gap: 9, alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${T.line}`, cursor: "pointer" }}>
-            <input type="checkbox" defaultChecked={def as boolean} />
-            <span style={{ fontSize: 12.5, color: T.text }}>{label}</span>
-          </label>
-        ))}
-      </Card>}
 
       <ReadinessCard />
 
-      <Card title="AIエンジン" sub="本番接続の設定">
+      <Card title="AIエンジン" sub="採点に使う AI">
         <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <span style={{ fontSize: 12.5, color: T.textSub, width: 90 }}>採点モデル</span>
@@ -209,17 +180,23 @@ export default function SettingsView() {
           </div>
         </div>
         <div style={{ fontSize: 11.5, color: T.textFaint, lineHeight: 1.8 }}>
-          {/* PROD-API: ここで /v1/messages に接続し、画像 + 採点基準プロンプトを送る */}
-          本番環境では、答案画像とこのアプリの採点基準をAPIに渡し、設問ごとの正誤・部分点・信頼度を受け取ります。
+          AI採点では、答案画像とこのアプリの採点基準を AI の提供元（Anthropic）に送り、設問ごとの正誤・部分点・信頼度を受け取ります。
           APIキーはサーバーの環境変数にだけ置き、この画面やブラウザには入力・保存しません。
         </div>
+        {!demo && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
+            <span style={{ fontSize: 12, color: T.textSub }}>AI への送信の同意（この端末）：{aiConsent ? "同意済み" : "未同意（AI を使うときにたずねます）"}</span>
+            {aiConsent && <Btn size="sm" variant="soft" onClick={() => { setAiConsent(false); setAiConsentState(false); toast("同意を取り消しました。次に AI を使うときにもう一度たずねます"); }}>同意を取り消す</Btn>}
+          </div>
+        )}
       </Card>
     </div>
   );
 }
 
 /* ------------------------------------------------------------ AI採点の準備状況 */
-type Health = { supabase: boolean; ai: boolean; migrations?: Record<string, boolean>; env: string };
+type Health = { supabase: boolean; ai: boolean; migrations?: Record<string, boolean>; env: string;
+  server?: { accountDeletion: boolean; retention: boolean }; publicInfo?: string[] };
 
 function ReadinessCard() {
   const { T, ds } = useUI();
@@ -244,6 +221,10 @@ function ReadinessCard() {
       { label: "原本の赤ペンの位置の調整（0009_mark_positions.sql）", ok: h.migrations?.["0009"] ?? null, fix: "採点結果の原本で ○×△ を動かした位置を保存するのに必要です（実行しなくても、自動で決めた位置で表示できます）。Supabase の SQL Editor で 0009_mark_positions.sql を実行してください。" },
       { label: "返却の版・受信箱・復習の状態（0012_voice_tutor.sql）", ok: h.migrations?.["0012"] ?? null, fix: "生徒の受信箱・返し直しの版・復習の状態（自己申告と先生の確認）に必要です。0010・0011 の後に、Supabase の SQL Editor で 0012_voice_tutor.sql を実行してください。" },
       { label: "ChatGPT で復習の設定（0015_review_copy.sql）", ok: h.migrations?.["0015"] ?? null, fix: "生徒が「ChatGPT で復習」を使うのに必要です（学校・クラスで有効にする設定）。0012〜0014 の後に、Supabase の SQL Editor で 0015_review_copy.sql を実行してください。" },
+      { label: "アカウントの削除・保存期間の削除（0016_account_deletion.sql）", ok: h.migrations?.["0016"] ?? null, fix: "ストアに公開するアプリに必要です（本人によるアカウントの削除）。0015 の後に、Supabase の SQL Editor で 0016_account_deletion.sql を実行してください。" },
+      { label: "アカウントの削除のサーバー設定（SUPABASE_SERVICE_ROLE_KEY）", ok: h.server ? h.server.accountDeletion : null, fix: "Vercel の環境変数に SUPABASE_SERVICE_ROLE_KEY（NEXT_PUBLIC_ を付けない）を設定して再デプロイしてください（docs/STORE-RELEASE.md）。" },
+      { label: "保存期間を過ぎた答案の削除（CRON_SECRET）", ok: h.server ? h.server.retention : null, fix: "Vercel の環境変数に CRON_SECRET（32文字以上の乱数）と SUPABASE_SERVICE_ROLE_KEY を設定して再デプロイしてください。毎日1回、自動で動きます（vercel.json）。" },
+      { label: "公開の情報（提供者名・問い合わせ先・本番の URL）", ok: h.publicInfo ? h.publicInfo.length === 0 : null, fix: `未設定：${(h.publicInfo ?? []).join("、")}。Vercel の環境変数に設定して再デプロイしてください（docs/STORE-RELEASE.md）。` },
       { label: "モデル比較試験の記録（0005_model_compare.sql）", ok: h.migrations?.["0005"] ?? null, fix: "管理者がモデル比較試験を使う場合だけ必要です。Supabase の SQL Editor で 0005_model_compare.sql を実行してください。" },
       { label: "iPhone の写真（HEIC）", ok: true, fix: "" },
     ] : [];

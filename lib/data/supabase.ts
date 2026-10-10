@@ -1,6 +1,7 @@
 // 本番のデータソース。lib/db/grading.ts を呼び、所属校の ID を補って渡す。
 import * as db from "@/lib/db/grading";
 import type { DataSource, SessionInfo } from "@/lib/data/source";
+import { requireAiConsent } from "@/lib/ai-consent";
 
 export function createSupabaseSource(): DataSource {
   let session: SessionInfo | null = null;
@@ -70,6 +71,7 @@ export function createSupabaseSource(): DataSource {
     // 1回の要求でサーバーが呼ぶモデルは1つ。3モデル併用で上の段階に回すときは、同じ requestId で続きを要求する。
     // 通信が切れて応答を受け取れなかったときも同じ requestId で送り直すので、同じモデルを二重に呼ばない（二重課金しない）。
     async aiGrade(submissionId, { mode, onProgress }) {
+      await requireAiConsent();   // 答案を AI に送る前に、明示の同意（同意しなければ何も送らない）
       const requestId = crypto.randomUUID();
       const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
       let networkErrors = 0;
@@ -112,6 +114,7 @@ export function createSupabaseSource(): DataSource {
     uploadImportFile: (requestId, index, file) => db.uploadImportFile(schoolId(), requestId, index, file),
     // 同じ requestId で送り直しても、サーバーは同じ読み取りとして扱う（AI を二重に呼ばない）
     async importTestKey(params) {
+      await requireAiConsent();
       const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
       let networkErrors = 0;
       for (let step = 0; step < 120; step++) {

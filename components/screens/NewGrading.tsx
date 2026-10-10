@@ -15,13 +15,14 @@ import { MODE_LABEL, STAGE_LABEL } from "@/lib/grading/cost";
 import { GradingModePicker } from "@/components/GradingModePicker";
 import { friendlyError } from "@/lib/errors";
 import { useUI } from "@/components/ui-context";
-import { Badge, Bar, Btn, Card, Empty, Field, Modal, PseudoQR, Section, Select, Table, grid } from "@/components/ui";
+import { Badge, Bar, Btn, Card, Empty, Field, Section, Select, Table, grid } from "@/components/ui";
 import type { GradingInput, Quality, Source, Submission } from "@/lib/types";
 
 import { assignPages, type PageInfo } from "@/lib/workflow/intake";
 import NewTestForm from "./NewTestForm";
 import FileThumbnail from "@/components/FileThumbnail";
 import { preflight } from "@/lib/workflow/preflight";
+import { requireAiConsent } from "@/lib/ai-consent";
 
 type Picked = { id: string; name: string; kb: number; src: Source; file?: File; studentId: string; warnings?: string[]; hash?: string };
 
@@ -74,7 +75,6 @@ export default function NewGrading() {
   const [log, setLog] = useState<{ t: string; m: string }[]>([]);
   const [createdIds, setCreatedIds] = useState<string[]>([]);
   const [failed, setFailed] = useState(0);
-  const [modal, setModal] = useState<"" | "mobile" | "mfp">("");
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -123,6 +123,7 @@ export default function NewGrading() {
   const scanPages = async () => {
     setScanBusy(true); setChecked(false);
     try {
+      await requireAiConsent();   // 答案の写真を AI に送る前に、明示の同意
       const pages: PageInfo[] = [];
       for (const f of files) {
         if (!f.file) throw new Error("実際の画像を選んでください");
@@ -226,12 +227,12 @@ export default function NewGrading() {
     const animation = new Promise<void>((resolve) => {
       if (!grading) { resolve(); return; }
       const lines: [string, string][] = [
-        ["quality", `${files.length} 枚（${groups.length} 名分）を検査 → 自動トリミング / 傾き補正 / コントラスト補正を適用`],
+        ["quality", `${files.length} 枚（${groups.length} 名分）の画質を確認`],
         ["quality", demoIssue ? "1 枚でぼやけと影を検出。再撮影の候補として記録しました" : "全ページが採点可能な品質です"],
         ["test", `${test.subject}「${test.name}」${test.grade}年 ${test.term} / 試験番号 ${test.testNo} を抽出`],
         ["test", `問題数 ${test.questions.length} 問・満点 ${test.maxScore} 点・単元 ${test.units.length} 種を確定`],
         ["student", `${klass.label} の出席番号を割り当て、匿名IDで管理します（実名は保存しません）`],
-        ["answer", demo ? "手書き文字・計算式・選択肢・記述を認識（デモ）" : "仮採点：解答の読み取りは行っていません（AI採点は準備中）"],
+        ["answer", demo ? "手書き文字・計算式・選択肢・記述を認識（デモ）" : "仮採点：解答は読み取っていません（点数は答案と無関係です）"],
         ["answer", demoBlank ? "1 枚が全問白紙と判定 → 採点をスキップし模範解答生成へ" : "全ページで解答を検出"],
         ["grade", `${groups.length} 名分 × ${test.questions.length} 問の採点と部分点判定が完了`],
         ["grade", "赤ペン採点画像・弱点分析・フィードバックを生成しました"],
@@ -433,15 +434,13 @@ export default function NewGrading() {
   }
 
   /* ------------------------------------------------------------- 取り込み */
-  const options: { k: Source; icon: string; t: string; d: string; soon?: boolean }[] = [
+  // 取り込み方法：カメラ・ファイル・PDF（複合機のスキャンは PDF に保存してから「PDF一括」で取り込む）
+  const options: { k: Source; icon: string; t: string; d: string }[] = [
     { k: "camera", icon: "📷", t: "カメラで撮影", d: demo ? "撮影ガイド枠つき（教師用）" : "スマートフォン・タブレットのカメラで撮る" },
-    { k: "mobile", icon: "📱", t: "生徒モバイル提出", d: "リンク／QRを配って回収", soon: !demo },
-    { k: "mfp", icon: "🖨", t: "印刷機・コピー機", d: "複合機スキャンから自動取り込み", soon: !demo },
     { k: "file", icon: "💻", t: "PCから選択", d: "JPEG / PNG / HEIC / PDF" },
-    { k: "pdf", icon: "📄", t: "PDF一括", d: demo ? "1ファイルに複数枚を格納" : "PDFファイルを選ぶ（1ファイル＝1人分）" },
+    { k: "pdf", icon: "📄", t: "PDF一括", d: demo ? "1ファイルに複数枚を格納" : "PDFファイルを選ぶ（1ファイル＝1人分。複合機のスキャンもここから）" },
   ];
   const pick = (k: Source) => {
-    if (k === "mobile" || k === "mfp") { setSource(k); setModal(k); return; }
     if (demo && k !== "file") { addDemoFiles(k === "camera" ? 5 : 10, k); return; }
     setSource(k);
     if (k === "camera") cameraRef.current?.click();
@@ -472,7 +471,6 @@ export default function NewGrading() {
                 border: `1px solid ${source === o.k ? T.accent : T.line}`, borderRadius: 13, padding: 14,
                 cursor: "pointer", font: "inherit", position: "relative",
               }}>
-              {o.soon && <span style={{ position: "absolute", top: 10, insetInlineEnd: 10 }}><Badge tone="mute">準備中</Badge></span>}
               <div style={{ fontSize: 21, marginBottom: 6 }}>{o.icon}</div>
               <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{o.t}</div>
               <div style={{ fontSize: 11.5, color: T.textSub, marginTop: 4, lineHeight: 1.6 }}>{o.d}</div>
@@ -503,43 +501,6 @@ export default function NewGrading() {
           {demo && <Btn size="sm" variant="soft" onClick={() => addDemoFiles(9, "camera")}>デモ答案を9枚入れる</Btn>}
         </div>
       </div>
-
-      <Modal open={modal === "mobile"} onClose={() => setModal("")} title="生徒モバイル提出リンク" width={520}
-        footer={demo ? <>
-          <Btn onClick={() => { navigator.clipboard?.writeText("https://grade.example.jp/s/8F3K-92"); toast("リンクをコピーしました"); }}>リンクをコピー</Btn>
-          <Btn variant="primary" onClick={() => { addDemoFiles(8, "mobile"); setModal(""); toast("生徒から8枚の提出がありました"); }}>提出を受け取る（デモ）</Btn>
-        </> : <Btn variant="primary" onClick={() => setModal("")}>閉じる</Btn>}>
-        {demo ? (
-          <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-            <PseudoQR seed={testId.length * 31 + 5} />
-            <div style={{ flex: 1, minWidth: 200 }}>
-              <div style={{ font: `700 13px ${FONT_MONO}`, color: T.text, marginBottom: 6 }}>https://grade.example.jp/s/8F3K-92</div>
-              <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 12, color: T.textSub, lineHeight: 1.85 }}>
-                <li>アプリのインストールは不要です。</li>
-                <li>撮影ガイド枠に用紙を合わせると自動でシャッターが切れます。</li>
-                <li>提出時に名前は入力させず、出席番号だけで受け付けます。</li>
-                <li>リンクは実施日から72時間で失効します。</li>
-              </ul>
-            </div>
-          </div>
-        ) : (
-          <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.85 }}>
-            生徒が自分のスマートフォンから提出する機能は準備中です（提出リンクの発行と受け付けの仕組みを作成しています）。
-            それまでは、先生のスマートフォンの「カメラで撮影」か、「PCから選択」で取り込んでください。
-          </div>
-        )}
-      </Modal>
-
-      <Modal open={modal === "mfp"} onClose={() => setModal("")} title="印刷機・コピー機からの取り込み" width={520}
-        footer={demo
-          ? <Btn variant="primary" onClick={() => { addDemoFiles(12, "mfp"); setModal(""); toast("複合機から12枚のスキャンを受け取りました"); }}>スキャンを受け取る（デモ）</Btn>
-          : <Btn variant="primary" onClick={() => setModal("")}>閉じる</Btn>}>
-        <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.85 }}>
-          {demo
-            ? "複合機のスキャン送信先に本アプリの取り込みアドレスを登録すると、スキャンした答案がそのまま採点キューに入ります（設定画面の「複合機・印刷機との連携」）。"
-            : "複合機のスキャンを直接受け取る機能は準備中です。それまでは、複合機で PDF にスキャンして PC に保存し、「PDF一括」または「PCから選択」で取り込んでください。"}
-        </div>
-      </Modal>
 
       <div id="grading-step-2" style={{scrollMarginTop:110}} />
       <Section title={`2. 取り込んだ答案（${files.length} / ${MAX_FILES} 枚）`}

@@ -23,7 +23,8 @@ from (values
   ('0013', 'tutor_call_secrets 表',            to_regclass('public.tutor_call_secrets') is not null),
   -- 0014 は権限だけを付ける。「自動で公開」がオンの環境では 0014 の前から true になる（それで正しい）
   ('0014', 'authenticated が grading_jobs を読める権限', to_regclass('public.grading_jobs') is not null and has_table_privilege('authenticated', 'public.grading_jobs', 'SELECT')),
-  ('0015', 'schools.review_copy_enabled 列',  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'schools' and column_name = 'review_copy_enabled'))
+  ('0015', 'schools.review_copy_enabled 列',  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'schools' and column_name = 'review_copy_enabled')),
+  ('0016', 'prepare_account_deletion 関数',     exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'prepare_account_deletion'))
 ) as m(no, what, applied)
 order by 1;
 

@@ -31,6 +31,8 @@ export function ReviewCopyPanel({ releaseId, item, meta }: { releaseId: string; 
   const text = buildReviewPrompt(item, meta);
   const area = useRef<HTMLTextAreaElement>(null);
   const [checked, setChecked] = useState(false);
+  // ChatGPT の利用条件（13歳以上。18歳未満は保護者の同意）。13歳未満の生徒は使わない
+  const [age, setAge] = useState(false);
   const [message, setMessage] = useState("");
   const [progress, setProgress] = useState<{ state: string; source: string } | null>(null);
 
@@ -40,7 +42,7 @@ export function ReviewCopyPanel({ releaseId, item, meta }: { releaseId: string; 
   }, [releaseId, item.qno]);
 
   const copy = async () => {
-    if (!checked) { setMessage("先に送る内容を読んで、「送る内容を確認しました」にチェックしてください。"); return; }
+    if (!checked || !age) { setMessage("先に送る内容を読み、2つのチェックを付けてください。"); return; }
     setMessage(await copyText(text, area.current)
       ? "復習内容をコピーしました。「ChatGPT を開く」から、自分のアカウントで貼り付けて送ってください。"
       : "自動でコピーできませんでした。上の文章を長押しして「すべて選択」→「コピー」してください。");
@@ -59,7 +61,7 @@ export function ReviewCopyPanel({ releaseId, item, meta }: { releaseId: string; 
     <section data-testid="review-copy" style={{ border: "1px solid #c9ced6", borderRadius: 14, padding: 12, marginTop: 10, background: "#fbfaf7", maxWidth: "100%", boxSizing: "border-box" }}>
       <h3 style={{ margin: "0 0 6px", fontSize: 17 }}>{item.label}：ChatGPT で復習</h3>
       <ol style={{ fontSize: 14, lineHeight: 1.7, margin: "0 0 8px", paddingInlineStart: 20 }}>
-        <li>下の「送る内容」を読んで確かめ、チェックを付ける</li>
+        <li>下の「送る内容」を読んで確かめ、2つのチェックを付ける</li>
         <li>「復習内容をコピー」を押す</li>
         <li>「ChatGPT を開く」→ 自分のアカウントでログインして、貼り付けて送る</li>
         <li>声で話したいときは、ChatGPT の音声モードを自分で始める</li>
@@ -75,9 +77,16 @@ export function ReviewCopyPanel({ releaseId, item, meta }: { releaseId: string; 
         <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} style={{ width: 20, height: 20, flex: "none" }} />
         <span>送る内容を確認しました</span>
       </label>
+      <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 14, margin: "6px 0" }}>
+        <input type="checkbox" checked={age} onChange={(e) => setAge(e.target.checked)} style={{ width: 20, height: 20, flex: "none" }} />
+        <span>13歳以上です（18歳未満の人は、ChatGPT を使うことに保護者が同意しています）</span>
+      </label>
+      <p style={{ fontSize: 12.5, color: "#555", margin: "0 0 6px" }}>13歳未満の人は、ChatGPT を使えません。わからないところは先生に聞きましょう。</p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button style={{ ...primary, opacity: checked ? 1 : 0.5 }} disabled={!checked} onClick={copy}>📋 復習内容をコピー</button>
-        <a style={btn} href={CHATGPT_URL} target="_blank" rel="noopener noreferrer">ChatGPT を開く ↗</a>
+        <button style={{ ...primary, opacity: checked && age ? 1 : 0.5 }} disabled={!checked || !age} onClick={copy}>📋 復習内容をコピー</button>
+        {age
+          ? <a style={btn} href={CHATGPT_URL} target="_blank" rel="noopener noreferrer">ChatGPT を開く ↗</a>
+          : <span style={{ ...btn, opacity: 0.5, cursor: "not-allowed" }} aria-disabled="true">ChatGPT を開く ↗</span>}
       </div>
       {message && <p role="status" style={{ color: "#8a4b00", fontSize: 14, margin: "6px 0" }}>{message}</p>}
       <p style={{ fontSize: 12.5, color: "#555", margin: "8px 0" }}>

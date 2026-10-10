@@ -31,6 +31,8 @@ echo "== supabase/tests/tutor_sweep_test.sql"
 "${PSQL_APP[@]}" -f supabase/tests/tutor_sweep_test.sql
 echo "== supabase/tests/review_copy_test.sql"
 "${PSQL_APP[@]}" -f supabase/tests/review_copy_test.sql
+echo "== supabase/tests/account_deletion_test.sql"
+"${PSQL_APP[@]}" -f supabase/tests/account_deletion_test.sql
 echo "== supabase/tests/upgrade_test.sh（本番と同じ順の適用）"
 bash supabase/tests/upgrade_test.sh
 echo "== supabase/tests/verify_db_test.sh（検証用 DB への適用スクリプト）"

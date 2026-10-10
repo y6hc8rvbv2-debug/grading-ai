@@ -56,6 +56,8 @@ export function ReviewCopyCard() {
   const [s, setS] = useState<ReviewCopySettings | null>(null);
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
+  // ChatGPT の利用条件は13歳以上。有効にするクラスの生徒が13歳以上であることを、保存の前に先生が確かめる
+  const [age13, setAge13] = useState(false);
   useEffect(() => {
     if (ds.mode !== "supabase") return;
     loadReviewCopySettings().then((v) => { if (v) setS(v); else setMissing(true); });
@@ -85,8 +87,13 @@ export function ReviewCopyCard() {
             </div>
           </div>
           <div style={{ fontSize: 12, color: T.textFaint }}>学校とクラスの両方で有効なときだけ、生徒の画面に「ChatGPT で復習」が出ます。アプリ内の AI との会話の設定とは別です。</div>
+          {canEdit && s.enabled && s.classIds.length > 0 && (
+            <label style={{ color: T.text }}>
+              <input type="checkbox" checked={age13} onChange={(e) => setAge13(e.target.checked)} /> 使えるクラスの生徒は、全員13歳以上です（ChatGPT の利用条件。小学生のクラスは有効にしないでください）
+            </label>
+          )}
           {canEdit ? (
-            <div><Btn variant="primary" disabled={busy} onClick={async () => {
+            <div><Btn variant="primary" disabled={busy || (s.enabled && s.classIds.length > 0 && !age13)} onClick={async () => {
               setBusy(true);
               try { await saveReviewCopySettings(s); toast("ChatGPT での復習の設定を保存しました"); } catch (e) { toast((e as Error).message, "ng"); }
               setBusy(false);

@@ -8,6 +8,7 @@ import { RedPenOverlay } from "@/components/RedPenOverlay";
 import { TutorPanel, type EphemeralKey, type TutorStatus } from "@/components/tutor/TutorPanel";
 import { TutorSettings } from "@/components/tutor/TutorSettings";
 import { ReviewCopyPanel } from "@/components/tutor/ReviewCopyPanel";
+import { AccountDeletion } from "@/components/AccountDeletion";
 import type { ReleasedItem as TutorItem } from "@/lib/tutor/prompt";
 import type { Submission, Test, Item, MarkPos } from "@/lib/types";
 type ReleasedItem = Item & { big: number };
@@ -192,7 +193,9 @@ export default function StudentPage() {
   const [rows, setRows] = useState<Release[]>([]);
   const [inbox, setInbox] = useState<InboxRow[]>([]);
   const [busy, setBusy] = useState(false);
-  const [view, setView] = useState<"list" | "settings" | string>("list");
+  const [view, setView] = useState<"list" | "settings" | "account" | string>("list");
+  // 新規登録の同意（利用規約・プライバシーポリシー。13歳未満は保護者の同意）
+  const [agree, setAgree] = useState(false);
   const [status, setStatus] = useState<TutorStatus | null>(null);
   const [copy, setCopy] = useState<CopyStatus | null>(null);
   // 保存しないキー：この画面を閉じるまでメモリにだけ置く（ブラウザの保存領域には置かない）
@@ -241,6 +244,7 @@ export default function StudentPage() {
     return () => clearInterval(id);
   }, []);
   const auth = async (signup: boolean) => {
+    if (signup && !agree) { setMessage("登録の前に、利用規約とプライバシーポリシーを読んで、同意のチェックを付けてください。"); return; }
     setBusy(true);
     try {
       const db = createClient();
@@ -330,11 +334,21 @@ export default function StudentPage() {
           <button disabled={busy}>ログイン</button>{" "}
           <button
             type="button"
-            disabled={busy || !email || password.length < 8}
+            disabled={busy || !email || password.length < 8 || !agree}
             onClick={() => auth(true)}
           >
             初めて：アカウント登録
           </button>
+          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13.5, margin: "12px 0", lineHeight: 1.7 }}>
+            <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ width: 20, height: 20, flex: "none" }} />
+            <span>
+              （初めて登録するとき）<a href="/terms">利用規約</a>と<a href="/privacy">プライバシーポリシー</a>を読み、同意します。
+              13歳未満の人は、保護者の人がいっしょに読んで同意しています。
+            </span>
+          </label>
+          <p style={{ fontSize: 12.5, color: "#555" }}>
+            <a href="/support">困ったとき・お問い合わせ</a>　<a href="/account-deletion">アカウントの削除について</a>　<a href="/">先生の方はこちら</a>
+          </p>
         </form>
       ) : (
         <>
@@ -347,10 +361,25 @@ export default function StudentPage() {
             <button style={tab(view === "list" || !!current)} onClick={() => setView("list")}>
               受信箱{inbox.some((x) => !x.read_at) ? `（新着 ${inbox.filter((x) => !x.read_at).length}）` : ""}
             </button>
+            <button style={tab(view === "account")} onClick={() => setView("account")}>アカウント</button>
             {status?.student && status.inapp === true && <button style={tab(view === "settings")} onClick={() => setView("settings")}>チャッピー先生の設定</button>}
           </nav>
           {view === "settings" && status?.inapp === true && (
             <TutorSettings status={status} reload={loadStatus} ephemeral={ephemeral} setEphemeral={setEphemeral} />
+          )}
+          {view === "account" && (
+            <section style={{ margin: "12px 0", fontSize: 14, lineHeight: 1.8 }}>
+              <h2 style={{ fontSize: 18 }}>アカウント</h2>
+              <p style={{ margin: "4px 0" }}>ログイン中：{user}</p>
+              <p style={{ margin: "4px 0" }}>
+                <a href="/privacy">プライバシーポリシー</a>　<a href="/terms">利用規約</a>　<a href="/support">お問い合わせ</a>
+              </p>
+              <h3 style={{ fontSize: 16, marginTop: 16 }}>アカウントの削除</h3>
+              <AccountDeletion kind="student" onDeleted={async () => {
+                await logout();
+                setMessage("アカウントを削除しました。");
+              }} />
+            </section>
           )}
           {view === "list" && (
             <>

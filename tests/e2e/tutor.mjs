@@ -19,6 +19,7 @@ const [rpSub] = await rp("submissions?select=id");
 const [mockTest] = await rp("tests?select=id");
 // 管理者（先生）の画面
 const adminCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+await adminCtx.addInitScript(() => { try { localStorage.setItem("ai-consent:2026-10-10", "yes"); } catch {} });   // AI への送信の同意（lib/ai-consent.ts）は済んだものとする
 const page = await adminCtx.newPage();
 page.on("console", (m) => { if (["error", "warning"].includes(m.type())) errors.push(`[admin ${m.type()}] ${m.text()}`); });
 await page.goto(BASE + "/login");

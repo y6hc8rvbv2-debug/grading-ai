@@ -38,7 +38,6 @@ export default function ModelAnswersView() {
           }}>CSVで保存</Btn>
         </div>
         <div style={{ fontSize: 11.5, color: T.textFaint, lineHeight: 1.7 }}>
-          {/* PROD-API: 模範解答と解説の生成をClaude APIに委譲 */}
           テスト管理で登録した正答と解説の要点から作成しています。白紙答案を検出したときは、この模範解答が生徒への配布資料として使えます。
         </div>
       </Card>

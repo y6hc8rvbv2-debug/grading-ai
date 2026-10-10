@@ -63,6 +63,8 @@ await card.waitFor();
 ok(!(await adm.evaluate(() => document.body.innerText)).includes("チャッピー先生（生徒の音声復習）"), "先生の設定画面：アプリ内の会話（キー・時間）の設定は出ない");
 ok(!(await card.getByRole("checkbox").first().isChecked()), "先生の設定画面：既定は無効");
 for (const c of await card.getByRole("checkbox").all()) await c.check();
+ok(await card.getByRole("button", { name: "設定を保存" }).isDisabled(), "有効にするクラスの生徒が13歳以上かを確かめるまで保存できない");
+await card.getByRole("checkbox", { name: /全員13歳以上/ }).check();
 await shot(adm, "0-teacher-settings", adm.locator("section", { hasText: "生徒の復習：本人の ChatGPT で復習" }).first());
 await card.getByRole("button", { name: "設定を保存" }).click();
 await adm.getByText("ChatGPT での復習の設定を保存しました").waitFor();
@@ -87,6 +89,8 @@ for (const s of ["HIDDEN-ANSWER", "HIDDEN-EXPLANATION", "正答（先生が公�
 }
 await panel.scrollIntoViewIfNeeded(); await shot(stu, "2-panel-before-check", panel);
 await panel.getByRole("checkbox", { name: "送る内容を確認しました" }).check();
+ok(await copyBtn.isDisabled() && (await panel.getByRole("link", { name: /ChatGPT を開く/ }).count()) === 0, "13歳以上の確認が無いと、コピーも ChatGPT を開くこともできない");
+await panel.getByRole("checkbox", { name: /13歳以上です/ }).check();
 await copyBtn.click();
 await panel.getByText("復習内容をコピーしました").waitFor();
 await shot(stu, "3-copied", panel);
@@ -160,6 +164,36 @@ const hits = await (await fetch(TRAP + "/__hits")).json();
 ok(hits.length === 0, `採点AI・OpenAI の宛先に要求が1回も来ない（${hits.length}件）`);
 const gwLog = await (await fetch(GW + "/__requests")).json();
 ok(gwLog.every((l) => /^(GET|POST|PATCH|DELETE|HEAD) \/(rest|auth|storage)\/v1\//.test(l)), "DB への要求は REST・ログイン・画像だけ");
+
+// ストアに載せる生徒の画面の写真（STORE_SHOT_DIR を指定したときだけ。scripts/mobile/screenshots.mjs と同じ端末の大きさ）
+if (process.env.STORE_SHOT_DIR) {
+  const devices = {
+    "iphone-6.9": { viewport: { width: 440, height: 956 }, deviceScaleFactor: 3 },
+    "ipad-13": { viewport: { width: 1032, height: 1376 }, deviceScaleFactor: 2 },
+    "android-phone": { viewport: { width: 360, height: 640 }, deviceScaleFactor: 3 },
+  };
+  for (const [name, opts] of Object.entries(devices)) {
+    const ctx = await browser.newContext({ ...opts, isMobile: true, hasTouch: true });
+    const p = await ctx.newPage();
+    await p.goto(BASE + "/student");
+    await p.getByLabel("メール").fill("stu-a@lite.example");
+    await p.getByLabel("パスワード").fill("pass-lite-123");
+    await p.getByRole("button", { name: "ログイン", exact: true }).click();
+    await p.getByTestId("inbox").getByText("一学期ライトテスト").waitFor();
+    await p.waitForTimeout(500);
+    await p.screenshot({ path: `${process.env.STORE_SHOT_DIR}/${name}/06-student-inbox.png` });
+    await p.getByTestId("inbox").getByText("一学期ライトテスト").click();
+    await p.getByRole("button", { name: "ChatGPT で復習" }).click();
+    const panel = p.getByTestId("review-copy");
+    await panel.getByRole("checkbox", { name: "送る内容を確認しました" }).check();
+    await panel.getByRole("checkbox", { name: /13歳以上です/ }).check();
+    await panel.evaluate((el) => el.scrollIntoView({ block: "start" }));
+    await p.waitForTimeout(500);
+    await p.screenshot({ path: `${process.env.STORE_SHOT_DIR}/${name}/07-student-review.png` });
+    await ctx.close();
+  }
+  console.log("✓ ストア用の生徒の画面の写真を保存しました");
+}
 
 ok(errors.length === 0, `コンソールのエラーが無い${errors.length ? "：\n" + errors.join("\n") : ""}`);
 await browser.close();

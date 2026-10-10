@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { aiConfig } from "@/lib/ai/grade";
+import { missingAppInfo } from "@/lib/app-info";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,11 +43,21 @@ export async function GET() {
   const { error: e12 } = await supabase.from("schools").select("tutor_enabled").limit(1);
   // 0015：「本人の ChatGPT で復習」の学校・クラスの設定
   const { error: e15 } = await supabase.from("schools").select("review_copy_enabled").limit(1);
+  // 0016：アカウントの削除・保存期間の削除。purge_submissions は service_role だけが呼べるので、教職員が空で呼ぶと
+  // 「権限がない」で止まる（関数がある）か「見つからない」（未適用）になる。何も変更しない
+  const { error: e16 } = await supabase.rpc("purge_submissions", { p_ids: [] });
 
   return NextResponse.json({
     supabase: true,
     ai: aiConfig().enabled,
-    migrations: { "0004": !missing(e4), "0005": !missing(e5), "0006": !missing(e6), "0007": !missing(e7), "0008": !missing(e8), "0009": !missing(e9), "0012": !missing(e12), "0015": !missing(e15) },
+    migrations: { "0004": !missing(e4), "0005": !missing(e5), "0006": !missing(e6), "0007": !missing(e7), "0008": !missing(e8), "0009": !missing(e9), "0012": !missing(e12), "0015": !missing(e15), "0016": !missing(e16) },
+    // サーバーの設定（値は返さない）：アカウントの削除・保存期間の削除に必要なもの
+    server: {
+      accountDeletion: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      retention: !!process.env.SUPABASE_SERVICE_ROLE_KEY && !!process.env.CRON_SECRET,
+    },
+    // 公開に必要な情報（提供者名・問い合わせ先・本番の URL）のうち、未設定のもの
+    publicInfo: missingAppInfo(),
     env: process.env.VERCEL_ENV ?? "local",
   });
 }

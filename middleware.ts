@@ -38,8 +38,12 @@ export async function middleware(request: NextRequest) {
     response.headers.set("cache-control", "no-store, private");
   }
 
-  // 未ログインならログイン画面へ（チャッピー先生の API は、自分で 401 を返す）
-  if (!user && !path.startsWith("/login") && !path.startsWith("/student") && !path.startsWith("/auth/callback") && !path.startsWith("/api/tutor")) {
+  // 未ログインならログイン画面へ。次はログインなしで開ける：
+  //   ログイン画面・生徒の画面・起動画面・規約などの公開ページ（ストアの審査・保護者も読める）・アプリの情報（manifest）
+  //   チャッピー先生・アカウント削除・保存期間の削除（Cron）の API は、自分で 401 を返す
+  const isPublic = ["/login", "/student", "/start", "/privacy", "/terms", "/support", "/account-deletion", "/auth/callback", "/manifest.webmanifest", "/api/tutor", "/api/account", "/api/retention"]
+    .some((p) => path === p || path.startsWith(p + "/"));
+  if (!user && !isPublic) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

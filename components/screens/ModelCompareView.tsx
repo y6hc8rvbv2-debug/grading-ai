@@ -8,6 +8,7 @@ import { FONT_MONO } from "@/lib/ui/theme";
 import { prepareImage } from "@/lib/image";
 import { useUI } from "@/components/ui-context";
 import { Badge, Btn, Card, Empty, Table } from "@/components/ui";
+import { requireAiConsent } from "@/lib/ai-consent";
 
 type Usage = { input: number; output: number; cacheWrite: number; cacheRead: number };
 type JudgeQ = { qno: number; detected: string; mark: string; earned: number; readOk: boolean; verdictOk: boolean; scoreOk: boolean; all: boolean };
@@ -109,6 +110,8 @@ export default function ModelCompareView() {
 
   const run = async () => {
     if (!picked || lock.current) return;
+    // 答案の写真を AI に送る前に、明示の同意（同意しなければ何も送らない）
+    try { await requireAiConsent(); } catch (e) { setNotice({ tone: "ng", text: (e as Error).message }); return; }
     lock.current = true;
     setBusy(true);
     setNotice(null);

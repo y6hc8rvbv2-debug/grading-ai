@@ -16,6 +16,7 @@ import { Btn, Toast, inputStyle } from "@/components/ui";
 import type { AiGradeSummary, AiStatus, Item, ItemPatch, Rubric, Submission, Workspace } from "@/lib/types";
 import { MODE_LABEL, STAGE_LABEL, type GradingMode } from "@/lib/grading/cost";
 import type { AiGradeProgress } from "@/lib/data/source";
+import { AiConsentDialog } from "@/components/AiConsentDialog";
 
 /** 採点結果の通知に添える方式（例: 3モデル併用・Sonnetで確定） */
 const modeNote = (r: AiGradeSummary) =>
@@ -332,6 +333,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <Ctx.Provider value={ctx}>
+      <AiConsentDialog />
       <div dir={rtl ? "rtl" : "ltr"} style={{
         display: "flex", minHeight: "100vh", background: T.bg, color: T.text,
         font: `14px/1.6 ${FONT_UI}`, WebkitFontSmoothing: "antialiased",
@@ -348,7 +350,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <button onClick={() => setDrawer(true)} aria-label="メニュー"
                 style={{ border: `1px solid ${T.lineStrong}`, background: T.panel, borderRadius: 9, width: 36, height: 34, cursor: "pointer", color: T.text, fontSize: 15 }}>☰</button>
             )}
-            <div style={{ flex: 1, minWidth: 0 }}>
+            {/* スマホ幅では、画面名をメニューの横の1行に置き、言語・テーマなどは次の行へ回す（画面名が潰れないように） */}
+            <div style={{ flex: mobile ? "1 1 calc(100% - 50px)" : 1, minWidth: 0 }}>
               <h1 style={{ margin: 0, font: `700 16px ${FONT_UI}`, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {t(tk)}
               </h1>
