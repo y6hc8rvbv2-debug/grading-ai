@@ -6,7 +6,7 @@
 import { readFileSync, existsSync } from "node:fs";
 
 // 決めてある値（lib/app-info.ts と同じ）。環境変数があればそちらを確かめる
-const DEFAULTS = { provider: "椎井重臣", email: "daikan12321@gmail.com", url: "https://saiten.school-app1.com" };
+const DEFAULTS = { provider: "椎井重臣", email: "testsaiten.support@gmail.com", url: "https://saiten.school-app1.com" };
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const read = (p) => readFileSync(ROOT + p, "utf8");
