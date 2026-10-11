@@ -9,6 +9,16 @@
 
 ## 現在地
 
+### 料金・決済・採点枠・夜間予約（PR #2 をこのブランチに取り込み。2026-10-11）
+
+承認済みの個人・塾・学校料金、Stripe Checkout / Webhook、採点枠の原子的確保、個人・塾のOpus追加55円の支払いと失敗時返金、夜間キュー。マイグレーションは **0017_billing_night.sql**（PR では 0016 だったがアカウントの削除と重なるため改番）。導入と停止は docs/BILLING-NIGHT.md。
+既存データとschools.planを上書きしない。課金のDB設定とBILLING_ENABLEDは既定で停止、NIGHT_GRADING_ENABLEDも既定で停止。Stripe・Supabase・定期処理の設定とsandbox実接続確認が済むまでは本番利用完了と扱わない。
+採点の新しい端末既定は3モデル併用。課金中の採点はサーバーservice_roleで行い、入口で認証・教職員の所属校を確認する（通常の旧経路は従来のRLS）。service_roleをブラウザへ出さない。
+夜間処理は日本時間22時〜翌6時の通常API呼出し。Batch割引は未実装。予約は採点履歴へ保存し、返却は教師確認後の既存操作。自動通知・自動返却はしない。
+**ストア用のアプリの中では料金の案内・申し込み・支払いを出さない**（`lib/native.ts`。capacitor.config.ts の appendUserAgent `TestSaitenApp/1` と Capacitor の橋渡しで判定。サーバーもアプリからの申し込み・支払いを 403）。契約は Web だけ。特定商取引法に基づく表記は `/tokushoho`。
+課金を有効にした環境では、1答案2ページ・20問まで・PDF の答案は採点できない（0017 の billing_reserve）。
+検証：`tests/db/billing.mjs`（PGlite）・`supabase/tests/billing_test.sql`（`npm run test:db`）・`tests/unit/billing.test.ts`・`tests/e2e-lite/store.mjs`（アプリの中で料金を出さない）。本物の Stripe（テストモード）・pg_cron → worker は未確認
+
 **Next.js 14 への移植・Supabase 接続・採点AI（Claude Vision）の実装が完了。**（2026-09-28）
 
 - 全15画面 + ログイン画面が `app/` 配下で動く。データは Supabase に保存され、再読み込みしても残る。
@@ -21,7 +31,7 @@
   アプリID はユーザー指定の「jp.Test Grade.app」が空白を含み使えないため `jp.testgrade.app` にした
   公開ページ（`/start`・`/privacy`・`/terms`・`/support`・`/account-deletion`）、本人によるアカウントの削除（0016）、AI に送る前の同意、保存期間の画像削除（Vercel Cron）、未完成の機能・架空の数値の削除。
   残りはユーザー作業：独自ドメインの割り当て、本番 DB、ビルドと署名（Mac・Android Studio）、ストアの入力
-- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004〜0016 はまだ**（0005 はモデル比較試験、0006 は採点方式と AI採点の記録、0009 は赤ペンの位置、0010・0011 は返却、0012 は返却の版・受信箱とチャッピー先生、0013 はチャッピー先生の見回り、0014 は明示的な GRANT、0015 は「本人の ChatGPT で復習」の設定、0016 はアカウントの削除と保存期間の削除）。
+- 本番 Supabase（ユーザーのプロジェクト）には 0001〜0003 を適用済み（2026-09-28）。**0004〜0017 はまだ**（0005 はモデル比較試験、0006 は採点方式と AI採点の記録、0009 は赤ペンの位置、0010・0011 は返却、0012 は返却の版・受信箱とチャッピー先生、0013 はチャッピー先生の見回り、0014 は明示的な GRANT、0015 は「本人の ChatGPT で復習」の設定、0016 はアカウントの削除と保存期間の削除、0017 は料金・採点枠）。
 - **生徒の復習は「本人の ChatGPT で復習」（B方式）だけを使う方針**（2026-10-07 ユーザーの決定。`docs/REVIEW-CHATGPT.md`）。
   アプリ内の AI との会話（A方式「チャッピー先生」）は `TUTOR_INAPP=on` のときだけ動き、既定は画面に出さずサーバーでも断る（コード・DB の表・追加済みの環境変数は消していない）。
   Vercel の Preview で、ログイン・名簿表示・答案画像の保存まで動作確認済み（ユーザー報告）。
@@ -63,7 +73,7 @@
   root 環境では `su postgres -c "bash supabase/tests/run.sh"`
 - `npm run test:e2e` … Supabase CLI のローカル環境（Docker）にアプリを繋ぎ、ブラウザで教員の作業を通しで検証（`tests/e2e/`）。
   採点AIは代役サーバー（本物の API は呼ばない）。ECR に届かない環境では `SUPABASE_INTERNAL_IMAGE_REGISTRY=docker.io` を付ける
-- `npm run test:db` には `supabase/tests/workflow_test.sql`（返却）・`tutor_test.sql`（受信箱・チャッピー先生）・`tutor_sweep_test.sql`（見回り）・`review_copy_test.sql`（B方式の設定・他の生徒の拒否・自己申告の区別）・`account_deletion_test.sql`（アカウントの削除・保存期間の削除）・`upgrade_test.sh`（0001〜0003＋既存データの DB に 0004〜0016 を足す：途中失敗で何も残らない・2回目はエラー・件数と合計が変わらない）も含まれる
+- `npm run test:db` には `supabase/tests/workflow_test.sql`（返却）・`tutor_test.sql`（受信箱・チャッピー先生）・`tutor_sweep_test.sql`（見回り）・`review_copy_test.sql`（B方式の設定・他の生徒の拒否・自己申告の区別）・`account_deletion_test.sql`（アカウントの削除・保存期間の削除）・`billing_test.sql`（料金・採点枠：サーバーでの採点の確定・失敗の枠戻し・返金待ち・アカウントの削除）・`upgrade_test.sh`（0001〜0003＋既存データの DB に 0004〜0017 を足す：途中失敗で何も残らない・2回目はエラー・件数と合計が変わらない）も含まれる
 - `npm run test:e2e` は A方式の休止中のコードの回帰確認のため `TUTOR_INAPP=on` で動かす。`tests/e2e/tutor.mjs`（返却・チャッピー先生）→ `scenario.mjs`（教員の作業）→ `fullflow.mjs`（答案登録→採点→教師確認→返却→復習を画面で1本に）→ `tutor-sweep.mjs`（ブラウザが来なくても見回りが通話を切る。アプリを再起動するので最後）の順。
   ローカルの Supabase に pg_cron（5秒ごと）→ pg_net → `http://host.docker.internal:3200/api/tutor/sweep` を登録して、本番と同じ経路で動かす
 - `npm run test:e2e:lite` … Docker なしの画面テスト（`tests/e2e-lite/`。`review-copy.mjs` → `store.mjs`：公開ページ・未完成の表示が無い・AI に送る前の同意・アカウントの削除・登録の同意）。専用の PostgreSQL（一時フォルダ・ポート 5433）＋全マイグレーション＋本物の PostgREST（RLS は本物）＋ログイン・画像だけの代役（`gateway.mjs`）。

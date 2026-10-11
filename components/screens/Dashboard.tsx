@@ -6,6 +6,7 @@ import { FONT_UI, FONT_HAND } from "@/lib/ui/theme";
 import { pct } from "@/lib/util";
 import { useUI, type View } from "@/components/ui-context";
 import { Btn, Card, Field, Input, Section, Stat, grid, inputStyle } from "@/components/ui";
+import SubscriptionPlans from "@/components/SubscriptionPlans";
 import { APP_INFO, POLICY_VERSION, mailtoLink } from "@/lib/app-info";
 
 const QA = [
@@ -117,6 +118,9 @@ export default function Dashboard() {
           </div>
         </Card>
       </div>
+
+      {/* 料金・契約（ネイティブアプリでは購入の操作を出さない。components/SubscriptionPlans.tsx） */}
+      <div style={{ marginBottom: 18 }}><SubscriptionPlans /></div>
 
       {/* お問い合わせ */}
       <Card title="お問い合わせ" sub={APP_INFO.provider ? `提供者：${APP_INFO.provider}` : "提供者"}>

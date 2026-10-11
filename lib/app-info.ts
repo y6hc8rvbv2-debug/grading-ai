@@ -9,7 +9,7 @@ export const DEFAULT_PROVIDER = "椎井重臣";
 export const DEFAULT_SUPPORT_EMAIL = "testsaiten.support@gmail.com";
 export const DEFAULT_APP_URL = "https://saiten.school-app1.com";
 /** 規約・ポリシーの版（内容を変えたら日付を更新する） */
-export const POLICY_VERSION = "2026-10-10";
+export const POLICY_VERSION = "2026-10-11";
 
 export const APP_INFO = {
   name: APP_NAME,

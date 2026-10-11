@@ -15,6 +15,9 @@ const config: CapacitorConfig = {
   appName: "テスト採点ver5",
   // 通信できないときに出す画面（mobile/www/offline.html）。ここには秘密もデータも置かない
   webDir: "mobile/www",
+  // アプリから開いたことをサーバー・画面が知るための印（lib/native.ts）。アプリの中では料金の申し込み・支払いの操作を出さない
+  // （App Store 3.1.1・Google Play の決済ポリシー：アプリ内でのデジタルの購入は各ストアの決済が必要なため）
+  appendUserAgent: "TestSaitenApp/1",
   server: {
     url: `${url}/start`,
     // アプリの中で開くのは本番のサイトだけ。ほかのサイト（ChatGPT など）は、端末のブラウザ・アプリで開く

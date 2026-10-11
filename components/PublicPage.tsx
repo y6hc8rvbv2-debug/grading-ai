@@ -15,6 +15,7 @@ export function PublicPage({ title, children, updated = true }: { title: string;
         <span>お問い合わせ：{APP_INFO.supportEmail ? <a href={`mailto:${APP_INFO.supportEmail}`}>{APP_INFO.supportEmail}</a> : <Missing what="問い合わせ先" />}</span>
         <a href="/privacy">プライバシーポリシー</a>
         <a href="/terms">利用規約</a>
+        <a href="/tokushoho">特定商取引法に基づく表記</a>
         <a href="/support">サポート</a>
         <a href="/account-deletion">アカウントの削除</a>
       </footer>

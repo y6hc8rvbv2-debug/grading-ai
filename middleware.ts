@@ -41,7 +41,8 @@ export async function middleware(request: NextRequest) {
   // 未ログインならログイン画面へ。次はログインなしで開ける：
   //   ログイン画面・生徒の画面・起動画面・規約などの公開ページ（ストアの審査・保護者も読める）・アプリの情報（manifest）
   //   チャッピー先生・アカウント削除・保存期間の削除（Cron）の API は、自分で 401 を返す
-  const isPublic = ["/login", "/student", "/start", "/privacy", "/terms", "/support", "/account-deletion", "/auth/callback", "/manifest.webmanifest", "/api/tutor", "/api/account", "/api/retention"]
+  //   決済の通知（Stripe の署名で確かめる）と予約採点の定期処理（BILLING_WORKER_SECRET で確かめる）も、ログインなしで届く必要がある
+  const isPublic = ["/login", "/student", "/start", "/privacy", "/terms", "/support", "/account-deletion", "/tokushoho", "/auth/callback", "/manifest.webmanifest", "/api/tutor", "/api/account", "/api/retention", "/api/billing/webhook", "/api/billing/worker"]
     .some((p) => path === p || path.startsWith(p + "/"));
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

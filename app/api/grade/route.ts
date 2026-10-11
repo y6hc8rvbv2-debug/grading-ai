@@ -21,7 +21,7 @@
 // ============================================================================
 import { targetedTest, mergeTargeted } from "@/lib/ai/targeted";
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { rubricFromRow } from "@/lib/db/rubric";
 import { typeLabelOf } from "@/lib/grading/engine";
 import {
@@ -34,6 +34,7 @@ import {
 } from "@/lib/ai/cascade";
 import { heicToJpeg, looksLikeHeic } from "@/lib/ai/heic";
 import { costOfStage, type GradingMode, type GradingStage } from "@/lib/grading/cost";
+import { billingEnabled, nightEnabled, sameOrigin, workerAuthorized } from "@/lib/billing/server";
 import type { QType, Rubric } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -75,17 +76,18 @@ export async function GET() {
 
 /* ------------------------------------------------------------------ 入力（答案・設問・採点基準・画像） */
 
-async function loadInputs(supabase: Supa, sub: { test_id: string; image_paths: string[] | null }) {
+async function loadInputs(supabase: Supa, sub: { school_id: string; test_id: string; image_paths: string[] | null }) {
   const paths: string[] = sub.image_paths ?? [];
   if (!paths.length) {
     throw new GradingError("この答案には原本画像がないため、AI採点できません。「新規採点」で答案画像を取り込み直してください。", 400);
   }
   if (paths.length > MAX_PAGES) throw new GradingError(`1人分の答案は${MAX_PAGES}ページまでです。ページを分けて取り込んでください。`, 400);
+  if (paths.some(path => path.split("/")[0] !== sub.school_id)) throw new GradingError("答案画像の所属校が一致しません。", 403);
 
   const [{ data: test, error: e2 }, { data: questions, error: e3 }, { data: rubrics, error: e4 }] = await Promise.all([
-    supabase.from("tests").select("id, name, subject, grade, answer_lang").eq("id", sub.test_id).single(),
-    supabase.from("questions").select("*").eq("test_id", sub.test_id).order("no"),
-    supabase.from("rubrics").select("*").or(`test_id.eq.${sub.test_id},test_id.is.null`),
+    supabase.from("tests").select("id, name, subject, grade, answer_lang").eq("id", sub.test_id).eq("school_id", sub.school_id).single(),
+    supabase.from("questions").select("*").eq("test_id", sub.test_id).eq("school_id", sub.school_id).order("no"),
+    supabase.from("rubrics").select("*").eq("school_id", sub.school_id).or(`test_id.eq.${sub.test_id},test_id.is.null`),
   ]);
   if (e2 || e3 || e4 || !test) throw new GradingError("テストの設問を読み込めませんでした。時間をおいて、もう一度お試しください。", 500);
   if (!questions?.length) throw new GradingError("このテストには設問が登録されていません。テスト管理で設問を登録してください。", 400);
@@ -142,17 +144,28 @@ async function loadInputs(supabase: Supa, sub: { test_id: string; image_paths: s
 /* ------------------------------------------------------------------ 採点 */
 
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => null) as { submissionId?: unknown; mode?: unknown; requestId?: unknown } | null;
+  const body = await request.json().catch(() => null) as { submissionId?: unknown; mode?: unknown; requestId?: unknown; opusConsent?: unknown } | null;
   const submissionId = typeof body?.submissionId === "string" ? body.submissionId : "";
   const mode: GradingMode = body?.mode === "cascade" ? "cascade" : "opus";
+  if (body?.mode !== "cascade" && body?.mode !== "opus") return fail("採点方式を選んでください。", 400);
   const requestId = typeof body?.requestId === "string" ? body.requestId : "";
   if (!UUID.test(submissionId)) return fail("採点する答案が指定されていません。画面を再読み込みしてください。", 400);
   if (!UUID.test(requestId)) return fail("画面の情報が古くなっています。画面を再読み込みしてから、もう一度お試しください。", 400);
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const internal = workerAuthorized(request);
+  if (!internal && !sameOrigin(request)) return fail("操作元を確認できません。", 403);
+  const authDb = internal ? createAdminClient() : await createClient();
+  const supabase = internal || billingEnabled() ? createAdminClient() : authDb;
+  const { data: { user: sessionUser } } = internal ? { data: { user: null } } : await authDb.auth.getUser();
+  const { data: queuedJob } = internal ? await supabase.from("grading_jobs").select("created_by").eq("request_id", requestId).single() : { data: null };
+  const user = internal && queuedJob ? { id: queuedJob.created_by } : sessionUser;
   if (!user) return fail("ログインしていません。もう一度ログインしてください。", 401);
 
+  const { data: actor } = await authDb.from("profiles").select("school_id,role").eq("id", user.id).single();
+  if (!actor || !["admin", "teacher"].includes(actor.role)) return fail("採点を行う権限がありません。", 403);
+  const { data: enforce, error: configError } = await supabase.rpc("billing_is_enabled");
+  if (enforce && !billingEnabled()) return fail("課金機能の設定を確認中です。採点を一時停止しています。", 503);
+  if (billingEnabled() && (configError || !enforce)) return fail("課金台帳の準備が完了していません。", 503);
   const cfg = aiConfig();
   if (!cfg.enabled) {
     return fail("採点AIが設定されていません。管理者に、サーバーの環境変数 ANTHROPIC_API_KEY の設定を依頼してください。", 503);
@@ -162,15 +175,17 @@ export async function POST(request: Request) {
     .from("submissions")
     .select("id, school_id, test_id, status, progress, image_paths")
     .eq("id", submissionId)
+    .eq("school_id", actor.school_id)
     .is("deleted_at", null)
     .maybeSingle();
   if (e1) return fail("答案を読み込めませんでした。時間をおいて、もう一度お試しください。", 500);
   if (!sub) return fail("答案が見つかりません。削除されたか、他校の答案です。", 404);
 
   /* ------------------------------------------------ 採点の記録（requestId ごとに1つ） */
-  await supabase.rpc("expire_stale_grading_jobs", { p_submission_id: submissionId });
+  const { data: existingQueue } = billingEnabled() ? await supabase.from("night_queue").select("id").eq("id", (await supabase.from("grading_jobs").select("id").eq("request_id", requestId).maybeSingle()).data?.id || "00000000-0000-0000-0000-000000000000").maybeSingle() : { data: null };
+  if (!existingQueue) await supabase.rpc("expire_stale_grading_jobs", { p_submission_id: submissionId });
   let { data: job } = await supabase.from("grading_jobs").select("*").eq("request_id", requestId).maybeSingle() as { data: JobRow | null };
-  if (job && job.submission_id !== submissionId) return fail("画面の情報が古くなっています。画面を再読み込みしてください。", 400);
+  if (job && (job.submission_id !== submissionId || job.mode !== mode)) return fail("画面の情報が古くなっています。画面を再読み込みしてください。", 400);
   if (job?.status === "done") return NextResponse.json(await summary(supabase, job));
   if (job?.status === "failed") return fail(job.error || "このAI採点は中断されました。もう一度「AIで採点する」を押してください。", 409, { code: "failed" });
 
@@ -178,6 +193,20 @@ export async function POST(request: Request) {
   if (!job) {
     // 入力に問題があれば、記録を作る前に断る（費用はかからない）
     try { inputs = await loadInputs(supabase, sub); } catch (e) { return errorResponse(e); }
+    if (billingEnabled()) {
+      const admin = createAdminClient();
+      const { data: enabled } = await admin.from("billing_config").select("enabled").eq("id", true).single();
+      if (!enabled?.enabled) return fail("課金台帳の有効化が未完了です。", 503);
+      const { data: account } = await admin.from("billing_accounts").select("night").eq("school_id", sub.school_id).maybeSingle();
+      if (account?.night && !nightEnabled()) return fail("夜間採点は一時停止しています。", 503);
+      if (account?.night || mode === "opus") {
+        const { data: worker } = await admin.from("billing_worker_state").select("last_seen").eq("id", true).single();
+        if (!worker?.last_seen || Date.parse(worker.last_seen) < Date.now() - 3 * 60_000) return fail("予約採点の定期処理を確認中です。後ほどお試しください。", 503);
+      }
+      const { data: created, error } = await admin.rpc("billing_start_job", { p_school: sub.school_id, p_user: user.id, p_submission: submissionId, p_request: requestId, p_mode: mode, p_enforced: true, p_consent: body?.opusConsent === true });
+      if (error || !created) return fail(error?.code === "23505" ? "この答案には進行中の採点・予約があります。採点履歴を確認してください。" : error?.message || "採点枠を確保できませんでした。", 409);
+      job = created as JobRow;
+    } else {
     const { data: created, error } = await supabase.from("grading_jobs").insert({
       school_id: sub.school_id, submission_id: submissionId, created_by: user.id, request_id: requestId, mode,
       prev_status: sub.status, prev_progress: sub.progress,
@@ -193,8 +222,15 @@ export async function POST(request: Request) {
       job = created as JobRow;
       await supabase.from("submissions").update({ status: "processing", progress: 30 }).eq("id", submissionId);
     }
+    }
   }
   const theJob = job as JobRow;
+  if (billingEnabled()) {
+    const { data: order } = await supabase.from("billing_orders").select("status").eq("id", theJob.id).maybeSingle();
+    if (order && order.status !== "paid") return fail("Opus単独の追加55円の支払いが必要です。", 402, { jobId: theJob.id, requiresPayment: true });
+    const { data: queue } = await supabase.from("night_queue").select("id,night,due_at").eq("id", theJob.id).maybeSingle();
+    if (queue && !internal) return NextResponse.json({ ok: true, done: false, queued: true, dueAt: queue.due_at, jobId: theJob.id });
+  }
 
   /* ------------------------------------------------ 次の段階を決める */
   const rows = await stageRows(supabase, theJob.id);

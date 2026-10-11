@@ -1,6 +1,6 @@
 // ストアに出すための要件の画面テスト（tests/e2e-lite/run.sh から、review-copy.mjs の後に呼ぶ）。
 //   - ログインなしで読める公開ページ（起動画面・プライバシーポリシー・利用規約・サポート・アカウントの削除）と、アプリの情報（manifest・アイコン）
-//   - 未完成の機能・架空の数値（準備中・為替・料金表・利用者の声）が画面に無い
+//   - 未完成の機能・架空の数値（準備中・為替・利用者の声）が画面に無い。料金は承認済みの値だけで、ストア用のアプリの中では申し込み・支払いを出さない
 //   - 答案を AI に送る前に、送る内容を示して同意をたずねる（同意しなければ送らない）
 //   - 本人によるアカウントの削除（生徒・先生。学校の最後の管理者は削除できない）
 //   - 生徒の新規登録は、利用規約・プライバシーポリシー（13歳未満は保護者）への同意が無いとできない
@@ -29,8 +29,9 @@ const pub = await (await browser.newContext({ viewport: { width: 390, height: 84
 watch(pub, "公開");
 for (const [path, must] of [
   ["/start", ["テスト採点ver5", "先生・職員", "生徒", "プライバシーポリシー"]],
-  ["/privacy", ["プライバシーポリシー", "検証用の提供者", "support@example.com", "Anthropic", "氏名は扱いません", "13歳未満", "削除"]],
-  ["/terms", ["利用規約", "検証用の提供者", "AI の採点は下書き", "購入や課金はありません"]],
+  ["/privacy", ["プライバシーポリシー", "検証用の提供者", "support@example.com", "Anthropic", "Stripe", "氏名は扱いません", "13歳未満", "削除"]],
+  ["/terms", ["利用規約", "検証用の提供者", "AI の採点は下書き", "ストア用のアプリの中では、購入・支払いはできません", "特定商取引法に基づく表記"]],
+  ["/tokushoho", ["特定商取引法に基づく表記", "検証用の提供者", "1,650円", "44,000円", "55円", "support@example.com", "解約", "請求があった場合には、遅滞なく開示"]],
   ["/support", ["サポート", "support@example.com", "アカウントの削除"]],
   ["/account-deletion", ["アカウントの削除", "検証用の提供者", "削除されるもの", "残るもの", "support@example.com"]],
 ]) {
@@ -72,10 +73,26 @@ await adm.getByRole("button", { name: "ログイン" }).click();
 await adm.waitForURL(BASE + "/");
 await adm.getByText("よくある質問").waitFor();
 const dash = await adm.evaluate(() => document.body.innerText);
-for (const ng of ["為替", "ユーザーの声", "サブスクリプション", "¥9,800", "0120-", "準備中", "GDPR", "デモ", "ver.3", "提出用リンクとQRコード"]) {
+for (const ng of ["為替", "ユーザーの声", "¥9,800", "0120-", "準備中", "GDPR", "デモ", "ver.3", "提出用リンクとQRコード", "チャッピー先生", "○×マーク中心"]) {
   ok(!dash.includes(ng), `ダッシュボードに「${ng}」が無い（架空の数値・未完成の機能を出さない）`);
 }
 ok(dash.includes("利用規約とプライバシー") && dash.includes("support@example.com"), "ダッシュボード：規約・プライバシーと問い合わせ先");
+// 料金（Web）：承認済みの料金を表示。決済を有効にしていない環境では申し込みのボタンを出さない（押せないボタンを残さない）
+ok(dash.includes("サブスクリプション") && dash.includes("¥1,650") && dash.includes("¥40,000") && dash.includes("特定商取引法に基づく表記"), "ダッシュボード（Web）：料金と特定商取引法に基づく表記");
+ok(!dash.includes("申し込む") && !dash.includes("夜間採点"), "決済が無効の環境：申し込みのボタン・受付前の夜間プランを出さない");
+// ストア用のアプリ（User-Agent に TestSaitenApp/）：料金の案内・申し込み・支払いを出さず、契約の状況だけ（App Store 3.1.1・Google Play の決済ポリシー）
+{
+  const nat = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, storageState: await admCtx.storageState(),
+    userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 TestSaitenApp/1" })).newPage();
+  watch(nat, "アプリ");
+  await nat.goto(BASE + "/");
+  await nat.getByText("よくある質問").waitFor();
+  const t = await nat.evaluate(() => document.body.innerText);
+  ok(t.includes("ご契約の状況") && !t.includes("¥1,650") && !t.includes("申し込む") && !t.includes("Stripe") && !t.includes("特定商取引法"), "アプリの中：料金の案内・申し込み・外部の決済への案内を出さない（契約の状況だけ）");
+  const r = await nat.evaluate(async () => { const res = await fetch("/api/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: "personal-mini" }) }); return res.status; });
+  ok(r === 403, "アプリの中からの申し込みはサーバーが断る（403）");
+  await nat.context().close();
+}
 await adm.goto(BASE + "/settings");
 await adm.getByText("AIエンジン").first().waitFor();
 const settings = await adm.evaluate(() => document.body.innerText);

@@ -25,6 +25,7 @@ check(/^https:\/\/[^/\s]+$/.test(url) && !/example|invalid|localhost/.test(url),
 
 const appId = "jp.testgrade.app";
 check(read("capacitor.config.ts").includes(`appId: "${appId}"`), "capacitor.config.ts の アプリID", `appId を ${appId} にする`);
+check(read("capacitor.config.ts").includes('appendUserAgent: "TestSaitenApp/') && read("lib/native.ts").includes('"TestSaitenApp/"'), "アプリの印（料金の申し込みをアプリの中で出さない）", "capacitor.config.ts の appendUserAgent と lib/native.ts をそろえる");
 check(existsSync(ROOT + "android/app/build.gradle") && read("android/app/build.gradle").includes(`applicationId "${appId}"`), "Android の パッケージ名", "npx cap add android をやり直す");
 check(existsSync(ROOT + "ios/App/App.xcodeproj/project.pbxproj") && read("ios/App/App.xcodeproj/project.pbxproj").includes(`PRODUCT_BUNDLE_IDENTIFIER = ${appId};`), "iOS の Bundle ID", "npx cap add ios をやり直す");
 const plist = existsSync(ROOT + "ios/App/App/Info.plist") ? read("ios/App/App/Info.plist") : "";
@@ -42,7 +43,7 @@ for (const f of ["app/privacy/page.tsx", "app/terms/page.tsx", "app/support/page
 check(read("vercel.json").includes("/api/retention/purge"), "保存期間の削除（Vercel Cron）", "vercel.json に crons を入れる");
 
 if (process.env.STORE_CHECK_ONLINE === "1" && url) {
-  for (const p of ["/start", "/privacy", "/terms", "/support", "/account-deletion", "/manifest.webmanifest"]) {
+  for (const p of ["/start", "/privacy", "/terms", "/support", "/account-deletion", "/tokushoho", "/manifest.webmanifest"]) {
     const r = await fetch(url + p, { redirect: "manual" }).catch(() => null);
     check(!!r && r.status === 200, `公開ページ ${url}${p}`, "Vercel の Production にデプロイし、ログインなしで開けるか確かめる");
   }

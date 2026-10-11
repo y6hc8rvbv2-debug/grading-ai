@@ -1,4 +1,5 @@
 // 本番のデータソース。lib/db/grading.ts を呼び、所属校の ID を補って渡す。
+import { isNativeApp } from "@/lib/native";
 import * as db from "@/lib/db/grading";
 import type { DataSource, SessionInfo } from "@/lib/data/source";
 import { requireAiConsent } from "@/lib/ai-consent";
@@ -73,6 +74,16 @@ export function createSupabaseSource(): DataSource {
     async aiGrade(submissionId, { mode, onProgress }) {
       await requireAiConsent();   // 答案を AI に送る前に、明示の同意（同意しなければ何も送らない）
       const requestId = crypto.randomUUID();
+      let opusConsent = false;
+      if (mode === "opus") {
+        const billing = await fetch("/api/billing").then(r => r.json());
+        if (billing.enabled && billing.account?.personal !== false) {
+          // ストア用のアプリの中では、追加料金の支払いを出さない（lib/native.ts）
+          if (isNativeApp()) throw new Error("アプリでは、追加料金がかかる Opus 単独は選べません。3モデル併用で採点してください。");
+          opusConsent = window.confirm("Opus単独は追加55円（税込）です。支払い画面へ進みますか？採点に失敗した場合は返金します。");
+          if (!opusConsent) throw new Error("追加料金の支払いを取り消しました。");
+        }
+      }
       const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
       let networkErrors = 0;
       for (let step = 0; step < 60; step++) {
@@ -81,7 +92,7 @@ export function createSupabaseSource(): DataSource {
           res = await fetch("/api/grade", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ submissionId, mode, requestId }),
+            body: JSON.stringify({ submissionId, mode, requestId, opusConsent }),
           });
         } catch {
           if (++networkErrors > 3) {
@@ -91,6 +102,14 @@ export function createSupabaseSource(): DataSource {
           continue;
         }
         const json = await res.json().catch(() => null);
+        if (res.status === 402 && json?.requiresPayment) {
+          const payment = await fetch("/api/billing/opus", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId: json.jobId }) });
+          const info = await payment.json();
+          if (!payment.ok || !info.url) throw new Error(info.error || "支払い画面を開けません。");
+          window.location.assign(info.url);
+          throw new Error("支払い画面に移動します。入金確認後に自動採点します。");
+        }
+        if (json?.queued) return { queued: true, dueAt: json.dueAt, model: "", total: 0, needReview: 0, blank: false, mode };
         if (res.status === 202 && json?.pending) { await wait(3000); continue; }   // 同じ採点がまだモデルを呼んでいる
         if (res.status === 504 || (res.status === 502 && !json)) {
           // 関数の時間切れ：サーバー側の記録が残っているので、同じ requestId で状況を確かめる
