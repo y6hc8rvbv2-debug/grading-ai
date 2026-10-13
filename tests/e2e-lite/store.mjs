@@ -31,7 +31,7 @@ for (const [path, must] of [
   ["/start", ["テスト採点ver5", "先生・職員", "生徒", "プライバシーポリシー"]],
   ["/privacy", ["プライバシーポリシー", "検証用の提供者", "support@example.com", "Anthropic", "Stripe", "氏名は扱いません", "13歳未満", "削除"]],
   ["/terms", ["利用規約", "検証用の提供者", "AI の採点は下書き", "ストア用のアプリの中では、購入・支払いはできません", "特定商取引法に基づく表記"]],
-  ["/tokushoho", ["特定商取引法に基づく表記", "検証用の提供者", "1,650円", "44,000円", "55円", "support@example.com", "解約", "請求があった場合には、遅滞なく開示"]],
+  ["/tokushoho", ["特定商取引法に基づく表記", "検証用の提供者", "月額1,650円（税込）", "月額40,000円（税別）", "月額240,000円（税別）", "月6,500枚まで", "消費税（10%）", "55円", "support@example.com", "解約", "請求があった場合には、遅滞なく開示"]],
   ["/support", ["サポート", "support@example.com", "アカウントの削除"]],
   ["/account-deletion", ["アカウントの削除", "検証用の提供者", "削除されるもの", "残るもの", "support@example.com"]],
 ]) {
@@ -78,8 +78,8 @@ for (const ng of ["為替", "ユーザーの声", "¥9,800", "0120-", "準備中
 }
 ok(dash.includes("利用規約とプライバシー") && dash.includes("support@example.com"), "ダッシュボード：規約・プライバシーと問い合わせ先");
 // 料金（Web）：承認済みの料金を表示。決済を有効にしていない環境では申し込みのボタンを出さない（押せないボタンを残さない）
-ok(dash.includes("サブスクリプション") && dash.includes("¥1,650") && dash.includes("¥40,000") && dash.includes("特定商取引法に基づく表記"), "ダッシュボード（Web）：料金と特定商取引法に基づく表記");
-ok(!dash.includes("申し込む") && !dash.includes("夜間採点"), "決済が無効の環境：申し込みのボタン・受付前の夜間プランを出さない");
+ok(dash.includes("サブスクリプション") && dash.includes("月額1,650円（税込）") && dash.includes("月額40,000円（税別）") && dash.includes("月800枚まで") && dash.includes("特定商取引法に基づく表記"), "ダッシュボード（Web）：料金と特定商取引法に基づく表記");
+ok(!dash.includes("申し込む") && !dash.includes("準備中"), "決済が無効の環境：申し込みのボタンを出さない（押せないボタン・準備中を残さない）");
 // ストア用のアプリ（User-Agent に TestSaitenApp/）：料金の案内・申し込み・支払いを出さず、契約の状況だけ（App Store 3.1.1・Google Play の決済ポリシー）
 {
   const nat = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, storageState: await admCtx.storageState(),
@@ -88,7 +88,7 @@ ok(!dash.includes("申し込む") && !dash.includes("夜間採点"), "決済が�
   await nat.goto(BASE + "/");
   await nat.getByText("よくある質問").waitFor();
   const t = await nat.evaluate(() => document.body.innerText);
-  ok(t.includes("ご契約の状況") && !t.includes("¥1,650") && !t.includes("申し込む") && !t.includes("Stripe") && !t.includes("特定商取引法"), "アプリの中：料金の案内・申し込み・外部の決済への案内を出さない（契約の状況だけ）");
+  ok(t.includes("ご契約の状況") && !t.includes("1,650円") && !t.includes("申し込む") && !t.includes("Stripe") && !t.includes("特定商取引法"), "アプリの中：料金の案内・申し込み・外部の決済への案内を出さない（契約の状況だけ）");
   const r = await nat.evaluate(async () => { const res = await fetch("/api/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: "personal-mini" }) }); return res.status; });
   ok(r === 403, "アプリの中からの申し込みはサーバーが断る（403）");
   await nat.context().close();

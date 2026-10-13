@@ -93,6 +93,11 @@ http.createServer(async (req, res) => {
     }
     return send(res, 200, PAGE, { "content-type": "image/png" });
   }
+  // サーバー（採点の API・service_role）が答案画像を読む（料金の画面テスト tests/e2e-lite/billing.mjs で使う）
+  if (url.pathname.startsWith("/storage/v1/object/") && req.method === "GET") {
+    if (!verify(bearer)) return send(res, 400, { statusCode: "403", error: "Unauthorized", message: "invalid token" });
+    return send(res, 200, PAGE, { "content-type": "image/png" });
+  }
   if (url.pathname.startsWith("/rest/v1/")) {
     const target = new URL(REST + url.pathname.replace("/rest/v1", "") + url.search);
     const headers = { ...req.headers };

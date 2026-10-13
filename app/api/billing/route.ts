@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { isNativeUserAgent } from "@/lib/native";
 import { randomBytes } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/server";
-import { CLEAR_CHECKOUT, appUrl, billingEnabled, billingUser, nightEnabled, priceMap, sameOrigin, stripeClient, syncSubscription } from "@/lib/billing/server";
-import { billingPlan } from "@/lib/billing/catalog";
+import { CLEAR_CHECKOUT, appUrl, billingEnabled, billingUser, nightEnabled, planAvailability, stripeMode, planPriceId, sameOrigin, stripeClient, syncSubscription, verifiedSchoolTaxRate } from "@/lib/billing/server";
+import { BILLING_PLANS, billingPlan } from "@/lib/billing/catalog";
 
 export const dynamic = "force-dynamic";
 export async function GET() {
@@ -17,7 +17,9 @@ export async function GET() {
     const { data: profile } = await db.from("profiles").select("role").eq("id", user.id).single();
     const { data: jobs } = await db.from("grading_jobs").select("id").eq("created_by", user.id).eq("status", "running");
     const { data: orders } = jobs?.length ? await db.from("billing_orders").select("id").in("id", jobs.map(j => j.id)).eq("status", "pending") : { data: [] };
-    return NextResponse.json({ enabled: true, nightEnabled: nightEnabled(), canManage: profile?.role === "admin", pendingOrders: orders || [], account, used: usage?.length || 0, opusAmount: usage?.reduce((n, x) => n + x.amount, 0) || 0 });
+    // コースごとに申し込めるか（理由つき）。料金ID・秘密は返さない
+    const availability = Object.fromEntries(BILLING_PLANS.map((p) => [p.id, planAvailability(p)]));
+    return NextResponse.json({ enabled: true, nightEnabled: nightEnabled(), canManage: profile?.role === "admin", pendingOrders: orders || [], account, used: usage?.length || 0, opusAmount: usage?.reduce((n, x) => n + x.amount, 0) || 0, availability });
   } catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : "契約情報を確認できません。" }, { status: 503 }); }
 }
 export async function POST(req: Request) {
@@ -47,8 +49,11 @@ export async function POST(req: Request) {
       const portal = await stripe.billingPortal.sessions.create({ customer, return_url: appUrl() });
       return NextResponse.json({ url: portal.url });
     }
-    const plan = billingPlan(body.planId);
-    if (!plan || (plan.night && !nightEnabled())) throw Error("このプランは現在申し込めません。");
+    // 受け付けるのはプランのキーだけ（画面から送られた金額・料金ID・上限は使わない）
+    const plan = billingPlan(body?.planId);
+    if (!plan) throw Error("このプランは現在申し込めません。");
+    const available = planAvailability(plan);
+    if (!available.ok) throw Error(available.reason);
     if (plan.night) {
       const { data: worker } = await db.from("billing_worker_state").select("last_seen").eq("id", true).single();
       if (!worker?.last_seen || Date.parse(worker.last_seen) < Date.now() - 3 * 60_000) throw Error("夜間処理を確認中です。後ほどお試しください。");
@@ -79,12 +84,18 @@ export async function POST(req: Request) {
       if (other.status === "open" && other.url) return NextResponse.json({ url: other.url });
       throw Error("申し込みの状態を確認しています。画面を再読み込みしてください。");
     }
-    const priceId = priceMap()[plan.id];
+    const priceId = planPriceId(plan).id;
     if (!priceId) throw Error("このプランの決済設定が未完了です。");
+    // Stripe の料金がアプリの料金表と一致することを確かめる（金額・円・毎月・税区分・有効・テスト/本番の別）
     const price = await stripe.prices.retrieve(priceId);
-    if (price.unit_amount !== plan.amount || price.currency !== "jpy" || price.recurring?.interval !== "month" || price.recurring.interval_count !== 1 || price.tax_behavior !== "inclusive") throw Error("決済側の料金設定がアプリの料金表と一致しません。");
+    if (price.unit_amount !== plan.amount || price.currency !== "jpy" || price.recurring?.interval !== "month" || price.recurring.interval_count !== 1
+        || price.tax_behavior !== plan.taxBehavior || !price.active || price.livemode !== (stripeMode() === "live")) {
+      throw Error("決済側の料金設定がアプリの料金表と一致しません。");
+    }
+    // 学校（税別）は、作成済みの税率で消費税を加える（無ければ止める）
+    const taxRates = plan.taxBehavior === "exclusive" ? [await verifiedSchoolTaxRate(stripe)] : undefined;
     const session = await stripe.checkout.sessions.create({ mode: "subscription", customer,
-      line_items: [{ price: priceId, quantity: 1 }], success_url: `${appUrl()}/billing/return`, cancel_url: appUrl(),
+      line_items: [{ price: priceId, quantity: 1, ...(taxRates ? { tax_rates: taxRates } : {}) }], success_url: `${appUrl()}/billing/return`, cancel_url: appUrl(),
       integration_identifier: `saiten_${randomBytes(8).toString("hex").slice(0,8).replace(/[0-9]/g,"a")}`,
     }, { idempotencyKey: `subscribe-${schoolId}-${plan.id}-${lock.checkout_started_at}` });
     const { error: stored } = await db.from("billing_accounts").update({ checkout_session_id: session.id }).eq("school_id", schoolId);

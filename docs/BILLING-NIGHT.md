@@ -2,8 +2,7 @@
 
 ## 実装と課金方式
 
-個人・塾の通常月額（税込）は100回1,650円・200回2,750円・300回3,850円・1,000回12,100円。夜間は20%OFFの1,320円・2,200円・3,080円・9,680円。
-学校の通常月額（税別）は800回40,000円・2,500回120,000円・4,500回200,000円・6,500回300,000円。夜間は20%OFF。Stripeに設定する学校の実際の支払金額は消費税相当10%込みの44,000円・132,000円・220,000円・330,000円（夜間35,200円・105,600円・176,000円・264,000円）。
+16コースの金額・税区分・上限・テスト用の料金IDは `lib/subscription-plans.ts` の一元表（2026-10-13 確定。docs/SUBSCRIPTION-PLANS.md）。学校の Stripe の料金は税別額（例 40,000円）で、消費税10%は作成済みの税率（`STRIPE_SCHOOL_TAX_RATE_ID`）で加える。
 
 - 月額契約はStripe Checkout（subscription）と署名検証付きWebhook。月次請求の入金済みと現在の契約を照合して利用権を付ける。成功ページだけでは有効化しない。
 - 個人・塾は3モデル併用が基本。Opus単独は採点1回の追加55円を固定額のCheckout（payment）で支払い、入金確認後に自動採点する。月末まとめ請求ではない。夜間も55円、併用の自動点検は追加料金なし。
@@ -24,8 +23,12 @@
 本番へのSQL適用・公開・実課金をこの作業では行わない。最初に本番と別のSupabaseとStripeのsandboxを使う。
 
 1. バックアップと適用済み番号を確認し、0001〜0016適用済みの検証DBに0017_billing_night.sqlを全文1回適用（PR #2 では 0016 だったが、アカウントの削除の 0016 と重なるため 0017 にした）。
-2. Stripeのsandboxで通常・夜間の16プランを各別Productとして作成。月額JPYのPriceを用意し、税込の固定総額、tax_behavior=inclusive、月1回にする。価格IDを`STRIPE_PRICE_IDS_JSON`でplan_id→price_idのJSONとして登録。plan_idはlib/billing/catalog.ts参照。Customer Portalは1契約1商品・数量1、月額プランだけを許可し、クーポンやトライアルは使わない。解約は「期間の終わりに解約」にする（利用規約・特定商取引法に基づく表記と同じ）。
-3. サーバーのみの環境変数：`STRIPE_SECRET_KEY`（必要権限に絞ったrestricted keyを推奨）、`STRIPE_WEBHOOK_SECRET`、`SUPABASE_SERVICE_ROLE_KEY`、`BILLING_APP_URL`（HTTPSのPreviewオリジン）、`BILLING_WORKER_SECRET`（32文字以上のランダム秘密）。公開用Stripeキーは不要。秘密をチャット・git・ブラウザへ入れない。
+2. Stripeのsandbox（テスト採点ver5 検証用）の16コースの商品・料金は作成済み（2026-10-13 ユーザー確認：金額・tax_behavior・毎月・有効・テスト環境）。**作り直さない**。
+   テスト用の料金IDはコードの一元表 `lib/subscription-plans.ts`（`COURSES` の testPriceId）にある。サンドボックスのキー（sk_test_・rk_test_）のときだけ使う。
+   本番のキー（sk_live_・rk_live_）では、環境変数 `STRIPE_LIVE_PRICE_IDS_JSON`（{"personal-mini":"price_…", …}。キーは一元表の key）の料金IDだけを使う。無いコース・テスト用の料金IDを入れたコースは申し込みを止める。
+   個人・塾は税込（tax_behavior=inclusive）、学校は税別（exclusive）。学校のコースは、Stripe に作成済みの消費税の税率（10%・税別に加算）の ID を `STRIPE_SCHOOL_TAX_RATE_ID` に入れたときだけ申し込める（無ければ学校のコースを止める。税率の新規作成・Stripe Tax の有効化はこの作業では行わない）。
+   Customer Portalは1契約1商品・数量1、月額のこの16コースだけを許可し、クーポンやトライアルは使わない。解約は「期間の終わりに解約」にする（利用規約・特定商取引法に基づく表記と同じ）。プラン変更の差額（按分）は Portal の設定に従い、アプリは同じ契約期間の使用済み回数を引き継ぐ。
+3. サーバーのみの環境変数：`STRIPE_SECRET_KEY`（必要権限に絞ったrestricted keyを推奨）、`STRIPE_WEBHOOK_SECRET`、`SUPABASE_SERVICE_ROLE_KEY`、`BILLING_APP_URL`（HTTPSのPreviewオリジン）、`BILLING_WORKER_SECRET`（32文字以上のランダム秘密）、学校のコースを受け付けるなら `STRIPE_SCHOOL_TAX_RATE_ID`。本番では `STRIPE_LIVE_PRICE_IDS_JSON`。公開用Stripeキーは不要。秘密をチャット・git・ブラウザへ入れない。（以前の `STRIPE_PRICE_IDS_JSON` は使わない）
 4. WebhookのURL `/api/billing/webhook` に checkout.session.completed / async_payment_succeeded / async_payment_failed / expired、customer.subscription.created / updated / deleted、invoice.paid / payment_failed を送る。
 5. Supabaseでpg_cron・pg_net・Vaultを有効化。Vaultに環境変数と同じ秘密をbilling_worker_secretとして登録（SQL履歴に平文を残さない）。Preview保護がある場合はVaultのvercel_protection_bypassを準備。次のURLを検証用URLに置換して定期処理を登録：
 
@@ -58,4 +61,4 @@ select cron.schedule('billing-night-worker', '* * * * *',
 
 ## 検証状況
 
-ローカルでビルド・型チェック・単体テスト・隔離PostgreSQLによる課金台帳のテスト（`tests/db/billing.mjs`、`supabase/tests/billing_test.sql`）を行う。Stripeの署名改変と期限切れ、料金・夜間時刻の境界もテスト。外部の実決済、Supabase pg_cronからPreviewへの実行、実機、ピーク負荷、返金の到着は未確認。設定を入れただけで本番導入完了とは扱わない。
+ローカルでビルド・型チェック・単体テスト（`tests/unit/billing.test.ts`：16コースの値・テスト/本番の料金IDの分離・申し込みを止める条件）・隔離PostgreSQLによる課金台帳のテスト（`tests/db/billing.mjs`、`supabase/tests/billing_test.sql`）・Stripe の代役による画面テスト（`tests/e2e-lite/billing.mjs`：表示→申し込み→決済画面への引き渡し→署名つきの通知で反映→通知の重複→採点の上限の境目→解約→学校の税率）を行う。Stripeの署名改変と期限切れ、料金・夜間時刻の境界もテスト。外部の実決済、Supabase pg_cronからPreviewへの実行、実機、ピーク負荷、返金の到着は未確認。設定を入れただけで本番導入完了とは扱わない。

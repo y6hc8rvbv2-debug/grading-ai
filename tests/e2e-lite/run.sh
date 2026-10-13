@@ -18,7 +18,9 @@ REST_PORT=${LITE_REST_PORT:-54398}
 GW_PORT=${LITE_GATEWAY_PORT:-54399}
 TRAP_PORT=${LITE_TRAP_PORT:-54397}
 APP_PORT=${LITE_APP_PORT:-3300}
-for p in "$PG_PORT" "$REST_PORT" "$GW_PORT" "$TRAP_PORT" "$APP_PORT"; do
+BILL_PORT=${LITE_BILL_PORT:-3301}
+STRIPE_PORT=${LITE_STRIPE_PORT:-54396}
+for p in "$PG_PORT" "$REST_PORT" "$GW_PORT" "$TRAP_PORT" "$APP_PORT" "$BILL_PORT" "$STRIPE_PORT"; do
   if (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then echo "✗ ポート $p が使用中です"; exit 1; fi
 done
 
@@ -105,3 +107,19 @@ BASE_URL="http://localhost:$APP_PORT" GATEWAY_URL="http://127.0.0.1:$GW_PORT" TR
 echo "== シナリオ（tests/e2e-lite/store.mjs：ストアの要件）"
 BASE_URL="http://localhost:$APP_PORT" GATEWAY_URL="http://127.0.0.1:$GW_PORT" TRAP_URL="http://127.0.0.1:$TRAP_PORT" \
   node tests/e2e-lite/store.mjs || { echo "--- app.log"; tail -40 "$WORK/app.log"; echo "--- gateway.log"; tail -20 "$WORK/gateway.log"; exit 1; }
+
+echo "== 料金・決済（tests/e2e-lite/billing.mjs）：Stripe の代役と、課金を有効にした2つ目のアプリ（同じビルド）"
+STRIPE_MOCK_PORT="$STRIPE_PORT" node --import tsx tests/e2e-lite/stripe-mock.mjs > "$WORK/stripe.log" 2>&1 &
+PIDS+=($!)
+# 決済のキーはテスト用の形（sk_test_）の架空の値。本物の Stripe には接続しない（STRIPE_API_BASE_URL は代役）。採点AI は罠
+WHSEC="whsec_lite_$(node -e "console.log(require('crypto').randomBytes(12).toString('hex'))")"
+"${CLEAN_ENV[@]}" "${PUBLIC_INFO[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
+  SUPABASE_SERVICE_ROLE_KEY="$SERVICE" BILLING_ENABLED=on STRIPE_SECRET_KEY="sk_test_lite_placeholder" STRIPE_API_BASE_URL="http://127.0.0.1:$STRIPE_PORT" \
+  STRIPE_WEBHOOK_SECRET="$WHSEC" STRIPE_SCHOOL_TAX_RATE_ID="txr_test_jp10" BILLING_APP_URL="https://saiten.example.com" \
+  ANTHROPIC_API_KEY="sk-ant-lite-placeholder" ANTHROPIC_BASE_URL="http://127.0.0.1:$TRAP_PORT" \
+  node_modules/.bin/next start -p "$BILL_PORT" > "$WORK/bill.log" 2>&1 &
+PIDS+=($!)
+for _ in $(seq 1 40); do curl -sf -o /dev/null "http://localhost:$BILL_PORT/login" && curl -sf -o /dev/null "http://127.0.0.1:$STRIPE_PORT/__log" && break; sleep 1; done
+BILL_URL="http://localhost:$BILL_PORT" STRIPE_MOCK_URL="http://127.0.0.1:$STRIPE_PORT" TRAP_URL="http://127.0.0.1:$TRAP_PORT" \
+  PG_URL="postgresql://postgres@127.0.0.1:$PG_PORT/lite" STRIPE_WEBHOOK_SECRET="$WHSEC" \
+  node --import tsx tests/e2e-lite/billing.mjs || { echo "--- bill.log"; tail -40 "$WORK/bill.log"; echo "--- stripe.log"; tail -20 "$WORK/stripe.log"; exit 1; }

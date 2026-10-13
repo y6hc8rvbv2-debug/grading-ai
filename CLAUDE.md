@@ -17,7 +17,10 @@
 夜間処理は日本時間22時〜翌6時の通常API呼出し。Batch割引は未実装。予約は採点履歴へ保存し、返却は教師確認後の既存操作。自動通知・自動返却はしない。
 **ストア用のアプリの中では料金の案内・申し込み・支払いを出さない**（`lib/native.ts`。capacitor.config.ts の appendUserAgent `TestSaitenApp/1` と Capacitor の橋渡しで判定。サーバーもアプリからの申し込み・支払いを 403）。契約は Web だけ。特定商取引法に基づく表記は `/tokushoho`。
 課金を有効にした環境では、1答案2ページ・20問まで・PDF の答案は採点できない（0017 の billing_reserve）。
-検証：`tests/db/billing.mjs`（PGlite）・`supabase/tests/billing_test.sql`（`npm run test:db`）・`tests/unit/billing.test.ts`・`tests/e2e-lite/store.mjs`（アプリの中で料金を出さない）。本物の Stripe（テストモード）・pg_cron → worker は未確認
+**16コース（2026-10-13 確定）の一元表は `lib/subscription-plans.ts`（COURSES：key・対象・通常/夜間・月額・税区分・上限・テスト用の料金ID）**。画面・特商法の表記・決済・Webhook は同じ表を読む。
+料金ID の選択は `lib/billing/prices.ts`：サンドボックスのキー（sk_test_）はテスト用の料金ID、本番のキー（sk_live_）は `STRIPE_LIVE_PRICE_IDS_JSON` だけ（無ければ止める・テスト用の ID は使わない）。学校（税別）は作成済みの税率 `STRIPE_SCHOOL_TAX_RATE_ID` が無ければ止める。
+夜間コースの上限は料金表で未指定のため、以前の仕様（通常と同じ）を残し、ユーザーの確認待ち（docs/SUBSCRIPTION-PLANS.md）。
+検証：`tests/db/billing.mjs`（PGlite）・`supabase/tests/billing_test.sql`（`npm run test:db`）・`tests/unit/billing.test.ts`・`tests/e2e-lite/store.mjs`（アプリの中で料金を出さない）・`tests/e2e-lite/billing.mjs`（Stripe の代役 `stripe-mock.mjs` で申し込み→通知→上限→解約）。本物の Stripe（テストモード）・pg_cron → worker は未確認
 
 **Next.js 14 への移植・Supabase 接続・採点AI（Claude Vision）の実装が完了。**（2026-09-28）
 
