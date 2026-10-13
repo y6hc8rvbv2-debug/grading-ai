@@ -1,0 +1,629 @@
+{
+ "title": "第1回 高校入試模擬テスト",
+ "subject": "数学",
+ "max_score": 100,
+ "max_score_file": 1,
+ "questions": [
+  {
+   "big": 1,
+   "big_label": "1",
+   "sub": "(1)",
+   "type": "calc",
+   "correct": "-1",
+   "correct_status": "read",
+   "correct_file": 1,
+   "points": 4,
+   "points_status": "printed",
+   "points_file": 1,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 1,
+    "page": 1,
+    "x": 0.72,
+    "y": 0.08,
+    "w": 0.2,
+    "h": 0.03
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 1,
+   "big_label": "1",
+   "sub": "(2)",
+   "type": "calc",
+   "correct": "-4a+6b-12",
+   "correct_status": "read",
+   "correct_file": 1,
+   "points": 4,
+   "points_status": "printed",
+   "points_file": 1,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 1,
+    "page": 1,
+    "x": 0.72,
+    "y": 0.115,
+    "w": 0.2,
+    "h": 0.03
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 1,
+   "big_label": "1",
+   "sub": "(3)",
+   "type": "calc",
+   "correct": "3a²/b",
+   "correct_status": "read",
+   "correct_file": 1,
+   "points": 4,
+   "points_status": "printed",
+   "points_file": 1,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 1,
+    "page": 1,
+    "x": 0.72,
+    "y": 0.15000000000000002,
+    "w": 0.2,
+    "h": 0.03
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 1,
+   "big_label": "1",
+   "sub": "(4)",
+   "type": "calc",
+   "correct": "x²-2x-3",
+   "correct_status": "read",
+   "correct_file": 1,
+   "points": 4,
+   "points_status": "printed",
+   "points_file": 1,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 1,
+    "page": 1,
+    "x": 0.72,
+    "y": 0.185,
+    "w": 0.2,
+    "h": 0.03
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 1,
+   "big_label": "1",
+   "sub": "(5)",
+   "type": "calc",
+   "correct": "3/2",
+   "correct_status": "read",
+   "correct_file": 1,
+   "points": 4,
+   "points_status": "printed",
+   "points_file": 1,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 1,
+    "page": 1,
+    "x": 0.72,
+    "y": 0.22000000000000003,
+    "w": 0.2,
+    "h": 0.03
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 2,
+   "big_label": "2",
+   "sub": "(1)",
+   "type": "calc",
+   "correct": "2y(x+1)(x+5)",
+   "correct_status": "read",
+   "correct_file": 1,
+   "points": 4,
+   "points_status": "printed",
+   "points_file": 1,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 1,
+    "page": 1,
+    "x": 0.72,
+    "y": 0.26,
+    "w": 0.2,
+    "h": 0.03
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 2,
+   "big_label": "2",
+   "sub": "(2)",
+   "type": "calc",
+   "correct": "x=4±√11",
+   "correct_status": "read",
+   "correct_file": 1,
+   "points": 4,
+   "points_status": "printed",
+   "points_file": 1,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 1,
+    "page": 1,
+    "x": 0.72,
+    "y": 0.27,
+    "w": 0.2,
+    "h": 0.03
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 2,
+   "big_label": "2",
+   "sub": "(3)",
+   "type": "calc",
+   "correct": "1/2",
+   "correct_status": "read",
+   "correct_file": 1,
+   "points": 4,
+   "points_status": "printed",
+   "points_file": 1,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 1,
+    "page": 1,
+    "x": 0.72,
+    "y": 0.28,
+    "w": 0.2,
+    "h": 0.03
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 2,
+   "big_label": "2",
+   "sub": "(4)",
+   "type": "calc",
+   "correct": "n=2,8,18,72",
+   "correct_status": "read",
+   "correct_file": 1,
+   "points": 4,
+   "points_status": "printed",
+   "points_file": 1,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 1,
+    "page": 1,
+    "x": 0.72,
+    "y": 0.29000000000000004,
+    "w": 0.2,
+    "h": 0.03
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 2,
+   "big_label": "2",
+   "sub": "(5)",
+   "type": "calc",
+   "correct": "(9+9√3)π cm³",
+   "correct_status": "read",
+   "correct_file": 1,
+   "points": 5,
+   "points_status": "unknown",
+   "points_file": 0,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 1,
+    "page": 1,
+    "x": 0.72,
+    "y": 0.3,
+    "w": 0.2,
+    "h": 0.03
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": "配点の印字がかすれています"
+  },
+  {
+   "big": 3,
+   "big_label": "3",
+   "sub": "",
+   "type": "graph",
+   "correct": "右図",
+   "correct_status": "read",
+   "correct_file": 1,
+   "points": 6,
+   "points_status": "printed",
+   "points_file": 1,
+   "explanation": "∠Aの二等分線とBCの交点がP",
+   "criteria": "∠Aの二等分線の作図の跡（弧）が残り、BCとの交点にPと記している",
+   "answer_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "figure_box": {
+    "file": 1,
+    "page": 1,
+    "x": 0.55,
+    "y": 0.48,
+    "w": 0.35,
+    "h": 0.15
+   },
+   "note": ""
+  },
+  {
+   "big": 4,
+   "big_label": "4",
+   "sub": "(1)",
+   "type": "calc",
+   "correct": "240円",
+   "correct_status": "read",
+   "correct_file": 3,
+   "points": 5,
+   "points_status": "printed",
+   "points_file": 1,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 1,
+    "page": 1,
+    "x": 0.72,
+    "y": 0.62,
+    "w": 0.2,
+    "h": 0.03
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 4,
+   "big_label": "4",
+   "sub": "(2)",
+   "type": "calc",
+   "correct": "y=x+80",
+   "correct_status": "read",
+   "correct_file": 1,
+   "points": 6,
+   "points_status": "printed",
+   "points_file": 1,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 4,
+   "big_label": "4",
+   "sub": "(3)",
+   "type": "calc",
+   "correct": "240分",
+   "correct_status": "read",
+   "correct_file": 1,
+   "points": 6,
+   "points_status": "printed",
+   "points_file": 1,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 5,
+   "big_label": "5",
+   "sub": "",
+   "type": "choice",
+   "correct": "ア",
+   "correct_status": "read",
+   "correct_file": 2,
+   "points": 6,
+   "points_status": "printed",
+   "points_file": 2,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 2,
+    "page": 1,
+    "x": 0.75,
+    "y": 0.05,
+    "w": 0.2,
+    "h": 0.04
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 6,
+   "big_label": "6",
+   "sub": "(1)",
+   "type": "calc",
+   "correct": "a=2",
+   "correct_status": "read",
+   "correct_file": 2,
+   "points": 5,
+   "points_status": "printed",
+   "points_file": 2,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 6,
+   "big_label": "6",
+   "sub": "(2)",
+   "type": "calc",
+   "correct": "2",
+   "correct_status": "read",
+   "correct_file": 2,
+   "points": 5,
+   "points_status": "printed",
+   "points_file": 2,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 6,
+   "big_label": "6",
+   "sub": "(3)",
+   "type": "calc",
+   "correct": "",
+   "correct_status": "unreadable",
+   "correct_file": 2,
+   "points": 7,
+   "points_status": "printed",
+   "points_file": 2,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 7,
+   "big_label": "7",
+   "sub": "(1)",
+   "type": "calc",
+   "correct": "378 cm³",
+   "correct_status": "read",
+   "correct_file": 2,
+   "points": 6,
+   "points_status": "printed",
+   "points_file": 2,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  },
+  {
+   "big": 7,
+   "big_label": "7",
+   "sub": "(2)",
+   "type": "calc",
+   "correct": "24√5/5 cm",
+   "correct_status": "read",
+   "correct_file": 2,
+   "points": 7,
+   "points_status": "printed",
+   "points_file": 2,
+   "explanation": "",
+   "criteria": "",
+   "answer_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "figure_box": {
+    "file": 0,
+    "page": 0,
+    "x": 0,
+    "y": 0,
+    "w": 0,
+    "h": 0
+   },
+   "note": ""
+  }
+ ],
+ "warnings": []
+}
