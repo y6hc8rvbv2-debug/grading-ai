@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { isNativeUserAgent } from "@/lib/native";
 import { randomBytes } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/server";
-import { CLEAR_CHECKOUT, appUrl, billingEnabled, billingUser, nightEnabled, planAvailability, stripeMode, planPriceId, sameOrigin, stripeClient, syncSubscription, verifiedSchoolTaxRate } from "@/lib/billing/server";
+import { CLEAR_CHECKOUT, appUrl, contractLabel, billingEnabled, billingUser, nightEnabled, planAvailability, stripeMode, planPriceId, sameOrigin, stripeClient, syncSubscription, verifiedSchoolTaxRate } from "@/lib/billing/server";
 import { BILLING_PLANS, billingPlan } from "@/lib/billing/catalog";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,12 @@ export async function GET() {
     const { data: orders } = jobs?.length ? await db.from("billing_orders").select("id").in("id", jobs.map(j => j.id)).eq("status", "pending") : { data: [] };
     // コースごとに申し込めるか（理由つき）。料金ID・秘密は返さない
     const availability = Object.fromEntries(BILLING_PLANS.map((p) => [p.id, planAvailability(p)]));
-    return NextResponse.json({ enabled: true, nightEnabled: nightEnabled(), canManage: profile?.role === "admin", pendingOrders: orders || [], account, used: usage?.length || 0, opusAmount: usage?.reduce((n, x) => n + x.amount, 0) || 0, availability });
+    // 確認待ちの契約（0018。料金表に無い料金ID）。管理者だけに理由を返す（料金ID そのものは返さない）
+    const { data: rv } = await db.from("billing_accounts").select("review_reason,review_at").eq("school_id", schoolId).maybeSingle();
+    const canManage = profile?.role === "admin";
+    const review = rv?.review_at ? { at: rv.review_at, reason: canManage ? rv.review_reason : null } : null;
+    return NextResponse.json({ enabled: true, nightEnabled: nightEnabled(), canManage, pendingOrders: orders || [], account, planLabel: contractLabel(account?.plan_id), review,
+      used: usage?.length || 0, opusAmount: usage?.reduce((n, x) => n + x.amount, 0) || 0, availability });
   } catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : "契約情報を確認できません。" }, { status: 503 }); }
 }
 export async function POST(req: Request) {
@@ -38,6 +43,16 @@ export async function POST(req: Request) {
       ({ data: account } = await db.from("billing_accounts").select("*").eq("school_id", schoolId).single());
     }
     const stripe = stripeClient();
+    // 契約を再確認（管理者）：Stripe の契約を読み直して反映する。旧プランの対応表を入れたあと、確認待ちを解くのに使う。
+    // 料金・契約は変えない（読むだけ）。対応が分からなければ確認待ちのまま
+    if (body?.action === "resync") {
+      const target = account?.review_subscription_id || account?.subscription_id;
+      if (!target) throw Error("確認する契約がありません。");
+      const r = await syncSubscription(target);
+      return NextResponse.json({ ok: true, review: r.review });
+    }
+    // 確認待ちの契約がある間は、新しい申し込みを受け付けない（二重の契約を防ぐ）
+    if (account?.review_subscription_id && body?.action !== "portal") throw Error("確認待ちの契約があります。管理者が「契約を再確認」するか、お問い合わせください。");
     let customer = account?.customer_id as string | null;
     if (!customer) {
       const c = await stripe.customers.create({ email: user.email }, { idempotencyKey: `school-customer-${schoolId}` });

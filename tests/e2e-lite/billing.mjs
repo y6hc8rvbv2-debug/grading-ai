@@ -130,6 +130,48 @@ last = (await mockLog()).filter((x) => x.path === "/v1/checkout/sessions").at(-1
 ok(r.status === 200 && last["line_items[0][price]"] === "price_1UQ1Iq79SNi0pstBVOm08xNT", "別のコース（学校プロ）に選び直すと、開いていた決済画面を閉じて作り直す");
 ok((await mockLog()).some((x) => /\/v1\/checkout\/sessions\/cs_test_\d+\/expire/.test(x.path)), "前の決済画面は閉じる（支払われないように）");
 
+// ---------------------------------------------------------------- 旧料金ID の既存契約
+// 確認済みの旧プラン（price_LegacyLite01 → legacy-lite-old：月150回）と、対応の分からない料金（price_UnknownLite01）
+const customer = sql(`select customer_id from public.billing_accounts where school_id = '${SCHOOL}'`);
+const subscribe = async (price) => (await (await fetch(`${MOCK}/__subscribe`, { method: "POST", body: JSON.stringify({ customer, price }) })).json()).subscription;
+const read = async () => (await api("/api/billing")).json;
+
+// 対応の分からない料金：権限を推測で付けず、いまの権限も変えず、管理者に確認待ちとして見せる
+const unknownSub = await subscribe("price_UnknownLite01");
+ok(await hook("customer.subscription.created", { id: unknownSub, object: "subscription" }) === 200, "対応の分からない料金の通知も受け付ける（記録して、再送の繰り返しにしない）");
+let b2 = await read();
+ok(b2.account.plan_id === "free" && b2.account.quota === 20 && b2.account.status === "free", "対応の分からない料金：有料の権限を付けない（無料・月20回のまま）");
+ok(b2.review && /料金表・旧プランの対応表に無い/.test(b2.review.reason) && !JSON.stringify(b2).includes("price_UnknownLite01"), "管理者に確認待ちと理由を見せる（料金ID は返さない）");
+ok(await hook("customer.subscription.updated", { id: unknownSub, object: "subscription" }) === 200 && (await read()).account.quota === 20, "同じ契約の通知の再送でも権限は変わらない");
+await page.goto(BASE + "/");
+await page.getByText("契約の内容を確認しています").waitFor();
+ok((await page.evaluate(() => document.body.innerText)).includes("いまの契約の状況・採点の回数は変えていません"), "画面：確認待ちの表示（いまの権限は変えていない）");
+r = await api("/api/billing", { planId: "personal-mini" });
+ok(r.status === 400 && /確認待ち/.test(r.json.error), "確認待ちの間は新しい申し込みを受け付けない（二重の契約を防ぐ）");
+await page.getByRole("button", { name: "契約を再確認" }).click();
+await page.getByText("確認待ちのまま").waitFor();
+ok((await read()).account.quota === 20, "「契約を再確認」：対応表に無いままなら確認待ちのまま（権限は変えない）");
+await fetch(`${MOCK}/__cancel/${unknownSub}`, { method: "POST" });
+ok(await hook("customer.subscription.deleted", { id: unknownSub, object: "subscription" }) === 200, "その契約の解約の通知");
+b2 = await read();
+ok(!b2.review && b2.account.plan_id === "free", "解約されると確認待ちが外れる");
+
+// 確認済みの旧プラン：対応表どおりの上限で扱い、契約画面に旧プランの名前を出す
+const legacySub = await subscribe("price_LegacyLite01");
+ok(await hook("customer.subscription.created", { id: legacySub, object: "subscription" }) === 200, "旧料金ID の契約の通知");
+b2 = await read();
+ok(b2.account.plan_id === "legacy-lite-old" && b2.account.quota === 150 && b2.account.status === "active" && !b2.review, "旧プランの対応表どおりに反映（月150回・契約中）");
+ok(b2.planLabel === "旧ライト（既存契約）", "契約画面に旧プランの名前（既存契約）を出す");
+const period2 = sql(`select period_start from public.billing_accounts where school_id = '${SCHOOL}'`);
+sql(`insert into public.billing_usage(id, school_id, submission_id, period_start, status)
+     select gen_random_uuid(), '${SCHOOL}', 'eeeeeeee-0000-0000-0000-000000000051', '${period2}', 'done' from generate_series(1, 7)`);
+for (const t of ["customer.subscription.updated", "customer.subscription.updated"]) ok(await hook(t, { id: legacySub, object: "subscription" }) === 200, "旧プランの通知の再送");
+b2 = await read();
+ok(b2.account.quota === 150 && b2.used === 7, "再送しても旧プランの上限（150）と使用済み（7）はそのまま");
+await page.goto(BASE + "/");
+await page.getByText("旧ライト（既存契約）").first().waitFor();
+ok(!(await page.evaluate(() => document.body.innerText)).includes("契約の内容を確認しています"), "画面：旧プランの名前を表示し、確認待ちは出ない");
+
 ok(errors.length === 0, `コンソールのエラーが無い${errors.length ? "：" + errors.join(" / ") : ""}`);
 await browser.close();
 sql("update public.billing_config set enabled = false where id = true");

@@ -57,3 +57,44 @@ export function availabilityOf(course: Course, env: BillingEnv): { ok: boolean; 
   if (course.tax === "exclusive" && !env.schoolTaxRateId) return { ok: false, reason: "消費税の設定が完了していないため、学校のコースのお申し込みを停止しています。" };
   return { ok: true };
 }
+
+// ---------------------------------------------------------------- 旧料金ID の既存契約（確認できたものだけ）
+// 現在の16コースに無い料金ID の契約を、そのままの条件（上限・税区分・対象）で扱うための対応表。
+// 値は環境変数 STRIPE_LEGACY_PLANS_JSON（配列）。金額だけで対応先を推測しない：旧プランの仕様を確かめた人が、根拠（source）と一緒に入れる。
+//   [{"key":"legacy-…","label":"旧プランの名前","mode":"test|live","priceIds":["price_…"],"monthlyYen":0,"tax":"inclusive|exclusive",
+//     "limit":100,"audience":"personal|school","night":false,"source":"根拠（契約書・当時の料金表など）"}]
+// 旧プランは新しい申し込みには出さない（Webhook と契約画面だけで使う）。料金の変更・契約の移行・解約はしない。
+export type LegacyPlan = {
+  key: string; label: string; mode: StripeMode; priceIds: string[]; monthlyYen: number; tax: "inclusive" | "exclusive";
+  limit: number; audience: "personal" | "school"; night: boolean; source: string;
+};
+/** 対応表を読む（形が違う行は使わない。現在の16コースのキー・料金ID と重なる行も使わない） */
+export function legacyPlans(json: string | undefined | null): LegacyPlan[] {
+  let raw: unknown;
+  try { raw = JSON.parse(json || "[]"); } catch { return []; }
+  if (!Array.isArray(raw)) return [];
+  const out: LegacyPlan[] = [];
+  for (const r of raw as Record<string, unknown>[]) {
+    if (!r || typeof r !== "object") continue;
+    const ids = Array.isArray(r.priceIds) ? r.priceIds.filter((x): x is string => typeof x === "string" && /^price_[A-Za-z0-9]+$/.test(x)) : [];
+    const ok = typeof r.key === "string" && /^legacy-[a-z0-9-]+$/.test(r.key) && !courseByKey(r.key)
+      && typeof r.label === "string" && r.label.trim() && (r.mode === "test" || r.mode === "live") && ids.length > 0
+      && ids.every((id) => !TEST_IDS.has(id)) && Number.isInteger(r.monthlyYen) && (r.monthlyYen as number) >= 0
+      && (r.tax === "inclusive" || r.tax === "exclusive") && Number.isInteger(r.limit) && (r.limit as number) > 0
+      && (r.audience === "personal" || r.audience === "school") && typeof r.night === "boolean"
+      && typeof r.source === "string" && r.source.trim();
+    if (ok) out.push({ key: r.key as string, label: (r.label as string).trim(), mode: r.mode as StripeMode, priceIds: ids, monthlyYen: r.monthlyYen as number,
+      tax: r.tax as LegacyPlan["tax"], limit: r.limit as number, audience: r.audience as LegacyPlan["audience"], night: r.night as boolean, source: (r.source as string).trim() });
+  }
+  return out;
+}
+
+/** 契約の料金ID から、反映する条件を決める（現在の16コース → 確認済みの旧プラン）。分からなければ null（推測しない） */
+export type ContractTerms = { key: string; label: string; amount: number; taxBehavior: "inclusive" | "exclusive"; limit: number; personal: boolean; night: boolean; legacy: boolean };
+export function contractTermsForPriceId(priceId: string, mode: StripeMode | null, env: { liveJson?: string | null; legacyJson?: string | null }): ContractTerms | null {
+  const c = courseForPriceId(priceId, mode, env.liveJson);
+  if (c) return { key: c.key, label: c.name, amount: c.monthlyYen, taxBehavior: c.tax, limit: c.limit, personal: c.audience === "personal", night: c.night, legacy: false };
+  if (!mode) return null;
+  const l = legacyPlans(env.legacyJson).find((x) => x.mode === mode && x.priceIds.includes(priceId));
+  return l ? { key: l.key, label: l.label, amount: l.monthlyYen, taxBehavior: l.tax, limit: l.limit, personal: l.audience === "personal", night: l.night, legacy: true } : null;
+}

@@ -20,7 +20,8 @@
     "mobile:sync": "cap sync",
     "mobile:open:ios": "cap open ios",
     "mobile:open:android": "cap open android",
-    "test:billing:db": "node tests/db/billing.mjs"
+    "test:billing:db": "node tests/db/billing.mjs",
+    "billing:audit": "node --import tsx scripts/billing/audit.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

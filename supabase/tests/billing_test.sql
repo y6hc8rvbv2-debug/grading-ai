@@ -167,5 +167,17 @@ do $$ begin
   assert (select status from public.billing_orders where payment_intent = 'pi_fixture_f') = 'refund_pending', '返金待ちは残る';
 end $$;
 
+-- 7. 確認待ちの記録（0018）は、先生のセッションからは書き換えられない
+set role authenticated;
+select pg_temp.login('ffffffff-0000-0000-0000-000000000001');
+do $$ begin
+  begin
+    update public.billing_accounts set review_price_id = null, review_at = null;
+    raise exception 'TEST: teacher cleared review';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+reset role;
+
 update public.billing_config set enabled = false where id = true;
 select 'OK: billing_test（課金の無効/有効・サーバーでの採点の確定・失敗の枠戻し・Opus の支払い前は実行しない・返金待ち・先生は台帳を変えられない・アカウントの削除）' as result;

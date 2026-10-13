@@ -116,6 +116,7 @@ WHSEC="whsec_lite_$(node -e "console.log(require('crypto').randomBytes(12).toStr
 "${CLEAN_ENV[@]}" "${PUBLIC_INFO[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
   SUPABASE_SERVICE_ROLE_KEY="$SERVICE" BILLING_ENABLED=on STRIPE_SECRET_KEY="sk_test_lite_placeholder" STRIPE_API_BASE_URL="http://127.0.0.1:$STRIPE_PORT" \
   STRIPE_WEBHOOK_SECRET="$WHSEC" STRIPE_SCHOOL_TAX_RATE_ID="txr_test_jp10" BILLING_APP_URL="https://saiten.example.com" \
+  STRIPE_LEGACY_PLANS_JSON='[{"key":"legacy-lite-old","label":"旧ライト","mode":"test","priceIds":["price_LegacyLite01"],"monthlyYen":9800,"tax":"inclusive","limit":150,"audience":"personal","night":false,"source":"画面テストの架空の旧プラン"}]' \
   ANTHROPIC_API_KEY="sk-ant-lite-placeholder" ANTHROPIC_BASE_URL="http://127.0.0.1:$TRAP_PORT" \
   node_modules/.bin/next start -p "$BILL_PORT" > "$WORK/bill.log" 2>&1 &
 PIDS+=($!)

@@ -22,7 +22,7 @@
 
 本番へのSQL適用・公開・実課金をこの作業では行わない。最初に本番と別のSupabaseとStripeのsandboxを使う。
 
-1. バックアップと適用済み番号を確認し、0001〜0016適用済みの検証DBに0017_billing_night.sqlを全文1回適用（PR #2 では 0016 だったが、アカウントの削除の 0016 と重なるため 0017 にした）。
+1. バックアップと適用済み番号を確認し、0001〜0016適用済みの検証DBに0017_billing_night.sql、続けて 0018_billing_review.sql を全文1回ずつ適用（PR #2 では 0016 だったが、アカウントの削除の 0016 と重なるため 0017 にした）。
 2. Stripeのsandbox（テスト採点ver5 検証用）の16コースの商品・料金は作成済み（2026-10-13 ユーザー確認：金額・tax_behavior・毎月・有効・テスト環境）。**作り直さない**。
    テスト用の料金IDはコードの一元表 `lib/subscription-plans.ts`（`COURSES` の testPriceId）にある。サンドボックスのキー（sk_test_・rk_test_）のときだけ使う。
    本番のキー（sk_live_・rk_live_）では、環境変数 `STRIPE_LIVE_PRICE_IDS_JSON`（{"personal-mini":"price_…", …}。キーは一元表の key）の料金IDだけを使う。無いコース・テスト用の料金IDを入れたコースは申し込みを止める。
@@ -49,6 +49,13 @@ select cron.schedule('billing-night-worker', '* * * * *',
 - 定期処理は1回で1モデル段階を処理し、6分のリースで重複を防ぐ。呼出し中の段階が10分を超えたら再呼出しせず失敗とする。大規模校での翌日納品は未保証。
 - 未完了の申し込み・解約後の再申込は、Stripe上の支払・契約状態を先に確認し、billing_accountsのsubscription_id / checkout_plan / checkout_session_idを管理者が照合してから解除する。DBだけ書き換えて支払い済みと扱わない。
 - 監視対象：billing_worker_state、night_queueのqueued件数と最古時刻、billing_ordersのpending / refund_pending。決済エラー・期限切れ・取り消しは台帳で確認する。
+
+## 旧料金ID の既存契約と確認待ち（2026-10-13）
+
+- 0018_billing_review.sql を 0017 の後に適用する（billing_accounts に確認待ちの列を足すだけ）
+- 確認済みの旧プランは `STRIPE_LEGACY_PLANS_JSON`（docs/SUBSCRIPTION-PLANS.md）。対応の分からない料金ID は権限を変えずに確認待ちにする
+- 既存の契約の調べ方（読み取りだけ）：`npm run billing:audit`（STRIPE_SECRET_KEY は読み取りだけの制限付きキー rk_… を推奨。値はチャットに貼らない）、
+  Supabase の SQL Editor で `supabase/runbook/billing-audit.sql`
 
 ## ブランチへの取り込み時に直したこと（2026-10-11）
 

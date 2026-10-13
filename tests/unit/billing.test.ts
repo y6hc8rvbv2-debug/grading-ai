@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import Stripe from "stripe";
 import { BILLING_PLANS, billingPlan, isNight, nextNightStart } from "../../lib/billing/catalog";
-import { availabilityOf, courseForPriceId, priceIdFor, stripeModeOf } from "../../lib/billing/prices";
+import { availabilityOf, contractTermsForPriceId, courseForPriceId, legacyPlans, priceIdFor, stripeModeOf } from "../../lib/billing/prices";
 import { COURSES, courseByKey, courseLabel, currentPlanLabel, limitLabel, priceLabel } from "../../lib/subscription-plans";
 // 2026-10-13 ユーザー確定の16コース（金額・税区分・上限・テスト用の料金ID）
 const CONFIRMED: [string, number, "inclusive" | "exclusive", number | null, string][] = [
@@ -94,4 +94,34 @@ test("申し込みを止める条件：決済が無効・キーなし・本番�
   assert.equal(availabilityOf(night, { ...env, night: true }).ok, true);
   assert.match(availabilityOf(school, { ...env, schoolTaxRateId: null }).reason!, /消費税/);
   assert.equal(availabilityOf(school, env).ok, true);
+});
+
+test("旧料金ID の対応表：確認済み（根拠つき）の行だけを使い、16コース・テスト用の ID と重ねない", () => {
+  const row = { key: "legacy-old-a", label: "旧A", mode: "live", priceIds: ["price_OLDa1"], monthlyYen: 9800, tax: "inclusive", limit: 150, audience: "personal", night: false, source: "当時の料金表" };
+  assert.equal(legacyPlans(JSON.stringify([row])).length, 1);
+  for (const bad of [
+    { ...row, source: "" },                                      // 根拠が無い
+    { ...row, key: "personal-mini" },                            // 現在のコースのキー
+    { ...row, key: "old-a" },                                    // legacy- で始まらない
+    { ...row, priceIds: ["price_1UPkN679SNi0pstBtGaeLtlf"] },     // 現在のテスト用の料金ID
+    { ...row, limit: 0 },                                        // 上限なし（無制限にしない）
+    { ...row, mode: "prod" },
+  ]) assert.equal(legacyPlans(JSON.stringify([bad])).length, 0, JSON.stringify(bad));
+  assert.deepEqual(legacyPlans("{broken"), []);
+  assert.deepEqual(legacyPlans(undefined), []);
+});
+test("契約の料金ID → 反映する条件：16コース → 確認済みの旧プラン → 不明は null（推測しない）。テストと本番を混ぜない", () => {
+  const legacyJson = JSON.stringify([{ key: "legacy-old-a", label: "旧A", mode: "live", priceIds: ["price_OLDa1"], monthlyYen: 9800, tax: "inclusive", limit: 150, audience: "personal", night: false, source: "当時の料金表" }]);
+  assert.equal(contractTermsForPriceId("price_1UQ1Iq79SNi0pstBVOm08xNT", "test", {})?.key, "school-upper");
+  const old = contractTermsForPriceId("price_OLDa1", "live", { legacyJson })!;
+  assert.equal(old.key, "legacy-old-a"); assert.equal(old.limit, 150); assert.equal(old.legacy, true); assert.equal(old.amount, 9800);
+  assert.equal(contractTermsForPriceId("price_OLDa1", "test", { legacyJson }), null, "本番の旧プランをテストの契約に使わない");
+  assert.equal(contractTermsForPriceId("price_SAME9800", "live", { legacyJson }), null, "同じ金額でも、対応表に無い料金ID は推測しない");
+  assert.equal(contractTermsForPriceId("price_OLDa1", null, { legacyJson }), null);
+});
+test("学校の夜間の上限は通常と同じ（2026-10-13 確定）", () => {
+  for (const t of ["mini", "light", "standard", "pro"]) {
+    const n = COURSES.find((c) => c.audience === "school" && !c.night && c.tier === t)!, x = COURSES.find((c) => c.audience === "school" && c.night && c.tier === t)!;
+    assert.equal(x.limit, n.limit);
+  }
 });

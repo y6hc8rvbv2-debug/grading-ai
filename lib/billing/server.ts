@@ -3,8 +3,8 @@ import Stripe from "stripe";
 import { timingSafeEqual } from "node:crypto";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { FREE_QUOTA, billingPlan, type BillingPlan } from "./catalog";
-import { availabilityOf, courseForPriceId, priceIdFor, stripeModeOf } from "./prices";
-import { courseByKey } from "@/lib/subscription-plans";
+import { availabilityOf, contractTermsForPriceId, legacyPlans, priceIdFor, stripeModeOf } from "./prices";
+import { courseByKey, currentPlanLabel } from "@/lib/subscription-plans";
 
 export const billingEnabled = () => process.env.BILLING_ENABLED === "on";
 export const nightEnabled = () => billingEnabled() && process.env.NIGHT_GRADING_ENABLED === "on";
@@ -84,6 +84,13 @@ export function freePeriod(now = new Date()) {
 }
 /** 申し込み中の印（決済画面の作成中・表示中）を外す値 */
 export const CLEAR_CHECKOUT = { checkout_plan: null, checkout_session_id: null, checkout_started_at: null };
+/** 契約の表示名（現在の16コース・確認済みの旧プラン・以前の学校の契約） */
+export function contractLabel(planId: string | null | undefined) {
+  const legacy = legacyPlans(process.env.STRIPE_LEGACY_PLANS_JSON).find((x) => x.key === planId);
+  return legacy ? `${legacy.label}（既存契約）` : currentPlanLabel(planId ?? undefined);
+}
+/** 確認待ち（料金表に無い料金ID。0018）の記録を外す値 */
+export const CLEAR_REVIEW = { review_subscription_id: null, review_price_id: null, review_reason: null, review_at: null };
 
 export async function syncSubscription(id: string) {
   const stripe = stripeClient();
@@ -93,35 +100,42 @@ export async function syncSubscription(id: string) {
   const { data: account, error } = await db.from("billing_accounts").select("school_id,subscription_id").eq("customer_id", customer).single();
   if (error || !account) throw Error("契約の支払者が見つかりません。");
   // 既存契約と別のsubscriptionで上書きしない（二重契約を防ぐ）。
-  if (account.subscription_id && account.subscription_id !== id) return;
+  if (account.subscription_id && account.subscription_id !== id) return { review: false as const };
   // 解約・期限切れ：無料プランに戻す（以前は解約後も「契約の支払いを確認してください」のまま採点できず、再申し込みもできなかった）
   if (sub.status === "canceled" || sub.status === "incomplete_expired") {
     const { error: reset } = await db.from("billing_accounts").update({
       subscription_id: null, plan_id: "free", status: "free", quota: FREE_QUOTA, personal: true, night: false,
-      ...freePeriod(), ...CLEAR_CHECKOUT,
+      ...freePeriod(), ...CLEAR_CHECKOUT, ...CLEAR_REVIEW,
     }).eq("school_id", account.school_id);
     if (reset) throw Error("契約情報の保存に失敗しました。");
-    return;
+    return { review: false as const };
   }
-  if (sub.items.data.length !== 1) throw Error("契約の商品が一致しません。");
-  const item = sub.items.data[0];
-  // 料金ID からコースを決める（いまのキーの種類の表だけ。テスト用と本番用を混ぜない）
-  const course = courseForPriceId(item.price.id, stripeMode(), process.env.STRIPE_LIVE_PRICE_IDS_JSON);
-  const plan = course && billingPlan(course.key);
-  if (!plan || item.quantity !== 1 || item.price.currency !== "jpy" || item.price.unit_amount !== plan.amount
-      || item.price.tax_behavior !== plan.taxBehavior || item.price.livemode !== (stripeMode() === "live")) {
-    throw Error("契約の料金が料金表と一致しません。");
+  // 料金ID から反映する条件を決める（現在の16コース → 確認済みの旧プランの対応表。テスト用と本番用を混ぜない）
+  const item = sub.items.data.length === 1 ? sub.items.data[0] : null;
+  const terms = item ? contractTermsForPriceId(item.price.id, stripeMode(), { liveJson: process.env.STRIPE_LIVE_PRICE_IDS_JSON, legacyJson: process.env.STRIPE_LEGACY_PLANS_JSON }) : null;
+  const mismatch = !item ? "契約の商品が1つではありません"
+    : !terms ? "料金表・旧プランの対応表に無い料金です"
+    : item.quantity !== 1 || item.price.currency !== "jpy" || item.price.unit_amount !== terms.amount || item.price.tax_behavior !== terms.taxBehavior
+      || item.price.livemode !== (stripeMode() === "live") ? "料金の金額・税区分・数量が対応表と一致しません" : null;
+  if (!item || !terms || mismatch) {
+    // 推測で有料の権限を付けない。いまのプラン・上限・状態も変えない。確認待ちとして記録し、管理者の画面に出す（0018）
+    const { error: review } = await db.from("billing_accounts").update({
+      review_subscription_id: sub.id, review_price_id: item?.price.id ?? null, review_reason: mismatch, review_at: new Date().toISOString(),
+    }).eq("school_id", account.school_id);
+    if (review) throw Error("確認待ちの契約を記録できません。");
+    return { review: true as const };
   }
   const invoice = typeof sub.latest_invoice === "object" && sub.latest_invoice ? sub.latest_invoice : null;
   const paid = invoice?.status === "paid";
   const active = sub.status === "active" && paid;
   const { error: update } = await db.from("billing_accounts").update({
-    subscription_id: sub.id, plan_id: plan.id, quota: plan.limit,
-    personal: plan.personal, night: plan.night, status: active ? "active" : sub.status === "active" ? "payment_pending" : sub.status,
+    subscription_id: sub.id, plan_id: terms.key, quota: terms.limit,
+    personal: terms.personal, night: terms.night, status: active ? "active" : sub.status === "active" ? "payment_pending" : sub.status,
     period_start: new Date(item.current_period_start * 1000).toISOString(),
     period_end: new Date(item.current_period_end * 1000).toISOString(),
     // 契約ができたので、申し込み中の印を外す（残すと、解約後に申し込み直せなかった）
-    ...CLEAR_CHECKOUT,
+    ...CLEAR_CHECKOUT, ...CLEAR_REVIEW,
   }).eq("school_id", account.school_id);
   if (update) throw Error("契約情報の保存に失敗しました。");
+  return { review: false as const };
 }

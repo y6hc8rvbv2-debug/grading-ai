@@ -25,7 +25,8 @@ from (values
   ('0014', 'authenticated が grading_jobs を読める権限', to_regclass('public.grading_jobs') is not null and has_table_privilege('authenticated', 'public.grading_jobs', 'SELECT')),
   ('0015', 'schools.review_copy_enabled 列',  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'schools' and column_name = 'review_copy_enabled')),
   ('0016', 'prepare_account_deletion 関数',     exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'prepare_account_deletion')),
-  ('0017', 'billing_config 表（料金・採点枠）', to_regclass('public.billing_config') is not null)
+  ('0017', 'billing_config 表（料金・採点枠）', to_regclass('public.billing_config') is not null),
+  ('0018', 'billing_accounts.review_price_id 列（確認待ち）', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'billing_accounts' and column_name = 'review_price_id'))
 ) as m(no, what, applied)
 order by 1;
 

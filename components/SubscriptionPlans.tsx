@@ -16,6 +16,10 @@ type BillingInfo = {
   enabled?: boolean; nightEnabled?: boolean; canManage?: boolean; used?: number; opusAmount?: number; error?: string;
   account?: { plan_id?: string; status?: string; quota?: number } | null;
   pendingOrders?: { id: string }[]; availability?: Availability;
+  /** 契約の表示名（確認済みの旧プランを含む。サーバーが決める） */
+  planLabel?: string;
+  /** 料金表に無い料金ID の契約（確認待ち。0018）。理由は管理者だけ */
+  review?: { at: string; reason: string | null } | null;
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -46,7 +50,17 @@ export default function SubscriptionPlans() {
     } catch (e) { setMessage(e instanceof Error ? e.message : "決済を開始できません。"); } finally { setBusy(false); }
   };
 
-  const current = currentPlanLabel(billing?.account?.plan_id || session.school?.plan);
+  const current = billing?.planLabel || currentPlanLabel(billing?.account?.plan_id || session.school?.plan);
+  const resync = async () => {
+    setBusy(true); setMessage("");
+    try {
+      const r = await fetch("/api/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "resync" }) });
+      const info = await r.json();
+      if (!r.ok) throw Error(info.error || "契約を確認できませんでした。");
+      setMessage(info.review ? "まだ料金表・旧プランの対応表に無い契約です（確認待ちのまま。権限は変えていません）。" : "契約を確認し、反映しました。");
+      setBilling(await (await fetch("/api/billing")).json());
+    } catch (e) { setMessage(e instanceof Error ? e.message : "契約を確認できませんでした。"); } finally { setBusy(false); }
+  };
   const quota = billing?.account?.quota ?? 20;
   const canApply = !!(billing?.enabled && billing?.canManage);
 
@@ -103,6 +117,13 @@ export default function SubscriptionPlans() {
       {(billing.opusAmount || 0) > 0 && ` ／ Opus 単独の追加料金：${(billing.opusAmount || 0).toLocaleString("ja-JP")}円`}
       {billing.canManage && <><br /><Btn onClick={() => post("/api/billing", { action: "portal" })} disabled={busy}>契約・支払い管理</Btn></>}
     </p>}
+    {billing?.review && <div role="status" style={{ border: `1px solid ${T.warn}`, borderRadius: 10, padding: 12, margin: "8px 0", fontSize: 13, lineHeight: 1.7 }}>
+      <b>契約の内容を確認しています</b>（{new Date(billing.review.at).toLocaleString("ja-JP")} から）。いまの契約の状況・採点の回数は変えていません。
+      {billing.canManage && <>
+        <br />理由：{billing.review.reason || "料金表に無い契約です"}。旧プランの対応表を確認したあと「契約を再確認」を押してください（料金・契約は変えません）。
+        <br /><Btn size="sm" onClick={resync} disabled={busy}>契約を再確認</Btn>
+      </>}
+    </div>}
     {message && <p role="alert" style={{ color: T.ng }}>{message}</p>}
     {billing?.pendingOrders?.map((o) => <p key={o.id}><Btn disabled={busy} onClick={() => post("/api/billing/opus", { jobId: o.id })}>未完了の Opus 単独の追加料金（{PERSONAL_OPUS_SURCHARGE}円）の支払いを再開</Btn></p>)}
 

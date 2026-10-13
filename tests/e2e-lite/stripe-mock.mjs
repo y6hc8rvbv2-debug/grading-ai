@@ -20,6 +20,11 @@ const sessions = new Map(), subs = new Map();
 let n = 0;
 const now = () => Math.floor(Date.now() / 1000);
 
+// 旧料金ID の代役（現在の16コースに無い料金）。price_LegacyLite01 は確認済みの旧プラン（run.sh の STRIPE_LEGACY_PLANS_JSON）、
+// price_UnknownLite01 は対応の分からない料金
+const EXTRA = { price_LegacyLite01: { monthlyYen: 9800, tax: "inclusive" }, price_UnknownLite01: { monthlyYen: 5000, tax: "inclusive" } };
+const extraPrice = (id) => EXTRA[id] && { id, object: "price", active: true, livemode: false, currency: "jpy", unit_amount: EXTRA[id].monthlyYen,
+  tax_behavior: EXTRA[id].tax, type: "recurring", recurring: { interval: "month", interval_count: 1 }, product: `prod_${id}` };
 const price = (c) => ({
   id: c.testPriceId, object: "price", active: true, livemode: false, currency: "jpy", unit_amount: c.monthlyYen,
   tax_behavior: c.tax, type: "recurring", recurring: { interval: "month", interval_count: 1 }, product: `prod_${c.key}`,
@@ -37,7 +42,8 @@ http.createServer(async (req, res) => {
   let m;
   if ((m = url.pathname.match(/^\/v1\/prices\/([^/]+)$/))) {
     const c = COURSES.find((x) => x.testPriceId === m[1]);
-    return c ? send(200, price(c)) : send(404, { error: { type: "invalid_request_error", message: "No such price" } });
+    const p = c ? price(c) : extraPrice(m[1]);
+    return p ? send(200, p) : send(404, { error: { type: "invalid_request_error", message: "No such price" } });
   }
   if ((m = url.pathname.match(/^\/v1\/tax_rates\/([^/]+)$/))) {
     return m[1] === "txr_test_jp10"
@@ -75,6 +81,18 @@ http.createServer(async (req, res) => {
       items: { object: "list", data: [{ id: `si_${n}`, object: "subscription_item", quantity: 1, price: price(c), current_period_start: now() - 60, current_period_end: now() + 30 * 86400 }] } });
     Object.assign(s, { status: "complete", payment_status: "paid", subscription: id });
     return send(200, { session: s.id, subscription: id });
+  }
+  // 既存の契約を作る（旧料金ID の契約の再現）：{"customer":"cus_…","price":"price_…"}
+  if (url.pathname === "/__subscribe" && req.method === "POST") {
+    const b = JSON.parse(body || "{}");
+    const c = COURSES.find((x) => x.testPriceId === b.price);
+    const p = c ? price(c) : extraPrice(b.price);
+    if (!p || !b.customer) return send(400, {});
+    const id = `sub_test_${++n}`;
+    subs.set(id, { id, object: "subscription", status: "active", customer: b.customer, livemode: false,
+      latest_invoice: { id: `in_${n}`, object: "invoice", status: "paid" },
+      items: { object: "list", data: [{ id: `si_${n}`, object: "subscription_item", quantity: 1, price: p, current_period_start: now() - 60, current_period_end: now() + 30 * 86400 }] } });
+    return send(200, { subscription: id });
   }
   if ((m = url.pathname.match(/^\/__cancel\/([^/]+)$/))) {
     const s = subs.get(m[1]);
