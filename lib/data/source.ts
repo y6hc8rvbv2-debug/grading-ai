@@ -55,9 +55,10 @@ export interface DataSource {
 
   /** 模範解答からの自動入力：資料を保存する／AI で読み取る／不要な資料を消す／登録したテストと紐づける */
   uploadImportFile(requestId: string, index: number, file: File): Promise<string>;
+  /** 同意の確認 → /api/test-import。待つ時間には上限がある（lib/test-import-client.ts）。signal で待機を中止できる */
   importTestKey(params: {
     requestId: string; files: { path: string; kind: "key" | "paper" | "student"; name: string }[]; force?: boolean; generate?: boolean;
-  }): Promise<{ importId: string; result: ImportResult; cached: boolean }>;
+  }, opts?: { signal?: AbortSignal }): Promise<{ importId: string; result: ImportResult; cached: boolean }>;
   removeImportFiles(paths: string[]): Promise<void>;
   /** テストの削除（答案が無いとき）／アーカイブ（答案・成績があるとき）。管理者だけ */
   testUsage(testId: string): Promise<{ submissions: number }>;

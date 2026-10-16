@@ -9,6 +9,10 @@
 //   - 同じ requestId の再送（連打・通信の再送）は、同じ読み取りとして扱う（実行中なら 202、終わっていれば同じ結果）
 //   - 同じ資料（内容の sha256 と種類が同じ）の読み取りは、実行中なら断り、終わっていれば結果を再利用する
 //     （force: true のときだけ、もう一度 AI に読ませる）
+// 無期限に「実行中」にしない
+//   - AI の呼び出しは AI_DEADLINE_MS で打ち切り、記録を failed にして理由を返す（Vercel の上限 maxDuration より前に終える）
+//   - それでも関数が強制終了されて running のまま残った記録は、STALE_RUNNING_MS を過ぎたら failed にする
+//     （同じ requestId の確認・同じ資料の新しい読み取りのときに片付ける。片付けた読み取りの AI は、もう動いていない）
 // テスト・答案・成績には書き込まない（登録は画面の「登録する」で行う）。
 // ANTHROPIC_API_KEY はサーバーの中だけで使い、応答・ログには出さない。
 // ============================================================================
@@ -26,6 +30,10 @@ import { costOfStage } from "@/lib/grading/cost";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+const AI_DEADLINE_MS = 270_000;                  // 要求の受付から。残りの30秒で記録を保存して応答する
+const STALE_RUNNING_MS = (maxDuration + 60) * 1000;
+const STALE_MESSAGE = "前回の読み取りが時間内に終わりませんでした（サーバーの処理が途中で止まりました）。もう一度「AIで読み取って入力する」を押してください。";
+const TIMEOUT_MESSAGE = "AI の読み取りが時間内（約4分半）に終わりませんでした。資料の枚数を減らすか、時間をおいて、もう一度お試しください。";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KINDS: SourceKind[] = ["key", "paper", "student"];
@@ -39,6 +47,7 @@ const fail = (message: string, status: number, extra: Record<string, unknown> = 
 type FileIn = { path: string; kind: SourceKind; name: string };
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
   const body = await request.json().catch(() => null) as { requestId?: unknown; files?: unknown; force?: unknown; generate?: unknown } | null;
   const requestId = typeof body?.requestId === "string" ? body.requestId : "";
   const force = body?.force === true;
@@ -65,8 +74,14 @@ export async function POST(request: Request) {
   if (files.some((f) => !f.path.startsWith(prefix) || f.path.includes(".."))) return fail("資料の保存先が正しくありません。もう一度選び直してください。", 400);
 
   /* ------------------------------------------------ 同じ操作の再送 */
-  const { data: same } = await supabase.from("test_imports").select("id, status, result, error").eq("request_id", requestId).maybeSingle();
+  const staleBefore = new Date(Date.now() - STALE_RUNNING_MS).toISOString();
+  const { data: same } = await supabase.from("test_imports").select("id, status, result, error, created_at").eq("request_id", requestId).maybeSingle();
   if (same?.status === "done") return NextResponse.json({ ok: true, importId: same.id, result: same.result, cached: true });
+  if (same?.status === "running" && new Date(same.created_at).getTime() < Date.now() - STALE_RUNNING_MS) {
+    await supabase.from("test_imports").update({ status: "failed", error: STALE_MESSAGE, finished_at: new Date().toISOString() })
+      .eq("id", same.id).eq("status", "running");
+    return fail(STALE_MESSAGE, 409, { code: "failed" });
+  }
   if (same?.status === "running") return NextResponse.json({ ok: true, pending: true }, { status: 202 });
   if (same?.status === "failed") return fail(same.error || "読み取りに失敗しました。もう一度お試しください。", 409, { code: "failed" });
 
@@ -101,6 +116,9 @@ export async function POST(request: Request) {
       .eq("input_sha", inputSha).eq("status", "done").order("created_at", { ascending: false }).limit(1);
     if (prev?.length) return NextResponse.json({ ok: true, importId: prev[0].id, result: prev[0].result, cached: true });
   }
+  // 強制終了で running のまま残った同じ資料の読み取りを片付ける（残っていると、同じ資料を二度と読み取れない）
+  await supabase.from("test_imports").update({ status: "failed", error: STALE_MESSAGE, finished_at: new Date().toISOString() })
+    .eq("school_id", schoolId).eq("input_sha", inputSha).eq("status", "running").lt("created_at", staleBefore);
   const { data: job, error: e1 } = await supabase.from("test_imports").insert({
     school_id: schoolId, created_by: user.id, request_id: requestId, input_sha: inputSha,
     files: files.map((f) => ({ path: f.path, kind: f.kind, name: f.name })), model: cfg.model,
@@ -113,6 +131,8 @@ export async function POST(request: Request) {
   if (e1 || !job) return fail("読み取りを始められませんでした。管理者が Supabase で 0007_test_import.sql を実行済みか確認してください。", 500);
 
   /* ------------------------------------------------ AI で読み取る（1回だけ） */
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), Math.max(1000, AI_DEADLINE_MS - (Date.now() - startedAt)));
   try {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2 });
     // 設問が多いと出力が長くなるので、時間切れを避けるため stream で受け取る
@@ -124,7 +144,7 @@ export async function POST(request: Request) {
       system: generate ? GENERATE_KEY_SYSTEM : IMPORT_SYSTEM,
       messages: [{ role: "user", content: buildImportContent(sources) }],
       ...(cfg.fallbacks ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
-    }).finalMessage();
+    }, { signal: deadline.signal }).finalMessage();
     const { parsed, model, usage } = readGradingResponse(message);
     const result = proposePoints(normalizeImport(parsed, files.map((f) => f.kind), generate));
     const tokens = { input: usage.input_tokens ?? 0, output: usage.output_tokens ?? 0, cacheWrite: usage.cache_creation_input_tokens ?? 0, cacheRead: usage.cache_read_input_tokens ?? 0 };
@@ -133,8 +153,10 @@ export async function POST(request: Request) {
     }).eq("id", job.id);
     return NextResponse.json({ ok: true, importId: job.id, result, cached: false });
   } catch (e) {
-    const err = e instanceof GradingError ? e : toGradingError(e);
+    const err = deadline.signal.aborted ? new GradingError(TIMEOUT_MESSAGE, 500) : e instanceof GradingError ? e : toGradingError(e);
     await supabase.from("test_imports").update({ status: "failed", error: err.message.slice(0, 500), finished_at: new Date().toISOString() }).eq("id", job.id);
     return fail(err.message.replace("採点", "読み取り"), err.status);
+  } finally {
+    clearTimeout(timer);
   }
 }

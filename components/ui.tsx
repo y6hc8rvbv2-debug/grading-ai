@@ -203,7 +203,7 @@ export function Table({ columns, rows, onRow, empty = "データがありませ�
   );
 }
 
-export function Modal({ open, onClose, title, children, width = 720, footer }: P) {
+export function Modal({ open, onClose, title, children, width = 720, footer, zIndex = 200 }: P) {
   const { T } = useUI();
   useEffect(() => {
     if (!open) return;
@@ -214,7 +214,7 @@ export function Modal({ open, onClose, title, children, width = 720, footer }: P
   if (!open) return null;
   return (
     <div onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(12,16,22,.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 14, backdropFilter: "blur(2px)" }}>
+      style={{ position: "fixed", inset: 0, background: "rgba(12,16,22,.55)", zIndex, display: "flex", alignItems: "center", justifyContent: "center", padding: 14, backdropFilter: "blur(2px)" }}>
       <div onClick={(e) => e.stopPropagation()}
         style={{ background: T.panel, borderRadius: 16, border: `1px solid ${T.lineStrong}`, width: "100%", maxWidth: width, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(0,0,0,.35)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 16px", borderBottom: `1px solid ${T.line}` }}>

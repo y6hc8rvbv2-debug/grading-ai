@@ -14,6 +14,8 @@ import { friendlyError } from "@/lib/errors";
 import { prepareImage, isHeic } from "@/lib/image";
 import { deleteDraft, loadDraft, saveDraft } from "@/lib/draft";
 import { draftToFile, fileToDraft } from "@/lib/draft-file";
+import { requireAiConsent } from "@/lib/ai-consent";
+import { CANCELLED_MESSAGE, IMPORT_TOTAL_TIMEOUT_MS, ImportStopped } from "@/lib/test-import-client";
 import { useUI } from "@/components/ui-context";
 import { Badge, Btn, Field, Input, Modal, Select, grid, inputStyle } from "@/components/ui";
 import type { FigureRef, ImportBox, ImportResult, NewTestInput, QType } from "@/lib/types";
@@ -54,6 +56,7 @@ type Draft = {
 const DRAFT_KEY = "new-test";
 const DIFFICULTIES = ["基本", "標準", "難"];
 const MAX_SOURCES = 12;
+const UPLOAD_TIMEOUT_MS = 120_000;   // 資料1件の保存の上限（通信が止まっても待ち続けない）
 const defaultPoints = (t: QType) => (t === "long" ? 8 : t === "short" || t === "graph" ? 6 : 4);
 let rowKey = 0;
 const blankRow = (o: Partial<Row> = {}): Row => ({
@@ -70,6 +73,7 @@ function nextSub(sub: string) {
 }
 export const labelOf = (big: number, sub: string) => (sub ? `大問${big}-${sub}` : `大問${big}`);
 const uid = () => Math.random().toString(36).slice(2, 10);
+const fmtElapsed = (ms: number) => { const sec = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`; };
 
 export default function NewTestForm({ open, onClose, initialFiles, onCreated, draftKey = DRAFT_KEY }: {
   open: boolean; onClose: () => void; initialFiles?: File[];
@@ -94,7 +98,18 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
     id: uid(), name: f.name, kind: "student", type: f.type, blob: f,
   })));
   const [imported, setImported] = useState<Draft["imported"]>(null);
-  const [importing, setImporting] = useState<"" | "upload" | "read">("");
+  const [importing, setImporting] = useState<"" | "consent" | "upload" | "read">("");
+  const [importStarted, setImportStarted] = useState(0);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (importing !== "upload" && importing !== "read") return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [importing]);
+  // 読み取りの待機を止める（画面の「中止する」）。サーバーで始まった AI の読み取りは止まらないので、結果は次の「読み取る」で確かめる
+  const abortRef = useRef<AbortController | null>(null);
+  // 時間切れ・中止・通信の失敗で終わった読み取り。資料が同じなら同じ requestId で結果を確かめ直す（AI を二重に呼ばない）
+  const pendingImport = useRef<{ requestId: string; key: string } | null>(null);
   const [uploadedSources, setUploadedSources] = useState(0);
   const [force, setForce] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
@@ -289,6 +304,19 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
 
   /* ---------------------------------------------------- AI で読み取る */
   const [generateKey, setGenerateKey] = useState(!!initialFiles);
+  const importKey = (list: Source[]) => JSON.stringify([generateKey, force, list.map((s) => [s.id, s.kind])]);
+  /** 資料1件の保存。上限時間・中止で打ち切る（保存は上書きなので、同じ requestId でやり直してよい） */
+  const uploadWithLimit = (requestId: string, index: number, file: File, name: string, signal: AbortSignal) =>
+    new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new ImportStopped(
+        `資料「${name}」の保存が${UPLOAD_TIMEOUT_MS / 60_000}分たっても終わりませんでした。通信状況を確認して、もう一度お試しください（資料と入力内容は残っています）。`,
+        "timeout", true)), UPLOAD_TIMEOUT_MS);
+      const onAbort = () => reject(new ImportStopped(CANCELLED_MESSAGE, "cancel", true));
+      signal.addEventListener("abort", onAbort, { once: true });
+      ds.uploadImportFile(requestId, index, file).then(resolve, reject)
+        .finally(() => { clearTimeout(timer); signal.removeEventListener("abort", onAbort); });
+    });
+
   const runImport = async () => {
     if (lock.current) return;
     if (!generateKey && !sources.some((s) => s.kind === "key")) { toast("模範解答の画像またはPDFを選んでください", "warn"); return; }
@@ -296,34 +324,48 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
     if (hasContent && !window.confirm("入力済みの設問を、AIの読み取り結果で置き換えます。よろしいですか？（いまの内容は下書きから消えます）")) return;
     lock.current = true;
     setError("");
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
-      // 資料を学校専用の保管場所に置く（同じ資料・同じ読み取りなら置き直さない）
+      // ① AI に送ってよいかを先に確かめる（同意の画面は一番手前に出る）。同意しなければ、資料の保存も AI への送信もしない
+      setImporting("consent");
+      await requireAiConsent();
+      // ② 資料を学校専用の保管場所に置く。前回が時間切れ・中止で資料が同じなら、同じ requestId（保存済みの資料は置き直さない）
+      const key = importKey(sources);
+      const requestId = pendingImport.current?.key === key ? pendingImport.current.requestId : crypto.randomUUID();
+      pendingImport.current = { requestId, key };
+      setImportStarted(Date.now());
       setUploadedSources(0); setImporting("upload");
-      const requestId = crypto.randomUUID();
       const placed: Source[] = [];
       for (let i = 0; i < sources.length; i++) {
         const s = sources[i];
         if (s.path && s.requestId === requestId) { placed.push(s); setUploadedSources(i + 1); continue; }
+        if (ctrl.signal.aborted) throw new ImportStopped(CANCELLED_MESSAGE, "cancel", true);
         const ext = s.type === "application/pdf" ? "pdf" : s.type === "image/png" ? "png" : "jpg";
         const file = new File([s.blob], `${i + 1}.${ext}`, { type: s.type });
-        placed.push({ ...s, path: await ds.uploadImportFile(requestId, i, file), requestId });
+        placed.push({ ...s, path: await uploadWithLimit(requestId, i, file, s.name, ctrl.signal), requestId });
         setUploadedSources(i + 1);
       }
       setSources(placed);
+      // ③ AI で読み取る。待つ時間には上限がある（lib/test-import-client.ts）
       setImporting("read");
       const r = await ds.importTestKey({
         requestId, force, generate: generateKey, files: placed.map((s) => ({ path: s.path!, kind: s.kind, name: s.name })),
-      });
+      }, { signal: ctrl.signal });
+      pendingImport.current = null;
       applyImport(r.result, { importId: r.importId, requestId }, placed);
       setForce(false);
       toast(r.cached
         ? "同じ資料の読み取り結果を使いました（AI は呼んでいません）。要確認の設問を確認してください"
         : `${r.result.questions.length} 問を読み取りました。要確認の設問を確認してから登録してください`);
     } catch (e) {
+      // サーバーが失敗と答えたときだけ、次は新しい読み取りにする（時間切れ・中止・通信の失敗は、同じ読み取りの結果を確かめ直す）
+      if (e instanceof ImportStopped && !e.resumable) pendingImport.current = null;
       // 失敗しても、選んだ資料と入力欄は下書きに残る
       setError(friendlyError(e, "模範解答の読み取り"));
     } finally {
       setImporting("");
+      abortRef.current = null;
       lock.current = false;
     }
   };
@@ -458,7 +500,7 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
   const viewerOn = showViewer && imagesOn;
 
   return (
-    <Modal open={open} onClose={() => { if (!saving) onClose(); }} title={onCreated ? "新規採点：模範解答・配点を準備" : "テストを追加"} width={viewerOn ? 1320 : 1100}
+    <Modal open={open} onClose={() => { if (!saving && !importing) onClose(); }} title={onCreated ? "新規採点：模範解答・配点を準備" : "テストを追加"} width={viewerOn ? 1320 : 1100}
       footer={<>
         <label style={{display:"flex",gap:8,alignItems:"center",padding:8,border:`2px solid ${T.accent}`,borderRadius:8}}>
           <input type="checkbox" checked={allConfirmed} disabled={saving || !!importing}
@@ -474,14 +516,24 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
             <span aria-hidden="true">{imagesOn ? "🙈 " : "🖼 "}</span>{imagesOn ? "画像を隠す" : "画像を表示"}
           </Btn>
         )}
-        <Btn onClick={onClose} disabled={saving}>閉じる（下書きは残ります）</Btn>
+        <Btn onClick={onClose} disabled={saving || !!importing}>閉じる（下書きは残ります）</Btn>
         <Btn variant="primary" onClick={save} disabled={saving || !!importing}>{saving ? "登録しています…" : onCreated ? "③ 登録して、採点開始の確認へ" : "登録する"}</Btn>
       </>}>
       <p>各問の「確認した」、または下部の「すべて確認した」を使えます。一括確認で全問にチェックが入ります。未入力の正答・配点がある場合は、登録時に該当する設問を案内します。</p>
       {!!importing && <div role="status" style={{padding:16,background:T.infoSoft,borderRadius:10,marginBottom:12}}>
-        <b>{importing === "upload" ? `資料を送信中：${uploadedSources} / ${sources.length}件` : "AIが問題・正答・配点を読み取っています"}</b>
-        <progress aria-label="模範解答・配点の準備状況" max={sources.length || 1} value={importing === "upload" ? uploadedSources : undefined} style={{display:"block",width:"100%",height:24,marginTop:8}} />
-        {importing === "read" && <small>AIの応答を待っています。処理中のため、画面を閉じずにお待ちください。</small>}
+        <b>{importing === "consent" ? "AI への送信の同意を待っています" : importing === "upload" ? `資料を送信中：${uploadedSources} / ${sources.length}件` : "AIが問題・正答・配点を読み取っています"}</b>
+        {importing === "consent"
+          ? <div><small>手前に出ている「AI に送る内容の確認」で選んでください。同意するまで、資料は保存も送信もしません。</small></div>
+          : <>
+            <progress aria-label="模範解答・配点の準備状況" max={sources.length || 1} value={importing === "upload" ? uploadedSources : undefined} style={{display:"block",width:"100%",height:24,marginTop:8}} />
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+              <small style={{ flex: 1 }}>
+                経過 {fmtElapsed(importStarted ? Date.now() - importStarted : 0)}（{IMPORT_TOTAL_TIMEOUT_MS / 60_000}分で打ち切り、理由を表示します）。
+                {importing === "read" && "AIの応答を待っています。画面を閉じずにお待ちください。"}
+              </small>
+              <Btn size="sm" onClick={() => abortRef.current?.abort()}>待つのを中止する</Btn>
+            </div>
+          </>}
       </div>}
       {onCreated && <p><b>現在は手順3：模範解答・配点の準備です。まだ採点は始まりません。①資料を確認 → ②AIで読み取り、正答・配点を確認 → ③登録 → 手順4で採点開始。</b><br />答案の印刷された問題と配点から解答案を作成します。生徒の手書き回答を正答には使いません。模範解答がある場合は追加して「模範解答がない」のチェックを外してください。読み取り後、正答・配点を確認して登録してください。</p>}
       {draftNote && (
@@ -589,7 +641,7 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
             )}
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               <Btn variant="primary" onClick={runImport} disabled={!!importing || !sources.length || (!generateKey && !sources.some((s) => s.kind === "key"))}>
-                {importing === "upload" ? "資料を保存しています…" : importing === "read" ? "AIが読み取っています…（1〜3分）" : "AIで読み取って入力する"}
+                {importing === "consent" ? "同意を待っています…" : importing === "upload" ? "資料を保存しています…" : importing === "read" ? "AIが読み取っています…（1〜3分）" : "AIで読み取って入力する"}
               </Btn>
               <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11.5, color: T.textSub }}>
                 <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} disabled={!!importing} />
