@@ -46,6 +46,8 @@ export default function GradingDetail({ subId }: { subId: string }) {
   const [lookup, setLookup] = useState<"idle" | "loading" | "missing">("idle");
   // 原本画像（ページごと）と、表示中の原本のページ（0 始まり）
   const [imageUrls, setImageUrls] = useState<(string | null)[]>([]);
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageRetry, setImageRetry] = useState(0);
   const [origPage, setOrigPage] = useState(0);
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
@@ -82,18 +84,49 @@ export default function GradingDetail({ subId }: { subId: string }) {
     refreshSub(subId).finally(() => setLookup("missing"));
   }, [sub, subId, lookup, refreshSub]);
 
-  // 原本画像（非公開の保管場所から、10分だけ有効な署名付きURLで表示する）
-  // 複数ページの答案（1人分を複数枚で撮った場合）は、すべてのページの URL を用意する
+  // 署名付きURLは10分で切れる。最初に全ページの写真を取得し、この画面の間だけ
+  // Blob URLで保持する（ページ切替時に期限切れURLを再取得しない）。画面を離れたら解放する。
   const pathKey = (sub?.imagePaths ?? []).join("|");
   useEffect(() => {
     const paths = pathKey ? pathKey.split("|") : [];
     if (!paths.length) { setImageUrls([]); return; }
     let alive = true;
-    // HEIC のまま保存された以前の答案は、ブラウザで表示できる JPEG にしてから使う
-    Promise.all(paths.map((p) => ds.signedImageUrl(p).then((u) => (u ? displayableUrl(p, u) : null)).catch(() => null)))
-      .then((urls) => { if (alive) setImageUrls(urls.map((u) => u || null)); });
-    return () => { alive = false; };
-  }, [ds, pathKey]);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 90000);
+    const owned = new Set<string>();
+    setImageUrls([]);
+    setImageLoading(true);
+    const retain = (url: string) => {
+      if (!alive) { URL.revokeObjectURL(url); return; }
+      owned.add(url);
+    };
+    Promise.all(paths.map(async (path) => {
+      try {
+        const signed = await ds.signedImageUrl(path);
+        if (!signed || !alive) return null;
+        const response = await fetch(signed, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        if (blob.type && !blob.type.startsWith("image/")) throw new Error("Not an image");
+        if (!alive) return null;
+        const local = URL.createObjectURL(blob);
+        retain(local);
+        // HEIC のまま保存された以前の答案も、表示可能なJPEGとして保持する。
+        const display = await displayableUrl(path, local);
+        if (display !== local) retain(display);
+        return alive ? display : null;
+      } catch { return null; }
+    })).then((urls) => {
+      clearTimeout(timeout);
+      if (alive) { setImageUrls(urls); setImageLoading(false); }
+    });
+    return () => {
+      alive = false;
+      clearTimeout(timeout);
+      controller.abort();
+      owned.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [ds, pathKey, imageRetry]);
   const imageUrl = imageUrls[origPage] ?? null;
   const origPages = imageUrls.length;
 
@@ -319,6 +352,15 @@ export default function GradingDetail({ subId }: { subId: string }) {
         )}
       </div>
 
+      {pathKey && (imageLoading || imageUrls.some((url) => !url)) && (
+        <div role="status" style={{ marginBottom: 14, color: T.textSub, fontSize: 13 }}>
+          {imageLoading ? "原本の写真を読み込んでいます…" : <>
+            原本の写真を取得できませんでした。通信状態を確認して、もう一度お試しください。
+            <Btn size="sm" onClick={() => setImageRetry((n) => n + 1)}>原本の写真を再読み込み</Btn>
+          </>}
+        </div>
+      )}
+
       {pending ? (
         <Card title={aiBusy || sub.status === "processing" ? "AIが採点しています" : "この答案はまだ採点されていません"}
           sub={ai.enabled ? "答案画像・正答・配点・採点基準をもとに AI が採点します（数十秒かかります）" : "採点AIが設定されると、ここから採点できます"}
@@ -394,7 +436,7 @@ export default function GradingDetail({ subId }: { subId: string }) {
                 <img src={imageUrl} alt={`${whoName} の答案（原本）`} style={{ width: "100%", maxHeight: "72vh", objectFit: "contain", borderRadius: 8 }} />
               ) : overlayOn ? (
                 pageLayout ? (
-                  <RedPenOverlay imageUrl={imageUrl!} sub={sub} test={test} page={origPage + 1} aspect={aspect} layout={pageLayout}
+                  <RedPenOverlay key={imageUrl} imageUrl={imageUrl!} sub={sub} test={test} page={origPage + 1} aspect={aspect} layout={pageLayout}
                     editable selected={selected} onSelect={(q) => setSelected(q)}
                     onMove={(q, x, y) => moveMark(q, origPage + 1, x, y)} svgRef={svgRef} />
                 ) : (
