@@ -24,6 +24,22 @@ export async function POST(req: Request) {
         const { error } = await createAdminClient().from("billing_accounts").update(CLEAR_CHECKOUT).eq("checkout_session_id", session.id);
         if (error) throw Error("申し込みの状態を保存できません。");
       }
+      // ver6：前払い（1回払い。コンビニ払い・銀行振込は「完了」のあとに入金の通知が届く）
+      if (session.mode === "payment" && session.metadata?.kind === "prepaid") {
+        const db = createAdminClient();
+        const { data: order } = await db.from("billing_prepaid").select("id,school_id,amount,status").eq("id", session.metadata.order_id ?? "").maybeSingle();
+        if (!order) throw Error("前払いの注文を照合できません。");
+        const customer = typeof session.customer === "string" ? session.customer : session.customer?.id;
+        const { data: account } = await db.from("billing_accounts").select("customer_id").eq("school_id", order.school_id).single();
+        if (account?.customer_id !== customer || session.amount_total !== order.amount || session.currency !== "jpy") throw Error("支払者・金額が一致しません。");
+        if (session.payment_status === "paid") {
+          const { error } = await db.rpc("billing_apply_prepaid", { p_order: order.id });
+          if (error) throw Error("前払いを反映できません。");
+        } else if (session.status === "expired" || event.type === "checkout.session.async_payment_failed") {
+          await db.from("billing_prepaid").update({ status: "expired" }).eq("id", order.id).eq("status", "pending");
+        }
+        return NextResponse.json({ received: true });
+      }
       if (session.mode === "payment") {
         const db = createAdminClient();
         const { data: order, error: lookup } = await db.from("billing_orders").select("*").eq("checkout_id", session.id).single();

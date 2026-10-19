@@ -137,4 +137,126 @@ grant execute on function public.submit_link_info(text) to service_role;
 grant execute on function public.submit_link_claim(text, uuid, smallint, boolean) to service_role;
 grant execute on function public.submit_link_finish(uuid, text[]) to service_role;
 
+/* ---------------------------------------------------------------- 3. 前払い（コンビニ・PayPay・銀行振込・暗号資産など） */
+-- 月額の自動更新（カード・Apple Pay・Google Pay）に加えて、1・3・6・12か月分をまとめて前払いできる。
+-- 支払いの確認（Stripe の通知・暗号資産の決済代行の通知。どちらも署名を確かめる）のあと、サーバーが billing_apply_prepaid で反映する。
+alter table public.billing_accounts add column prepaid_until timestamptz;
+
+create table public.billing_prepaid (
+  id           uuid primary key,
+  school_id    uuid        not null references public.schools(id),
+  plan_id      text        not null,
+  months       smallint    not null check (months in (1, 3, 6, 12)),
+  amount       integer     not null check (amount > 0),
+  currency     text        not null default 'jpy' check (currency = 'jpy'),
+  method       text        not null check (method in ('stripe', 'crypto')),
+  provider     text        not null check (provider in ('stripe', 'nowpayments', 'coinbase')),
+  provider_ref text        unique,
+  -- 反映する条件（申し込みの時点の料金表の値。後から料金表が変わっても、支払った内容で反映する）
+  quota        integer     not null check (quota > 0),
+  personal     boolean     not null,
+  night        boolean     not null,
+  status       text        not null default 'pending' check (status in ('pending', 'applied', 'expired', 'failed', 'refund_pending')),
+  created_by   uuid        references public.profiles(id) on delete set null,
+  created_at   timestamptz not null default now(),
+  applied_at   timestamptz
+);
+create index billing_prepaid_school on public.billing_prepaid(school_id, created_at);
+alter table public.billing_prepaid enable row level security;
+create policy billing_prepaid_read on public.billing_prepaid for select to authenticated using (school_id = public.current_school_id());
+create policy billing_prepaid_insert on public.billing_prepaid for insert to authenticated with check (false);
+create policy billing_prepaid_update on public.billing_prepaid for update to authenticated using (false) with check (false);
+create policy billing_prepaid_delete on public.billing_prepaid for delete to authenticated using (false);
+revoke all on public.billing_prepaid from public, anon, authenticated;
+grant select on public.billing_prepaid to authenticated;
+grant select, insert, update, delete on public.billing_prepaid to service_role;
+
+-- 支払いを確認した前払いを、契約に反映する（同じ注文を二度反映しない）。
+-- 月額の契約中・別のプランの前払いの期間中に届いた支払いは反映せず、返金待ちにする（推測で権限を付けない）
+create or replace function public.billing_apply_prepaid(p_order uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare o public.billing_prepaid%rowtype; a public.billing_accounts%rowtype; v_from timestamptz; v_until timestamptz;
+begin
+  select * into o from public.billing_prepaid where id = p_order for update;
+  if not found then raise exception '前払いの注文が見つかりません' using errcode = 'P0001'; end if;
+  if o.status = 'applied' then return jsonb_build_object('applied', true, 'again', true); end if;
+  if o.status not in ('pending', 'expired') then return jsonb_build_object('applied', false, 'status', o.status); end if;
+  insert into public.billing_accounts(school_id) values (o.school_id) on conflict do nothing;
+  select * into a from public.billing_accounts where school_id = o.school_id for update;
+  if a.subscription_id is not null or (a.prepaid_until is not null and a.prepaid_until > now() and a.plan_id <> o.plan_id) then
+    update public.billing_prepaid set status = 'refund_pending' where id = o.id;
+    return jsonb_build_object('applied', false, 'status', 'refund_pending');
+  end if;
+  v_from := greatest(now(), coalesce(a.prepaid_until, now()));
+  v_until := v_from + make_interval(months => o.months);
+  if a.prepaid_until is not null and a.prepaid_until > now() then
+    -- 同じプランの前払いの期間中：期限だけ延ばす（いまの月の枠はそのまま）
+    update public.billing_accounts set prepaid_until = v_until where school_id = a.school_id;
+  else
+    update public.billing_accounts set plan_id = o.plan_id, status = 'active', quota = o.quota, personal = o.personal, night = o.night,
+      prepaid_until = v_until, period_start = now(), period_end = least(now() + interval '1 month', v_until)
+      where school_id = a.school_id;
+  end if;
+  update public.billing_prepaid set status = 'applied', applied_at = now() where id = o.id;
+  insert into public.audit_logs (school_id, action, target_table, target_id, detail)
+  values (o.school_id, 'billing.prepaid', 'billing_prepaid', o.id,
+          jsonb_build_object('plan', o.plan_id, 'months', o.months, 'amount', o.amount, 'provider', o.provider, 'until', v_until));
+  return jsonb_build_object('applied', true, 'until', v_until);
+end $$;
+revoke all on function public.billing_apply_prepaid(uuid) from public, anon, authenticated;
+grant execute on function public.billing_apply_prepaid(uuid) to service_role;
+
+-- 採点の受付（0017）に、前払いの月ごとの枠の更新と期限切れを加える（ほかの規則は 0017 と同じ）
+create or replace function public.billing_reserve() returns trigger language plpgsql security definer set search_path=public as $$
+declare a public.billing_accounts%rowtype; n integer; sub public.submissions%rowtype;
+begin
+ if not (select enabled from public.billing_config where id=true) then return new; end if;
+ if not new.billing_enforced then
+   if current_setting('role',true) not in ('service_role','app_owner','postgres') then raise exception '課金確認を省略できません'; end if;
+   return new;
+ end if;
+ select * into sub from public.submissions where id=new.submission_id and school_id=new.school_id and deleted_at is null;
+ if not found then raise exception '答案が見つかりません'; end if;
+ if coalesce(cardinality(sub.image_paths),0)>2 or exists(select 1 from unnest(sub.image_paths) p where lower(p) like '%%.pdf')
+ or (select count(*) from public.questions where test_id=sub.test_id)>20 then
+   raise exception 'この料金枠は2ページ・20問までです。PDFは画像に分けて取り込んでください。';
+ end if;
+ insert into public.billing_accounts(school_id) values(new.school_id) on conflict do nothing;
+ select * into a from public.billing_accounts where school_id=new.school_id for update;
+ if a.status='free' and a.period_end<=now() then
+  update public.billing_accounts set period_start=date_trunc('month',now() at time zone 'Asia/Tokyo') at time zone 'Asia/Tokyo',
+   period_end=(date_trunc('month',now() at time zone 'Asia/Tokyo')+interval '1 month') at time zone 'Asia/Tokyo' where school_id=a.school_id returning * into a;
+ end if;
+ -- ver6（0019）：前払いの契約。月ごとの枠の期間を前払いの期限まで1か月ずつ進め、期限を過ぎたら無料プランに戻す
+ if a.subscription_id is null and a.prepaid_until is not null and a.period_end<=now() then
+  if a.prepaid_until>now() then
+   while a.period_end<=now() loop
+    a.period_start := a.period_end;
+    a.period_end := least(a.period_end + interval '1 month', a.prepaid_until);
+   end loop;
+   update public.billing_accounts set period_start=a.period_start, period_end=a.period_end where school_id=a.school_id returning * into a;
+  else
+   update public.billing_accounts set plan_id='free', status='free', quota=20, personal=true, night=false, prepaid_until=null,
+    period_start=date_trunc('month',now() at time zone 'Asia/Tokyo') at time zone 'Asia/Tokyo',
+    period_end=(date_trunc('month',now() at time zone 'Asia/Tokyo')+interval '1 month') at time zone 'Asia/Tokyo'
+    where school_id=a.school_id returning * into a;
+  end if;
+ end if;
+ if a.status not in ('active','free') or a.period_end<=now() then raise exception '契約の支払いを確認してください'; end if;
+ select count(*) into n from public.billing_usage where school_id=a.school_id and period_start=a.period_start and status in('reserved','done');
+ if n>=a.quota then raise exception '月間採点上限に達しました'; end if;
+ if a.personal and new.mode='opus' and a.status='free' then raise exception '無料プランは3モデル併用のみです'; end if;
+ if a.personal and new.mode='opus' and not new.opus_charge_accepted then raise exception 'Opus単独の追加55円への同意が必要です'; end if;
+ insert into public.billing_usage(id,school_id,submission_id,period_start,amount)
+ values(new.id,new.school_id,new.submission_id,a.period_start,case when a.personal and new.mode='opus' then 55 else 0 end);
+ if a.personal and new.mode='opus' then insert into public.billing_orders(id,school_id) values(new.id,new.school_id); end if;
+ if a.night or (a.personal and new.mode='opus') then
+ insert into public.night_queue(id,school_id,night,due_at) values(new.id,new.school_id,a.night,
+ case when a.night and extract(hour from now() at time zone 'Asia/Tokyo') between 6 and 21 then
+ (date_trunc('day',now() at time zone 'Asia/Tokyo')+interval '22 hours') at time zone 'Asia/Tokyo' else now() end);
+ end if;
+ return new;
+end $$;
+
+
 commit;

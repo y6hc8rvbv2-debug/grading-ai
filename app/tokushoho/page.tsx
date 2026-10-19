@@ -4,6 +4,7 @@ import { APP_INFO } from "@/lib/app-info";
 import { FREE_QUOTA } from "@/lib/billing/catalog";
 import { PERSONAL_OPUS_SURCHARGE, coursesOf, limitLabel, priceLabel } from "@/lib/subscription-plans";
 import { H2, Missing, PublicPage } from "@/components/PublicPage";
+import { PAYMENT_METHODS } from "@/lib/billing/prepaid";
 
 export const metadata: Metadata = { title: `特定商取引法に基づく表記｜${APP_INFO.name}` };
 
@@ -37,8 +38,8 @@ export default function TokushohoPage() {
             <div>1回（学校は1枚）＝生徒1人分の答案（2ページ・20問まで）の採点1回です（再採点も1回）。</div>
           </>)}
           {row("商品代金以外の必要料金", "インターネットの接続・通信の料金はお客様のご負担です。")}
-          {row("お支払い方法", "クレジットカード（決済サービス Stripe）。Web ブラウザから申し込みます（ストア用のアプリの中では購入できません）。")}
-          {row("お支払いの時期", "月額料金は申し込みのときに初回を、以後は契約期間ごとの更新日に自動でお支払いいただきます。「Opus 単独」の追加料金は、その採点を申し込むときにお支払いいただきます。")}
+          {row("お支払い方法", `月額（自動更新）：${PAYMENT_METHODS.monthly}（決済サービス Stripe）。前払い（1・3・6・12か月分）：${PAYMENT_METHODS.prepaid}、および${PAYMENT_METHODS.crypto}。いずれも Web ブラウザから申し込みます（ストア用のアプリの中では購入できません）。`)}
+          {row("お支払いの時期", "月額料金は申し込みのときに初回を、以後は契約期間ごとの更新日に自動でお支払いいただきます。前払いは申し込みのときに、選んだ月数分をまとめてお支払いいただきます（コンビニ払い・銀行振込は表示された期限までに）。「Opus 単独」の追加料金は、その採点を申し込むときにお支払いいただきます。")}
           {row("提供の時期", "お支払いの確認後、すぐに使えます。夜間採点のコースは、採点の予約を日本時間22時〜翌6時の間に順に処理します（終わる時刻はお約束できません）。")}
           {row("解約・返金", <>
             <div>解約は「契約・支払い管理」からいつでもでき、その契約期間の終わりまで使えます。次の更新から請求されません。</div>

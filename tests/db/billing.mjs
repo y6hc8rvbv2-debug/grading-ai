@@ -63,8 +63,43 @@ try {
   await db.exec("update billing_accounts set status='free',quota=20,period_start=now()-interval '2 months',period_end=now()-interval '1 month'");
   await db.exec(start(18));
   await ok("select (period_end>now()) as v from billing_accounts",true);
+  // ---------------------------------------------------------------- ver6（0019）：前払い
+  await db.exec("update grading_jobs set status='failed' where status='running'");
+  await db.exec(`insert into billing_prepaid(id,school_id,plan_id,months,amount,method,provider,provider_ref,quota,personal,night)
+    values('eeeeeeee-0000-0000-0000-0000000000a1','eeeeeeee-0000-0000-0000-000000000000','personal-light',3,8250,'stripe','stripe','cs_fixture_1',200,true,false)`);
+  await ok("select (billing_apply_prepaid('eeeeeeee-0000-0000-0000-0000000000a1')->>'applied')::boolean as v",true);
+  await ok("select plan_id||'/'||status||'/'||quota as v from billing_accounts",'personal-light/active/200');
+  await ok("select (prepaid_until between now()+interval '89 days' and now()+interval '93 days') as v from billing_accounts",true); // 3か月分
+  await ok("select (billing_apply_prepaid('eeeeeeee-0000-0000-0000-0000000000a1')->>'again')::boolean as v",true); // 二度反映しない
+  await ok("select (prepaid_until < now()+interval '93 days') as v from billing_accounts",true);
+  // 同じプランの追加の前払いは期限を延ばす。別のプランは期間中は反映せず返金待ち
+  await db.exec(`insert into billing_prepaid(id,school_id,plan_id,months,amount,method,provider,provider_ref,quota,personal,night) values
+    ('eeeeeeee-0000-0000-0000-0000000000a2','eeeeeeee-0000-0000-0000-000000000000','personal-light',1,2750,'crypto','nowpayments','np_fixture',200,true,false),
+    ('eeeeeeee-0000-0000-0000-0000000000a3','eeeeeeee-0000-0000-0000-000000000000','personal-pro',1,12100,'crypto','coinbase','cb_fixture',1000,true,false)`);
+  await db.exec("select billing_apply_prepaid('eeeeeeee-0000-0000-0000-0000000000a2')");
+  await ok("select (prepaid_until > now()+interval '115 days') as v from billing_accounts",true);
+  await ok("select billing_apply_prepaid('eeeeeeee-0000-0000-0000-0000000000a3')->>'status' as v",'refund_pending');
+  await ok("select plan_id as v from billing_accounts",'personal-light');
+  // 月が替わったら、前払いの期限まで枠の期間を進めて採点を受け付ける
+  await db.exec("update billing_accounts set period_start=now()-interval '40 days',period_end=now()-interval '10 days'");
+  await db.exec(start(19));
+  await ok("select (period_end>now() and period_end<=prepaid_until) as v from billing_accounts",true);
+  // 期限を過ぎたら無料プランに戻る（採点は無料の枠で続けられる）
+  await db.exec("update grading_jobs set status='failed' where status='running'");
+  await db.exec("update billing_accounts set prepaid_until=now()-interval '1 day',period_start=now()-interval '31 days',period_end=now()-interval '1 day'");
+  await db.exec(start(20));
+  await ok("select plan_id||'/'||status||'/'||quota||'/'||coalesce(prepaid_until::text,'-') as v from billing_accounts",'free/free/20/-');
+  // 先生は前払いの注文を書き換えられない・反映の関数を呼べない
+  await db.exec('set role authenticated');
+  await db.exec("select set_config('request.jwt.claims','{\"sub\":\"eeeeeeee-0000-0000-0000-000000000001\",\"role\":\"authenticated\"}',false)");
+  await ok('select count(*)::int as v from billing_prepaid',3);
+  await deny("update billing_prepaid set status='pending'");
+  await deny("select billing_apply_prepaid('eeeeeeee-0000-0000-0000-0000000000a3')");
+  await db.exec('set role app_owner');
+
   await db.exec('set role authenticated');
   await db.exec("select set_config('request.jwt.claims','{\"sub\":\"aaaaaaaa-0000-0000-0000-000000000001\",\"role\":\"authenticated\"}',false)");
   await ok('select count(*)::int as v from billing_usage',0);
+  await ok('select count(*)::int as v from billing_prepaid',0); // 他校の前払いは見えない
   console.log(`PASS billing PostgreSQL: ${checks} checks`);
 } catch(e) { console.error(e.message);process.exitCode=1; } finally { await db.close(); }

@@ -10,7 +10,9 @@ export async function GET() {
   try {
     const { db, schoolId, user } = await billingUser();
     if (!billingEnabled()) return NextResponse.json({ enabled: false, nightEnabled: false });
-    const { data: account, error } = await db.from("billing_accounts").select("plan_id,status,quota,period_start,period_end,night,personal").eq("school_id", schoolId).maybeSingle();
+    // ver6：前払いの期限（0019 の prepaid_until）。0019 の前の DB では列が無いので、無ければ外して読み直す
+    let { data: account, error } = await db.from("billing_accounts").select("plan_id,status,quota,period_start,period_end,night,personal,prepaid_until").eq("school_id", schoolId).maybeSingle();
+    if (error) ({ data: account, error } = await db.from("billing_accounts").select("plan_id,status,quota,period_start,period_end,night,personal").eq("school_id", schoolId).maybeSingle());
     if (error) throw Error("契約台帳の準備が完了していません。");
     const { data: usage, error: e } = await db.from("billing_usage").select("status,amount").eq("school_id", schoolId).eq("period_start", account?.period_start || new Date(0).toISOString()).in("status", ["reserved", "done"]);
     if (e) throw Error("利用量を確認できません。");
@@ -74,6 +76,8 @@ export async function POST(req: Request) {
       if (!worker?.last_seen || Date.parse(worker.last_seen) < Date.now() - 3 * 60_000) throw Error("夜間処理を確認中です。後ほどお試しください。");
     }
     if (account?.subscription_id) throw Error("既存の契約は「契約・支払い管理」で変更してください。");
+    // ver6：前払いの期間中は、月額の契約を重ねて申し込まない（二重の支払いを防ぐ）
+    if (account?.prepaid_until && Date.parse(account.prepaid_until) > Date.now()) throw Error(`前払いの期間中です（${new Date(account.prepaid_until).toLocaleDateString("ja-JP")} まで）。期間が終わってから月額の契約をお申し込みください。`);
     // 以前の申し込み（決済画面）が残っていれば、状態を Stripe で確かめてから続ける。
     // 以前は完了・期限切れの申し込みの印が残り続け、解約後や24時間後に申し込み直せなかった
     if (account?.checkout_session_id) {
