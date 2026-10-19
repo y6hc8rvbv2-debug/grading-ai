@@ -41,7 +41,7 @@ await page.getByLabel("メールアドレス").fill("admin@lite.example");
 await page.getByLabel("パスワード").fill("pass-lite-123");
 await page.getByRole("button", { name: "ログイン" }).click();
 await page.waitForURL(BASE + "/");
-await page.getByText("選んだコースを申し込む").first().waitFor();
+await page.getByText("選んだコースを月額で申し込む").first().waitFor();
 
 // ---------------------------------------------------------------- 表示：16コース
 const text = await page.evaluate(() => document.body.innerText);
@@ -67,7 +67,7 @@ for (const bad of [{ planId: "price_1UPkN679SNi0pstBtGaeLtlf" }, { planId: "pers
 ok((await mockLog()).filter((x) => x.path === "/v1/checkout/sessions").length === before, "断った申し込みでは決済画面を作らない");
 
 // ---------------------------------------------------------------- 決済画面への引き渡し（個人・塾 ミニ）
-await page.getByRole("button", { name: "選んだコースを申し込む" }).first().click();
+await page.getByRole("button", { name: "選んだコースを月額で申し込む" }).first().click();
 await page.waitForURL(/\/pay\/cs_test_/);
 const created = (await mockLog()).filter((x) => x.path === "/v1/checkout/sessions").at(-1).form;
 ok(created.mode === "subscription" && created["line_items[0][price]"] === "price_1UPkN679SNi0pstBtGaeLtlf" && created["line_items[0][quantity]"] === "1", "決済画面には、サーバーが選んだテスト用の料金ID（個人・塾ミニ）を1つだけ渡す");
@@ -171,6 +171,40 @@ ok(b2.account.quota === 150 && b2.used === 7, "再送しても旧プランの上
 await page.goto(BASE + "/");
 await page.getByText("旧ライト（既存契約）").first().waitFor();
 ok(!(await page.evaluate(() => document.body.innerText)).includes("契約の内容を確認しています"), "画面：旧プランの名前を表示し、確認待ちは出ない");
+
+// ---------------------------------------------------------------- ver6：前払い（1・3・6・12か月分）
+await fetch(`${MOCK}/__cancel/${legacySub}`, { method: "POST" });
+ok(await hook("customer.subscription.deleted", { id: legacySub, object: "subscription" }) === 200 && (await read()).account.plan_id === "free", "（前提）月額の契約を解約して無料プランに戻す");
+ok((await api("/api/billing/prepaid")).json.crypto === false, "暗号資産の決済代行を設定していない環境では、暗号資産の前払いを出さない");
+r = await api("/api/billing/prepaid", { planId: "personal-light", months: 3, method: "crypto" });
+ok(r.status === 400 && /暗号資産/.test(r.json.error), "暗号資産の設定が無ければ断る");
+for (const bad of [{ planId: "personal-light", months: 2, method: "stripe" }, { planId: "personal-light-night", months: 1, method: "stripe" }, { planId: "personal-light", months: 3, method: "stripe", amount: 1 }]) {
+  const x = await api("/api/billing/prepaid", bad);
+  if (bad.amount) ok(x.status === 200, "画面から送った金額は無視する（サーバーが料金表から決める）");
+  else ok(x.status === 400, `前払いの申し込みを断る：${JSON.stringify(bad)}`);
+}
+r = await api("/api/billing/prepaid", { planId: "personal-light", months: 3, method: "stripe" });
+ok(r.status === 200 && /\/pay\/cs_test_/.test(r.json.url) && r.json.total === 8250, "前払い：個人・塾ライト3か月分（2,750円×3＝8,250円・税込）の決済画面");
+last = (await mockLog()).filter((x) => x.path === "/v1/checkout/sessions").at(-1).form;
+ok(last.mode === "payment" && last["line_items[0][quantity]"] === "3" && last["line_items[0][price_data][unit_amount]"] === "2750" && last["metadata[kind]"] === "prepaid", "1回払い・単価2,750円×3か月・前払いの印を Stripe に渡す（支払い方法は Stripe 側で自動）");
+ok(!last["payment_method_types[0]"], "支払い方法を固定しない（コンビニ・PayPay などダッシュボードで有効にした方法が出る）");
+const prepaidCs = r.json.url.split("/pay/")[1];
+ok((await read()).account.status === "free", "支払いの通知の前は有料にしない");
+await fetch(`${MOCK}/__complete/${prepaidCs}`, { method: "POST" });
+ok(await hook("checkout.session.completed", { id: prepaidCs, object: "checkout.session" }) === 200, "前払いの支払い完了の通知");
+b2 = await read();
+ok(b2.account.plan_id === "personal-light" && b2.account.status === "active" && b2.account.quota === 200, "前払いを反映：個人・塾ライト・月200回");
+const until = Date.parse(b2.account.prepaid_until);
+ok(until > Date.now() + 88 * 86400_000 && until < Date.now() + 93 * 86400_000, "前払いの期限は3か月後");
+ok(await hook("checkout.session.completed", { id: prepaidCs, object: "checkout.session" }) === 200 && Date.parse((await read()).account.prepaid_until) === until, "同じ通知の再送で期限を二重に延ばさない");
+r = await api("/api/billing", { planId: "personal-mini" });
+ok(r.status === 400 && /前払いの期間中/.test(r.json.error), "前払いの期間中は月額の契約を重ねて申し込めない");
+r = await api("/api/billing/prepaid", { planId: "personal-pro", months: 1, method: "stripe" });
+ok(r.status === 400 && /別のコースの前払い/.test(r.json.error), "前払いの期間中に別のコースは申し込めない（同じコースの延長はできる）");
+await page.goto(BASE + "/");
+await page.getByText(/前払い：.*まで/).first().waitFor();
+ok(true, "画面に前払いの期限を表示");
+ok(Number(sql(`select count(*) from public.billing_prepaid where school_id = '${SCHOOL}' and status = 'applied'`)) === 1, "前払いの注文は1件だけ反映");
 
 ok(errors.length === 0, `コンソールのエラーが無い${errors.length ? "：" + errors.join(" / ") : ""}`);
 await browser.close();

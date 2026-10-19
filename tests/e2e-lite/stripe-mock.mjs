@@ -56,7 +56,10 @@ http.createServer(async (req, res) => {
     const f = form(body);
     const id = `cs_test_${++n}`;
     const s = { id, object: "checkout.session", mode: f.mode, customer: f.customer, status: "open", payment_status: "unpaid", url: `${BASE}/pay/${id}`,
-      subscription: null, price: f["line_items[0][price]"], tax_rate: f["line_items[0][tax_rates][0]"] ?? null, amount_total: null, currency: "jpy" };
+      subscription: null, price: f["line_items[0][price]"], tax_rate: f["line_items[0][tax_rates][0]"] ?? null, amount_total: null, currency: "jpy",
+      // ver6：前払い（1回払い・price_data）。金額は単価×数量（税率があれば10%を加える）
+      metadata: Object.fromEntries(Object.entries(f).filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v])),
+      unit_amount: Number(f["line_items[0][price_data][unit_amount]"] || 0), quantity: Number(f["line_items[0][quantity]"] || 1) };
     sessions.set(id, s);
     return send(200, s);
   }
@@ -73,6 +76,11 @@ http.createServer(async (req, res) => {
   if ((m = url.pathname.match(/^\/pay\/([^/]+)$/))) return send(200, `<!doctype html><meta charset="utf-8"><title>決済の代役</title><p>決済の代役 ${m[1]}</p>`, "text/html; charset=utf-8");
   if ((m = url.pathname.match(/^\/__complete\/([^/]+)$/))) {
     const s = sessions.get(m[1]);
+    if (s && s.mode === "payment" && s.metadata?.kind === "prepaid") {
+      const subtotal = s.unit_amount * s.quantity;
+      Object.assign(s, { status: "complete", payment_status: "paid", amount_total: subtotal + (s.tax_rate ? Math.round(subtotal * 0.1) : 0) });
+      return send(200, { session: s.id });
+    }
     const c = COURSES.find((x) => x.testPriceId === s?.price);
     if (!s || !c) return send(404, {});
     const id = `sub_test_${++n}`;
