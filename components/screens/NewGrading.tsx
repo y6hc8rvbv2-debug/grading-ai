@@ -29,6 +29,7 @@ import { runPool, withBusyRetry } from "@/lib/workflow/pool";
 import { autoCheck, bestClass, matchTest } from "@/lib/workflow/auto-check";
 import NewTestForm from "./NewTestForm";
 import FileThumbnail from "@/components/FileThumbnail";
+import { StudentSubmitPanel } from "@/components/StudentSubmitPanel";
 import { preflight } from "@/lib/workflow/preflight";
 import { requireAiConsent } from "@/lib/ai-consent";
 import { askNotifyPermission, notifyDone } from "@/lib/notify";
@@ -89,6 +90,7 @@ export default function NewGrading() {
   const [printedTitles, setPrintedTitles] = useState<string[]>([]);
   const [testAuto, setTestAuto] = useState<"" | "matched" | "created">("");
   const [onlyProblems, setOnlyProblems] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [aiProgress, setAiProgress] = useState<{ done: number; total: number } | null>(null);
   const [savedCount, setSavedCount] = useState(0);
   const [saveErrors, setSaveErrors] = useState(0);
@@ -553,12 +555,15 @@ export default function NewGrading() {
 
   /* ------------------------------------------------------------- 取り込み */
   // 取り込み方法：カメラ・ファイル・PDF（複合機のスキャンは PDF に保存してから「PDF一括」で取り込む）
+  // ver6：生徒のタブレット・スマホから（QRコードで生徒が自分で提出する）
   const options: { k: Source; icon: string; t: string; d: string }[] = [
     { k: "camera", icon: "📷", t: "カメラで撮影", d: demo ? "撮影ガイド枠つき（教師用）" : "スマートフォン・タブレットのカメラで撮る" },
     { k: "file", icon: "💻", t: "PCから選択", d: "JPEG / PNG / HEIC / PDF" },
     { k: "pdf", icon: "📄", t: "PDF一括", d: demo ? "1ファイルに複数枚を格納" : "PDFファイルを選ぶ（1ファイル＝1人分。複合機のスキャンもここから）" },
+    { k: "mobile", icon: "📱", t: "生徒のタブレット・スマホから", d: "QRコードを映すと、生徒が自分の端末で撮って提出します。届いた答案はそのままAI採点できます" },
   ];
   const pick = (k: Source) => {
+    if (k === "mobile") { setMobileOpen(true); return; }
     if (demo && k !== "file") { addDemoFiles(k === "camera" ? 5 : 10, k); return; }
     setSource(k);
     if (k === "camera") cameraRef.current?.click();
@@ -634,6 +639,7 @@ export default function NewGrading() {
         </div>
         <input ref={inputRef} type="file" multiple accept={source === "pdf" ? "application/pdf" : ACCEPT}
           style={{ display: "none" }} onChange={(e) => { onPickFiles(e.target.files, source === "pdf" ? "pdf" : "file"); e.target.value = ""; }} />
+        <StudentSubmitPanel open={mobileOpen} onClose={() => { setMobileOpen(false); refresh(); }} testId={testId} classId={classId} />
         <input ref={cameraRef} type="file" accept="image/*" capture="environment"
           style={{ display: "none" }} onChange={(e) => { onPickFiles(e.target.files, "camera"); e.target.value = ""; }} />
       </Section>

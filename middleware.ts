@@ -34,7 +34,7 @@ export async function middleware(request: NextRequest) {
 
   // 生徒の画面とチャッピー先生の API は、答案・会話を端末や共有のキャッシュに残さない
   const path = request.nextUrl.pathname;
-  if (path.startsWith("/student") || path.startsWith("/api/tutor")) {
+  if (path.startsWith("/student") || path.startsWith("/api/tutor") || path.startsWith("/submit") || path.startsWith("/api/submit")) {
     response.headers.set("cache-control", "no-store, private");
   }
 
@@ -42,7 +42,8 @@ export async function middleware(request: NextRequest) {
   //   ログイン画面・生徒の画面・起動画面・規約などの公開ページ（ストアの審査・保護者も読める）・アプリの情報（manifest）
   //   チャッピー先生・アカウント削除・保存期間の削除（Cron）の API は、自分で 401 を返す
   //   決済の通知（Stripe の署名で確かめる）と予約採点の定期処理（BILLING_WORKER_SECRET で確かめる）も、ログインなしで届く必要がある
-  const isPublic = ["/login", "/student", "/start", "/privacy", "/terms", "/support", "/account-deletion", "/tokushoho", "/auth/callback", "/manifest.webmanifest", "/api/tutor", "/api/account", "/api/retention", "/api/billing/webhook", "/api/billing/worker"]
+  //   ver6：生徒のタブレット・スマホからの提出（先生が配ったリンクのトークンで確かめる）、暗号資産の決済の通知（署名で確かめる）
+  const isPublic = ["/login", "/student", "/submit", "/api/submit", "/api/billing/crypto/webhook", "/start", "/privacy", "/terms", "/support", "/account-deletion", "/tokushoho", "/auth/callback", "/manifest.webmanifest", "/api/tutor", "/api/account", "/api/retention", "/api/billing/webhook", "/api/billing/worker"]
     .some((p) => path === p || path.startsWith(p + "/"));
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

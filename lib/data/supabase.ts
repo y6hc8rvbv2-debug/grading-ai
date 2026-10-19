@@ -149,6 +149,10 @@ export function createSupabaseSource(): DataSource {
     saveMarkPosition: (id, pos) => db.saveMarkPosition(id, pos),
     resetMarkPosition: (id, qno) => db.resetMarkPosition(id, qno),
 
+    createSubmitLink: (input) => db.createSubmitLink(schoolId(), userId(), input),
+    submitLinkStatus: (id) => db.submitLinkStatus(id),
+    revokeSubmitLink: (id) => db.revokeSubmitLink(id),
+
     signedImageUrl: (path) => db.signedImageUrl(path),
     loadAudit: () => db.loadAudit(),
     verifyAudit: () => db.verifyAuditChain(schoolId()),

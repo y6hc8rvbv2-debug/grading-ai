@@ -11,7 +11,7 @@ try {
     await db.exec(fs.readFileSync(`supabase/migrations/${file}`,'utf8'));
     console.log('PASS',file);
   }
-  for (const file of ['rls_test.sql','workflow_test.sql']) {
+  for (const file of ['rls_test.sql','ver6_test.sql','workflow_test.sql']) {
     await db.exec(fs.readFileSync(`supabase/tests/${file}`,'utf8').replace(/^\\.*$/gm,''));
     console.log('PASS',file);
   }

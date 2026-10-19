@@ -100,7 +100,8 @@ ok(!settings.includes("準備中") && !settings.includes("複合機・印刷機�
 await adm.goto(BASE + "/new");
 await adm.getByText("1. 答案の取り込み方法を選ぶ").waitFor();
 const newg = await adm.evaluate(() => document.body.innerText);
-ok(!newg.includes("生徒モバイル提出") && !newg.includes("印刷機・コピー機") && !newg.includes("準備中") && newg.includes("PDF一括"), "新規採点に未完成の取り込み方法が無い（PDF一括で複合機のスキャンを取り込める）");
+ok(!newg.includes("印刷機・コピー機") && !newg.includes("準備中") && newg.includes("PDF一括"), "新規採点に未完成の取り込み方法が無い（PDF一括で複合機のスキャンを取り込める）");
+ok(newg.includes("生徒のタブレット・スマホから"), "ver6：生徒のタブレット・スマホからの提出を選べる");
 
 // ---------------------------------------------------------------- AI に送る前の同意
 const png = (() => {

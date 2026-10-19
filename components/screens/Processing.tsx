@@ -11,12 +11,15 @@ import { Badge, Bar, Btn, Card, Empty } from "@/components/ui";
 import { GradingModeSelect } from "@/components/GradingModePicker";
 import { runPool, withBusyRetry } from "@/lib/workflow/pool";
 import { askNotifyPermission, notifyDone } from "@/lib/notify";
+import { StudentSubmitPanel } from "@/components/StudentSubmitPanel";
 
 export default function Processing() {
   const { T, go, subs, testById, who, refresh, ds, ai, aiGradeSub, toast } = useUI();
   const list = subs.filter((s) => s.status === "processing" || s.status === "uploaded");
   const [running, setRunning] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const mobilePanel = <StudentSubmitPanel open={mobileOpen} onClose={() => { setMobileOpen(false); refresh(); }} />;
 
   const gradeOne = async (id: string, silent = false) => {
     setRunning((p) => new Set(p).add(id));
@@ -52,7 +55,10 @@ export default function Processing() {
 
   if (!list.length) {
     return <Card><Empty icon="✅" title="処理中の答案はありません" hint="取り込んだ答案はすべて採点が終わっています。"
-      action={<Btn variant="primary" onClick={() => go("new")}>新しく採点する</Btn>} /></Card>;
+      action={<div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+        <Btn variant="primary" onClick={() => go("new")}>新しく採点する</Btn>
+        <Btn onClick={() => setMobileOpen(true)}>📱 生徒の端末から集める</Btn>
+      </div>} />{mobilePanel}</Card>;
   }
   return (
     <div style={{ display: "grid", gap: 11 }}>
@@ -74,6 +80,8 @@ export default function Processing() {
             </Btn>
           )}
           <Btn size="sm" onClick={refresh}>最新の状態にする</Btn>
+          <Btn size="sm" variant="soft" onClick={() => setMobileOpen(true)}>📱 生徒の端末から集める</Btn>
+          {mobilePanel}
         </div>
       </Card>
       {list.map((s) => {

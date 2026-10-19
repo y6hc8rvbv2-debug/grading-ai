@@ -8,7 +8,7 @@ import { pct } from "@/lib/util";
 import type { DataSource, SessionInfo } from "@/lib/data/source";
 import type {
   MarkPos,
-  AuditRow, Item, QuestionStat, RateRow, Retention, Rubric, Submission, Test,
+  AuditRow, Item, QuestionStat, RateRow, Retention, Rubric, Submission, Test, SubmitLink, LinkUpload,
 } from "@/lib/types";
 
 const DEMO_SESSION: SessionInfo = {
@@ -40,6 +40,7 @@ export function createDemoSource(): DataSource {
   let retention: Retention = "year";
   const audit: AuditRow[] = [];
   let seq = 0;
+  const demoLinks = new Map<string, { link: SubmitLink; startedAt: number; count?: number }>();
 
   const log = (action: string, targetTable: string, targetId: string | null, detail: unknown) => {
     audit.unshift({
@@ -213,6 +214,27 @@ export function createDemoSource(): DataSource {
     listOpenImports: async () => [],
     downloadImportFile: async () => { throw new Error("デモモードでは資料を読み込めません。"); },
 
+    // デモ：リンクを作ると、数秒ごとにクラスの生徒が1人ずつ提出したことにする（画像は無いので採点はできない）
+    createSubmitLink: async (input) => {
+      const link: SubmitLink = { id: `link-${++seq}`, token: "demo-token-demo-token-demo-tok", testId: input.testId, classId: input.classId,
+        expiresAt: new Date(Date.now() + input.hours * 3600_000).toISOString(), maxUploads: input.maxUploads, usedCount: 0, revokedAt: null, note: input.note ?? "" };
+      demoLinks.set(link.id, { link, startedAt: Date.now() });
+      log("submit_link.create", "submission_links", link.id, { hours: input.hours });
+      return clone(link);
+    },
+    submitLinkStatus: async (id) => {
+      const d = demoLinks.get(id);
+      if (!d) throw new Error("提出リンクが見つかりません");
+      const roster = DEMO_STUDENTS.filter((st) => st.classId === d.link.classId).sort((a, b) => a.number - b.number);
+      const n = d.link.revokedAt ? d.count ?? 0 : Math.min(roster.length, Math.floor((Date.now() - d.startedAt) / 4000));
+      d.count = n;
+      const uploads: LinkUpload[] = roster.slice(0, n).map((st, i) => ({
+        id: `up-${id}-${i}`, studentId: st.id, submissionId: "", pages: 1 + (i % 2), verified: i % 3 === 0, status: "done" as const,
+        createdAt: new Date(d.startedAt + (i + 1) * 4000).toISOString(),
+      })).reverse();
+      return { link: { ...clone(d.link), usedCount: n }, uploads };
+    },
+    revokeSubmitLink: async (id) => { const d = demoLinks.get(id); if (d) d.link.revokedAt = new Date().toISOString(); },
     signedImageUrl: async () => "",
     loadAudit: async () => clone(audit),
     verifyAudit: async () => ({ total: audit.length, broken: 0 }),

@@ -256,3 +256,8 @@ export type AuditRow = {
   id: number; createdAt: string; action: string; targetTable: string;
   targetId: string | null; actor: string; detail: unknown;
 };
+
+/** 生徒のタブレット・スマホからの提出リンク（ver6。0019） */
+export type SubmitLink = { id: string; token: string; testId: string; classId: string; expiresAt: string; maxUploads: number; usedCount: number; revokedAt: string | null; note: string };
+/** 提出リンクから届いた答案（だれが・何ページ・いつ・本人確認済みか） */
+export type LinkUpload = { id: string; studentId: string; submissionId: string; pages: number; verified: boolean; status: "receiving" | "done" | "failed"; createdAt: string };

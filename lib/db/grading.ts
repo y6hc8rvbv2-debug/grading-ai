@@ -14,7 +14,7 @@ import type {
   MarkPos,
   AuditRow, ClassRoom, GradingInput, GradingLog, ImportResult, Item, ItemPatch, Mark, NewTestInput, Profile,
   QType, Quality, QuestionStat, RateRow, Retention, ReviewEntry, Rubric, School,
-  Student, Submission, Test, Workspace,
+  Student, Submission, Test, Workspace, SubmitLink, LinkUpload,
 } from "@/lib/types";
 
 
@@ -734,4 +734,51 @@ export async function verifyAuditChain(schoolId: string) {
   if (error) throw error;
   const broken = (data ?? []).filter((r: any) => r.ok === false);
   return { total: data?.length ?? 0, broken: broken.length };
+}
+
+/* ---------------------------------------------------------- 生徒のタブレット・スマホからの提出（ver6・0019） */
+
+/** 推測できない32文字のトークン（URL に使える文字だけ） */
+export function newLinkToken() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+const toLink = (r: Record<string, unknown>): SubmitLink => ({
+  id: r.id as string, token: r.token as string, testId: r.test_id as string, classId: r.class_id as string,
+  expiresAt: r.expires_at as string, maxUploads: Number(r.max_uploads), usedCount: Number(r.used_count),
+  revokedAt: (r.revoked_at as string | null) ?? null, note: (r.note as string) ?? "",
+});
+
+export async function createSubmitLink(schoolId: string, userId: string, input: { testId: string; classId: string; hours: number; maxUploads: number; note?: string }) {
+  const sb = createClient();
+  const { data, error } = await sb.from("submission_links").insert({
+    school_id: schoolId, test_id: input.testId, class_id: input.classId, token: newLinkToken(), created_by: userId,
+    expires_at: new Date(Date.now() + input.hours * 3600_000).toISOString(), max_uploads: input.maxUploads, note: (input.note ?? "").slice(0, 100),
+  }).select("*").single();
+  if (error) throw error;
+  return toLink(data);
+}
+
+export async function submitLinkStatus(linkId: string): Promise<{ link: SubmitLink; uploads: LinkUpload[] }> {
+  const sb = createClient();
+  const [{ data: link, error }, { data: ups, error: e2 }] = await Promise.all([
+    sb.from("submission_links").select("*").eq("id", linkId).single(),
+    sb.from("link_uploads").select("*").eq("link_id", linkId).order("created_at", { ascending: false }),
+  ]);
+  if (error) throw error;
+  if (e2) throw e2;
+  return {
+    link: toLink(link),
+    uploads: (ups ?? []).map((u) => ({
+      id: u.id, studentId: u.student_id, submissionId: u.submission_id, pages: u.pages, verified: u.verified, status: u.status, createdAt: u.created_at,
+    })),
+  };
+}
+
+export async function revokeSubmitLink(linkId: string) {
+  const sb = createClient();
+  const { error } = await sb.from("submission_links").update({ revoked_at: new Date().toISOString() }).eq("id", linkId);
+  if (error) throw error;
 }

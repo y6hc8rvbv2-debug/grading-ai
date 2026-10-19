@@ -4,7 +4,7 @@
 //   - demo    : Supabase 未設定時。メモリ上のデモデータで動き、再読み込みで元に戻る（lib/data/demo.ts）
 import type {
   AiGradeSummary, AiStatus, AuditRow, GradingInput, GradingLog, ImportResult, ItemPatch, NewTestInput, Profile, QuestionStat, RateRow,
-  MarkPos, Retention, ReviewEntry, Rubric, School, Submission, Workspace,
+  MarkPos, Retention, ReviewEntry, Rubric, School, Submission, Workspace, SubmitLink, LinkUpload,
 } from "@/lib/types";
 import type { GradingMode, GradingStage } from "@/lib/grading/cost";
 
@@ -74,6 +74,13 @@ export interface DataSource {
   saveMarkPosition(submissionId: string, pos: MarkPos): Promise<void>;
   /** 「位置を元に戻す」（自動で決めた位置に戻す） */
   resetMarkPosition(submissionId: string, qno: number): Promise<void>;
+
+  /** 生徒のタブレット・スマホからの提出リンク（ver6。0019）。トークンはブラウザで作る（32文字） */
+  createSubmitLink(input: { testId: string; classId: string; hours: number; maxUploads: number; note?: string }): Promise<SubmitLink>;
+  /** リンクの状態と届いた答案（新しい順） */
+  submitLinkStatus(linkId: string): Promise<{ link: SubmitLink; uploads: LinkUpload[] }>;
+  /** リンクを取り消す（以後は提出できない。届いた答案は残る） */
+  revokeSubmitLink(linkId: string): Promise<void>;
 
   signedImageUrl(path: string): Promise<string>;
   loadAudit(): Promise<AuditRow[]>;
