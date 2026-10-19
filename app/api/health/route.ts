@@ -46,11 +46,13 @@ export async function GET() {
   // 0016：アカウントの削除・保存期間の削除。purge_submissions は service_role だけが呼べるので、教職員が空で呼ぶと
   // 「権限がない」で止まる（関数がある）か「見つからない」（未適用）になる。何も変更しない
   const { error: e16 } = await supabase.rpc("purge_submissions", { p_ids: [] });
+  // 0019（ver6）：AIエンジンの設定・生徒の提出リンク・前払い
+  const { error: e19 } = await supabase.from("ai_settings").select("school_id", { head: true, count: "exact" }).limit(1);
 
   return NextResponse.json({
     supabase: true,
     ai: aiConfig().enabled,
-    migrations: { "0004": !missing(e4), "0005": !missing(e5), "0006": !missing(e6), "0007": !missing(e7), "0008": !missing(e8), "0009": !missing(e9), "0012": !missing(e12), "0015": !missing(e15), "0016": !missing(e16) },
+    migrations: { "0004": !missing(e4), "0005": !missing(e5), "0006": !missing(e6), "0007": !missing(e7), "0008": !missing(e8), "0009": !missing(e9), "0012": !missing(e12), "0015": !missing(e15), "0016": !missing(e16), "0019": !missing(e19) },
     // サーバーの設定（値は返さない）：アカウントの削除・保存期間の削除に必要なもの
     server: {
       accountDeletion: !!process.env.SUPABASE_SERVICE_ROLE_KEY,

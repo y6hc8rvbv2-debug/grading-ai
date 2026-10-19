@@ -36,10 +36,15 @@ const clean = () => [
 test("Opus単独は Opus だけ、3モデル併用は Haiku → Sonnet → Opus", () => {
   assert.deepEqual(PLAN.opus, ["opus"]);
   assert.deepEqual(PLAN.cascade, ["haiku", "sonnet", "opus"]);
-  // Haiku 4.5 は adaptive thinking・effort 非対応。Haiku・Sonnet は拒否されたら上の段階に回すので fallbacks なし
-  assert.deepEqual(stageOptions("haiku", "cascade"), { model: "claude-haiku-4-5", thinking: false, fallbacks: false });
-  assert.deepEqual(stageOptions("sonnet", "cascade"), { model: "claude-sonnet-5-5", thinking: true, effort: "high", fallbacks: false });
-  assert.equal(stageOptions("opus", "opus").thinking, true);
+  // ver6 の既定：1段目は Haiku 5.5（速さ優先の effort low）、2段目は Sonnet 5.5（effort medium）、最上位は Opus 5.5（effort high）。
+  // Haiku・Sonnet は拒否されたら上の段階に回すので fallbacks なし
+  assert.deepEqual(stageOptions("haiku", "cascade"), { model: "claude-haiku-5-5", thinking: true, effort: "low", fallbacks: false });
+  assert.deepEqual(stageOptions("sonnet", "cascade"), { model: "claude-sonnet-5-5", thinking: true, effort: "medium", fallbacks: false });
+  assert.deepEqual(stageOptions("opus", "opus"), { model: "claude-opus-5-5", thinking: true, effort: "high" });
+  // Haiku 4.5 を選んだ学校：adaptive thinking・effort 非対応なので thinking なし
+  assert.deepEqual(stageOptions("haiku", "cascade", { fast: "claude-haiku-4-5" }), { model: "claude-haiku-4-5", thinking: false, fallbacks: false });
+  // 学校の設定は環境変数より優先する
+  assert.equal(stageOptions("opus", "opus", { top: "claude-fable-5-1" }).model, "claude-fable-5-1");
 });
 
 test("表記ゆれは同じ解答とみなす", () => {
@@ -92,8 +97,10 @@ test("最後の段階で前のモデルと判定が分かれた設問は要確�
 });
 
 test("料金の目安：3モデル併用は Haiku 全件 + Sonnet 20% + Opus 5%", () => {
-  assert.equal(costOfStage("haiku", { input: 1_000_000, output: 0 }), 1);
-  assert.equal(costOfStage("opus", { input: 0, output: 1_000_000 }), 25);
+  // 既定のモデル（Haiku 5.5：入力 $0.10、Opus 5.5：出力 $20）。使ったモデルIDを渡すとその単価で計算する
+  assert.equal(costOfStage("haiku", { input: 1_000_000, output: 0 }), 0.1);
+  assert.equal(costOfStage("opus", { input: 0, output: 1_000_000 }), 20);
+  assert.equal(costOfStage("opus", { input: 0, output: 1_000_000 }, "claude-opus-5"), 25);
   const opus = estimatePerAnswer("opus", 1, 10);
   const cascade = estimatePerAnswer("cascade", 1, 10);
   assert.ok(cascade < opus * 0.5, `3モデル併用 ${cascade} は Opus単独 ${opus} より安い`);

@@ -15,15 +15,20 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import type { Mark, QType, Rubric } from "@/lib/types";
+import { resolveModels, traitsOf, type ModelOverrides } from "@/lib/grading/models";
 
-export const DEFAULT_MODEL = "claude-opus-5";
+/** 最上位の段階の既定モデル（lib/grading/models.ts の DEFAULT_MODELS.top） */
+export const DEFAULT_MODEL = resolveModels({}).top;
 
-/** 採点AIの設定。キーはサーバーの環境変数にだけ置く。 */
-export function aiConfig() {
+/** 採点AIの設定。キーはサーバーの環境変数にだけ置く。
+ *  school を渡すと、学校の設定（設定画面の「AIエンジン」）を環境変数より優先する */
+export function aiConfig(school: ModelOverrides = {}) {
   const apiKey = process.env.ANTHROPIC_API_KEY ?? "";
+  const models = resolveModels(process.env, school);
   return {
     enabled: apiKey.length > 0,
-    model: process.env.ANTHROPIC_MODEL || DEFAULT_MODEL,
+    model: models.top,
+    models,
     // 拒否されたときに別モデルで自動再実行する（server-side fallbacks）。"off" で無効化
     fallbacks: process.env.ANTHROPIC_FALLBACKS !== "off",
   };
@@ -245,10 +250,13 @@ export async function callClaude(params: {
     throw new GradingError("採点AIが設定されていません。サーバーの環境変数 ANTHROPIC_API_KEY を設定してください。", 503);
   }
   const model = opts.model ?? cfg.model;
-  const thinking = opts.thinking ?? true;
-  const fallbacks = opts.fallbacks ?? cfg.fallbacks;
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2 });
-  const { system, content } = buildGradingPrompt(params);
+  const traits = traitsOf(model);
+  const thinking = (opts.thinking ?? true) && traits.adaptive;
+  // fallbacks は対応するモデルだけ（対応しないモデルに付けると 400 になる）
+  const fallbacks = (opts.fallbacks ?? cfg.fallbacks) && traits.fallbacks;
+  // 混み合い（429）・一時的な障害（5xx）は SDK が待ってから自動で再試行する。並列採点で混み合っても途中で止めないため多めにする
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 4 });
+  const { system, content } = buildCachedGradingPrompt(params);
 
   let response: Anthropic.Beta.BetaMessage;
   try {
@@ -257,7 +265,7 @@ export async function callClaude(params: {
       max_tokens: 16000,
       ...(thinking ? { thinking: { type: "adaptive" as const } } : {}),
       output_config: {
-        ...(thinking ? { effort: opts.effort ?? "high" } : {}),
+        ...(traits.effort ? { effort: opts.effort ?? "high" } : {}),
         format: { type: "json_schema", schema: OUTPUT_SCHEMA as unknown as Record<string, unknown> },
       },
       system,
@@ -270,6 +278,30 @@ export async function callClaude(params: {
     throw toGradingError(e);
   }
   return readGradingResponse(response);
+}
+
+/** アプリの採点で使う指示。答案ごとに変わらない部分（採点の指示・設問・正答・採点基準）を system に置いて
+ *  プロンプトキャッシュに載せ、2人目以降の答案では読み込みを安く・速くする（ver6）。
+ *  内容は buildGradingPrompt と同じで、並べ方だけが違う。 */
+export function buildCachedGradingPrompt(params: { pages: AnswerPage[]; test: GradeTest; rubric: Rubric }) {
+  const content: Anthropic.Beta.BetaContentBlockParam[] = [];
+  params.pages.forEach((p) => {
+    if (p.kind === "pdf") {
+      content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: p.data } });
+    } else {
+      content.push({ type: "image", source: { type: "base64", media_type: p.mediaType, data: p.data } });
+    }
+  });
+  content.push({ type: "text", text: `上の${params.pages.length}ページが1人分の答案です。指示どおり、設問ごとに採点してください。` });
+  const system: Anthropic.Beta.BetaTextBlockParam[] = [
+    { type: "text", text: SYSTEM_PROMPT },
+    {
+      type: "text",
+      text: ["次のテストの答案を採点します。", "", testText(params.test), "", "採点基準:", rubricText(params.rubric)].join("\n"),
+      cache_control: { type: "ephemeral" },
+    },
+  ];
+  return { system, content };
 }
 
 /** 採点の指示（system）と、答案ページ＋設問＋採点基準（user）を組み立てる。

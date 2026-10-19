@@ -14,26 +14,28 @@
 import "server-only";
 import { aiConfig, type CallOptions, type GradeTest, type NormalizedItem, type ReviewFlag } from "@/lib/ai/grade";
 import type { GradingMode, GradingStage } from "@/lib/grading/cost";
+import { STAGE_TIER, traitsOf, type ModelOverrides } from "@/lib/grading/models";
 
 export const PLAN: Record<GradingMode, GradingStage[]> = {
   opus: ["opus"],
   cascade: ["haiku", "sonnet", "opus"],
 };
 
-/** 各段階のモデルID（環境変数で変更できる） */
-export function stageModel(stage: GradingStage) {
-  if (stage === "haiku") return process.env.ANTHROPIC_MODEL_HAIKU || "claude-haiku-4-5";
-  if (stage === "sonnet") return process.env.ANTHROPIC_MODEL_SONNET || "claude-sonnet-5-5";
-  return aiConfig().model;
+/** 各段階のモデルID。優先順：学校の設定（設定画面の「AIエンジン」）→ 環境変数 → 既定値（lib/grading/models.ts） */
+export function stageModel(stage: GradingStage, school: ModelOverrides = {}) {
+  return aiConfig(school).models[STAGE_TIER[stage]];
 }
 
-/** 各段階の呼び出し方。Haiku 4.5 は adaptive thinking・effort に対応していない。
- *  3モデル併用の Haiku・Sonnet は、拒否されたら別モデルに切り替えず、上の段階に回す（記録が残る） */
-export function stageOptions(stage: GradingStage, mode: GradingMode): CallOptions {
-  const model = stageModel(stage);
-  if (stage === "haiku") return { model, thinking: false, fallbacks: false };
-  if (stage === "sonnet") return { model, thinking: true, effort: "high", fallbacks: false };
-  // Opus は方式によらず、これまでの Opus単独の採点と同じ呼び出し方（fallbacks は ANTHROPIC_FALLBACKS に従う）
+/** 各段階の呼び出し方。
+ *  - 1段目（高速）：速さを優先して effort low。Haiku 4.5 など adaptive thinking に対応しないモデルは thinking なし
+ *  - 2段目（標準）：effort medium
+ *  - 最上位：これまでの Opus単独の採点と同じ effort high（fallbacks は ANTHROPIC_FALLBACKS に従う）
+ *  3モデル併用の1・2段目は、拒否されたら別モデルに切り替えず、上の段階に回す（記録が残る） */
+export function stageOptions(stage: GradingStage, mode: GradingMode, school: ModelOverrides = {}): CallOptions {
+  const model = stageModel(stage, school);
+  const traits = traitsOf(model);
+  if (stage === "haiku") return traits.adaptive ? { model, thinking: true, effort: "low", fallbacks: false } : { model, thinking: false, fallbacks: false };
+  if (stage === "sonnet") return { model, thinking: true, effort: "medium", fallbacks: false };
   void mode;
   return { model, thinking: true, effort: "high" };
 }

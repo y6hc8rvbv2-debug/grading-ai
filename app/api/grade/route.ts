@@ -36,6 +36,7 @@ import { heicToJpeg, looksLikeHeic } from "@/lib/ai/heic";
 import { costOfStage, type GradingMode, type GradingStage } from "@/lib/grading/cost";
 import { billingEnabled, nightEnabled, sameOrigin, workerAuthorized } from "@/lib/billing/server";
 import type { QType, Rubric } from "@/lib/types";
+import { loadSchoolAi } from "@/lib/ai/settings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,11 +67,14 @@ export async function GET() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return fail("ログインしていません。もう一度ログインしてください。", 401);
-  const cfg = aiConfig();
+  const { data: prof } = await supabase.from("profiles").select("school_id").eq("id", user.id).maybeSingle();
+  const school = await loadSchoolAi(supabase, prof?.school_id as string | undefined);
+  const cfg = aiConfig(school.overrides);
   return NextResponse.json({
     enabled: cfg.enabled,
     model: cfg.enabled ? cfg.model : null,
-    models: cfg.enabled ? { haiku: stageModel("haiku"), sonnet: stageModel("sonnet"), opus: stageModel("opus") } : null,
+    models: cfg.enabled ? { haiku: stageModel("haiku", school.overrides), sonnet: stageModel("sonnet", school.overrides), opus: stageModel("opus", school.overrides) } : null,
+    concurrency: school.concurrency,
   });
 }
 
@@ -254,7 +258,8 @@ export async function POST(request: Request) {
   }
 
   /* ------------------------------------------------ この段階を1回だけ呼ぶ */
-  const opts = stageOptions(stage, theJob.mode);
+  const school = await loadSchoolAi(supabase, sub.school_id as string);
+  const opts = stageOptions(stage, theJob.mode, school.overrides);
   const { data: claimed, error: claimError } = await supabase.from("grading_stages").insert({
     school_id: sub.school_id, job_id: theJob.id, submission_id: submissionId,
     stage, position: nextIndex + 1, model_id: opts.model,
@@ -286,7 +291,7 @@ export async function POST(request: Request) {
     const escalate = !isLast && reasons.length > 0;
     await supabase.from("grading_stages").update({
       status: "done", escalate, reasons, items, quality, served_model: model, stop_reason: stopReason,
-      usage: tokens, cost_usd: costOfStage(stage, tokens), elapsed_ms: Date.now() - t0, finished_at: new Date().toISOString(),
+      usage: tokens, cost_usd: costOfStage(stage, tokens, opts.model), elapsed_ms: Date.now() - t0, finished_at: new Date().toISOString(),
     }).eq("id", claimed.id);
     if (escalate) {
       return NextResponse.json({ ok: true, done: false, stage, next: plan[nextIndex + 1], reasons: reasons.map((r) => r.msg) });
@@ -302,7 +307,7 @@ export async function POST(request: Request) {
     await supabase.from("grading_stages").update({
       status: "error", escalate, error: message.slice(0, 500), served_model: err.model ?? null, stop_reason: err.stopReason ?? null,
       reasons: escalate ? [{ code: "unusable", msg: `答案全体：${FLAG_MESSAGE.unusable}（${message}）` }] : [],
-      usage: tokens, cost_usd: tokens ? costOfStage(stage, tokens) : null,
+      usage: tokens, cost_usd: tokens ? costOfStage(stage, tokens, opts.model) : null,
       elapsed_ms: Date.now() - t0, finished_at: new Date().toISOString(),
     }).eq("id", claimed.id);
     if (escalate) {

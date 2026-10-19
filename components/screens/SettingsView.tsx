@@ -3,6 +3,7 @@
 // 表示の設定は端末に、保存期間は学校（schools.retention）に保存する。
 import { ReviewCopyCard, TutorAdminCard } from "@/components/tutor/TeacherTutor";
 import { AccountDeletion } from "@/components/AccountDeletion";
+import { AiEngineCard } from "@/components/AiEngineCard";
 import { hasAiConsent, setAiConsent } from "@/lib/ai-consent";
 import React, { useEffect, useState } from "react";
 import { FONT_UI } from "@/lib/ui/theme";
@@ -16,7 +17,7 @@ import type { Retention } from "@/lib/types";
 export default function SettingsView() {
   const {
     T, t, lang, setLang, mode, setMode, anonMode, setAnonMode, display, setDisplay,
-    answerLang, setAnswerLang, studentLang, setStudentLang, toast, ds, session, isAdmin, ai,
+    answerLang, setAnswerLang, studentLang, setStudentLang, toast, ds, session, isAdmin,
   } = useUI();
   const demo = ds.mode === "demo";
   const [q, setQ] = useState("");
@@ -163,33 +164,15 @@ export default function SettingsView() {
 
       <ReadinessCard />
 
-      <Card title="AIエンジン" sub="採点に使う AI">
-        <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span style={{ fontSize: 12.5, color: T.textSub, width: 90 }}>採点モデル</span>
-            <b style={{ fontSize: 12.5, color: T.text }}>{ai.enabled ? `Claude（${ai.model}）` : "Claude（Vision + 記述採点）"}</b>
-            {ai.enabled ? <Badge tone="ok">接続済み</Badge> : <Badge tone="mute">{demo ? "デモでは使えません" : "未設定"}</Badge>}
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span style={{ fontSize: 12.5, color: T.textSub, width: 90 }}>いま動く採点</span>
-            <span style={{ fontSize: 12.5, color: T.text }}>
-              {demo ? "ローカルのルールベース採点（デモ）"
-                : ai.enabled ? "AI採点（答案画像・正答・配点・採点基準をもとに採点）"
-                : "なし（答案は「AI採点待ち」で保存。サーバーに ANTHROPIC_API_KEY を設定すると使えます）"}
-            </span>
-          </div>
-        </div>
-        <div style={{ fontSize: 11.5, color: T.textFaint, lineHeight: 1.8 }}>
-          AI採点では、答案画像とこのアプリの採点基準を AI の提供元（Anthropic）に送り、設問ごとの正誤・部分点・信頼度を受け取ります。
-          APIキーはサーバーの環境変数にだけ置き、この画面やブラウザには入力・保存しません。
-        </div>
-        {!demo && (
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
-            <span style={{ fontSize: 12, color: T.textSub }}>AI への送信の同意（この端末）：{aiConsent ? "同意済み" : "未同意（AI を使うときにたずねます）"}</span>
+      <AiEngineCard />
+      {!demo && (
+        <Card title="AI への送信の同意" sub="この端末の設定">
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: T.textSub }}>{aiConsent ? "同意済み" : "未同意（AI を使うときにたずねます）"}</span>
             {aiConsent && <Btn size="sm" variant="soft" onClick={() => { setAiConsent(false); setAiConsentState(false); toast("同意を取り消しました。次に AI を使うときにもう一度たずねます"); }}>同意を取り消す</Btn>}
           </div>
-        )}
-      </Card>
+        </Card>
+      )}
     </div>
   );
 }
@@ -225,6 +208,7 @@ function ReadinessCard() {
       { label: "アカウントの削除のサーバー設定（SUPABASE_SERVICE_ROLE_KEY）", ok: h.server ? h.server.accountDeletion : null, fix: "Vercel の環境変数に SUPABASE_SERVICE_ROLE_KEY（NEXT_PUBLIC_ を付けない）を設定して再デプロイしてください（docs/STORE-RELEASE.md）。" },
       { label: "保存期間を過ぎた答案の削除（CRON_SECRET）", ok: h.server ? h.server.retention : null, fix: "Vercel の環境変数に CRON_SECRET（32文字以上の乱数）と SUPABASE_SERVICE_ROLE_KEY を設定して再デプロイしてください。毎日1回、自動で動きます（vercel.json）。" },
       { label: "公開の情報（提供者名・問い合わせ先・本番の URL）", ok: h.publicInfo ? h.publicInfo.length === 0 : null, fix: `未設定：${(h.publicInfo ?? []).join("、")}。Vercel の環境変数に設定して再デプロイしてください（docs/STORE-RELEASE.md）。` },
+      { label: "ver6 の追加機能（0019_ver6.sql）", ok: h.migrations?.["0019"] ?? null, fix: "AIエンジンの切り替え・生徒のタブレット/スマホからの提出・前払いの支払いに必要です。0018 の後に、Supabase の SQL Editor で 0019_ver6.sql を実行してください。" },
       { label: "モデル比較試験の記録（0005_model_compare.sql）", ok: h.migrations?.["0005"] ?? null, fix: "管理者がモデル比較試験を使う場合だけ必要です。Supabase の SQL Editor で 0005_model_compare.sql を実行してください。" },
       { label: "iPhone の写真（HEIC）", ok: true, fix: "" },
     ] : [];

@@ -227,6 +227,8 @@ export type ImportResult = { title: string; subject: string; maxScore: number | 
 export type AiStatus = {
   enabled: boolean; model: string | null;
   models?: Record<GradingStage, string> | null;
+  /** 同時に採点する答案の数（設定画面の「AIエンジン」。ver6） */
+  concurrency?: number;
 };
 
 /** 採点AIの結果の要約（詳細は答案を読み直して得る） */
