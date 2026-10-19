@@ -20,7 +20,9 @@ TRAP_PORT=${LITE_TRAP_PORT:-54397}
 APP_PORT=${LITE_APP_PORT:-3300}
 BILL_PORT=${LITE_BILL_PORT:-3301}
 STRIPE_PORT=${LITE_STRIPE_PORT:-54396}
-for p in "$PG_PORT" "$REST_PORT" "$GW_PORT" "$TRAP_PORT" "$APP_PORT" "$BILL_PORT" "$STRIPE_PORT"; do
+V6_PORT=${LITE_V6_PORT:-3302}
+MOCK_PORT=${LITE_MOCK_AI_PORT:-54395}
+for p in "$PG_PORT" "$REST_PORT" "$GW_PORT" "$TRAP_PORT" "$APP_PORT" "$BILL_PORT" "$STRIPE_PORT" "$V6_PORT" "$MOCK_PORT"; do
   if (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then echo "✗ ポート $p が使用中です"; exit 1; fi
 done
 
@@ -100,6 +102,8 @@ PUBLIC_INFO=(NEXT_PUBLIC_APP_PROVIDER="検証用の提供者" NEXT_PUBLIC_SUPPOR
 PIDS+=($!)
 for _ in $(seq 1 40); do curl -sf -o /dev/null "http://localhost:$APP_PORT/login" && break; sleep 1; done
 
+# LITE_ONLY=ver6 のときは ver6 のシナリオだけを動かす（開発中の確認用。既定はすべて）
+if [ "${LITE_ONLY:-}" != "ver6" ]; then
 echo "== シナリオ（tests/e2e-lite/review-copy.mjs）"
 # STORE_SHOT_DIR（例 $PWD/store/screenshots）を指定すると、ストア用の生徒の画面の写真も撮る
 BASE_URL="http://localhost:$APP_PORT" GATEWAY_URL="http://127.0.0.1:$GW_PORT" TRAP_URL="http://127.0.0.1:$TRAP_PORT" \
@@ -124,3 +128,19 @@ for _ in $(seq 1 40); do curl -sf -o /dev/null "http://localhost:$BILL_PORT/logi
 BILL_URL="http://localhost:$BILL_PORT" STRIPE_MOCK_URL="http://127.0.0.1:$STRIPE_PORT" TRAP_URL="http://127.0.0.1:$TRAP_PORT" \
   PG_URL="postgresql://postgres@127.0.0.1:$PG_PORT/lite" STRIPE_WEBHOOK_SECRET="$WHSEC" \
   node --import tsx tests/e2e-lite/billing.mjs || { echo "--- bill.log"; tail -40 "$WORK/bill.log"; echo "--- stripe.log"; tail -20 "$WORK/stripe.log"; exit 1; }
+
+fi
+
+echo "== ver6（tests/e2e-lite/ver6.mjs）：採点AI の代役と、ver6 の機能を確かめる3つ目のアプリ（同じビルド）"
+# 採点AI の代役（本物の API には接続しない）。1件の採点を1.5秒遅らせて、同時に採点していることを確かめる
+MOCK_KEY="sk-ant-ver6-$(node -e "console.log(require('crypto').randomBytes(8).toString('hex'))")"
+MOCK_ANTHROPIC_PORT="$MOCK_PORT" EXPECTED_API_KEY="$MOCK_KEY" GRADE_DELAY_MS=1500 node tests/e2e/mock-anthropic.mjs > "$WORK/mock-ai.log" 2>&1 &
+PIDS+=($!)
+"${CLEAN_ENV[@]}" "${PUBLIC_INFO[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
+  SUPABASE_SERVICE_ROLE_KEY="$SERVICE" ANTHROPIC_API_KEY="$MOCK_KEY" ANTHROPIC_BASE_URL="http://127.0.0.1:$MOCK_PORT" \
+  node_modules/.bin/next start -p "$V6_PORT" > "$WORK/v6.log" 2>&1 &
+PIDS+=($!)
+for _ in $(seq 1 40); do curl -sf -o /dev/null "http://localhost:$V6_PORT/login" && curl -sf -o /dev/null "http://127.0.0.1:$MOCK_PORT/__requests" && break; sleep 1; done
+V6_URL="http://localhost:$V6_PORT" MOCK_URL="http://127.0.0.1:$MOCK_PORT" GATEWAY_URL="http://127.0.0.1:$GW_PORT" SERVICE_JWT="$SERVICE" \
+  PG_URL="postgresql://postgres@127.0.0.1:$PG_PORT/lite" \
+  node tests/e2e-lite/ver6.mjs || { echo "--- v6.log"; tail -60 "$WORK/v6.log"; echo "--- mock-ai.log"; tail -20 "$WORK/mock-ai.log"; echo "--- gateway.log"; tail -20 "$WORK/gateway.log"; exit 1; }

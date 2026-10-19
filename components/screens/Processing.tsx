@@ -53,15 +53,16 @@ export default function Processing() {
     else toast(`${targets.length} 枚の採点・予約を受け付けました。採点履歴で状態を確認してください`);
   };
 
+  // 生徒の端末から集めるパネルは、一覧の有無が変わっても同じ位置に置く（答案が届いて一覧が出たときに、作ったリンクが消えないように）
   if (!list.length) {
-    return <Card><Empty icon="✅" title="処理中の答案はありません" hint="取り込んだ答案はすべて採点が終わっています。"
+    return <>{[<Card key="empty"><Empty icon="✅" title="処理中の答案はありません" hint="取り込んだ答案はすべて採点が終わっています。"
       action={<div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
         <Btn variant="primary" onClick={() => go("new")}>新しく採点する</Btn>
         <Btn onClick={() => setMobileOpen(true)}>📱 生徒の端末から集める</Btn>
-      </div>} />{mobilePanel}</Card>;
+      </div>} /></Card>]}{mobilePanel}</>;
   }
   return (
-    <div style={{ display: "grid", gap: 11 }}>
+    <>{[<div key="list" style={{ display: "grid", gap: 11 }}>
       <Card>
         <p><a href="/batch-review" target="_blank" rel="noreferrer">終わった答案を別タブで確認する</a></p>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -81,7 +82,6 @@ export default function Processing() {
           )}
           <Btn size="sm" onClick={refresh}>最新の状態にする</Btn>
           <Btn size="sm" variant="soft" onClick={() => setMobileOpen(true)}>📱 生徒の端末から集める</Btn>
-          {mobilePanel}
         </div>
       </Card>
       {list.map((s) => {
@@ -118,6 +118,6 @@ export default function Processing() {
           </Card>
         );
       })}
-    </div>
+    </div>]}{mobilePanel}</>
   );
 }

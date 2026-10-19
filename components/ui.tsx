@@ -215,7 +215,7 @@ export function Modal({ open, onClose, title, children, width = 720, footer, zIn
   return (
     <div onClick={onClose}
       style={{ position: "fixed", inset: 0, background: "rgba(12,16,22,.55)", zIndex, display: "flex", alignItems: "center", justifyContent: "center", padding: 14, backdropFilter: "blur(2px)" }}>
-      <div onClick={(e) => e.stopPropagation()}
+      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : undefined}
         style={{ background: T.panel, borderRadius: 16, border: `1px solid ${T.lineStrong}`, width: "100%", maxWidth: width, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(0,0,0,.35)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 16px", borderBottom: `1px solid ${T.line}` }}>
           <div style={{ flex: 1, fontSize: 14.5, fontWeight: 700, color: T.text }}>{title}</div>
@@ -277,9 +277,9 @@ export const grid = (min: number, gap = 12): CSSProperties => ({
 export function Tabs({ tabs, value, onChange }: P) {
   const { T } = useUI();
   return (
-    <div style={{ display: "flex", gap: 4, overflowX: "auto", borderBottom: `1px solid ${T.line}`, marginBottom: 16, paddingBottom: 1 }}>
+    <div role="tablist" style={{ display: "flex", gap: 4, overflowX: "auto", borderBottom: `1px solid ${T.line}`, marginBottom: 16, paddingBottom: 1 }}>
       {tabs.map((tb) => (
-        <button key={tb.k} onClick={() => onChange(tb.k)} style={{
+        <button key={tb.k} role="tab" aria-selected={value === tb.k} onClick={() => onChange(tb.k)} style={{
           border: "none", background: "transparent", cursor: "pointer",
           padding: "9px 13px", font: `700 12.5px ${FONT_UI}`, whiteSpace: "nowrap",
           color: value === tb.k ? T.accent : T.textSub,

@@ -40,6 +40,10 @@ test("答案に印刷されたテスト名から、テストを1つに決める�
   assert.equal(matchTest([""], tests), null);
   assert.equal(matchTest(["テスト"], tests), null, "どちらとも取れる名前では選ばない");
   assert.equal(normTitle("Ａ－Ｂ　テスト"), "abテスト");
+  // 名前が完全に同じテストがあれば、似た名前（複製した「（コピー）」など）より優先する
+  const withCopy = [...tests, { id: "t4", name: "2学期期末テスト（コピー）", subject: "数学", archivedAt: null }];
+  assert.equal(matchTest(["2学期期末テスト"], withCopy), "t1");
+  assert.equal(matchTest(["2学期期末テスト（コピー）"], withCopy), "t4");
 });
 
 test("読み取った番号に一番よく合うクラスを選ぶ（受験番号の一致を重く数える）", () => {

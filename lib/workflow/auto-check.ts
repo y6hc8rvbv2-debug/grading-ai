@@ -55,6 +55,9 @@ export function matchTest(printedTitles: string[], tests: Pick<Test, "id" | "nam
   const titles = [...new Set(printedTitles.map(normTitle).filter((t) => t.length >= 2))];
   if (!titles.length) return null;
   const active = tests.filter((t) => !t.archivedAt);
+  // 名前が完全に同じテストが1つだけなら、それを選ぶ（「〇〇（コピー）」などの似た名前があっても迷わない）
+  const exact = new Set(active.filter((t) => titles.includes(normTitle(t.name))).map((t) => t.id));
+  if (exact.size === 1) return [...exact][0];
   const hits = new Set<string>();
   for (const title of titles) {
     for (const t of active) {

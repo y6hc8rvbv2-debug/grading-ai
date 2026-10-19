@@ -20,6 +20,16 @@ const isImport = (body) => /テストを登録する教員の補助/.test(sysTex
 // ver6：模範解答の自動作成の検算・判定
 const isVerify = (body) => /模範解答を検算する教員/.test(sysText(body));
 const isAdjudicate = (body) => /模範解答を最終確認する教員/.test(sysText(body));
+// ver6：答案の自動振り分け（受験番号・テスト名の読み取り）。画像に埋め込んだ印（PNG の tEXt「EXAM:受験番号|TITLEHEX:テスト名のUTF-8の16進」）を読む
+const isIntake = (body) => /答案の印刷情報だけ読み取る/.test(sysText(body));
+function intakeResult(body) {
+  const img = (body.messages?.[0]?.content ?? []).find((c) => c.type === "image");
+  const bytes = img?.source?.data ? Buffer.from(img.source.data, "base64").toString("latin1") : "";
+  const m = /EXAM:([A-Za-z0-9]*)\|TITLEHEX:([0-9a-f]*)/.exec(bytes);
+  return { examNo: m ? m[1] : "", number: 0, page: 1, first: 1, last: 2, totalPages: 1, issues: [], title: m ? Buffer.from(m[2], "hex").toString("utf8") : "" };
+}
+// 同時に処理している採点の数（並列採点の確認用。GRADE_DELAY_MS で1件の応答を遅らせる）
+let inFlight = 0, maxInFlight = 0;
 // ver6：既定のモデル（lib/grading/models.ts の DEFAULT_MODELS）
 const TOP = "claude-opus-5-5", STANDARD = "claude-sonnet-5-5", FAST = "claude-haiku-5-5";
 function importProblems(req, body) {
@@ -61,6 +71,8 @@ const MODELS = [
   { type: "model", id: "claude-opus-5", display_name: "Claude Opus 5", created_at: "2026-05-01T00:00:00Z" },
   { type: "model", id: "claude-haiku-5-5", display_name: "Claude Haiku 5.5", created_at: "2026-09-01T00:00:00Z" },
   { type: "model", id: "claude-opus-5-5", display_name: "Claude Opus 5.5", created_at: "2026-09-01T00:00:00Z" },
+  // 将来のモデルの代役（設定画面の「新しいモデルがあります」の確認用）
+  { type: "model", id: "claude-sonnet-6", display_name: "Claude Sonnet 6", created_at: "2026-12-01T00:00:00Z" },
 ];
 const COMPARE_IDS = ["claude-haiku-4-5-20251001", "claude-sonnet-5-5", "claude-opus-5"];
 const isCompare = (body) => !("fallbacks" in body) && /比較試験/.test(JSON.stringify(body.messages?.[0]?.content ?? ""));
@@ -153,6 +165,7 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify(obj));
     };
     if (req.method === "GET" && req.url === "/__requests") return send(200, requests);
+    if (req.method === "GET" && req.url === "/__stats") return send(200, { maxInFlight, inFlight });
     if (req.method === "POST" && req.url === "/__mode") { nextMode = JSON.parse(raw || "{}").mode || ""; return send(200, { ok: true }); }
     if (req.method === "POST" && req.url === "/__script") {
       for (const [m, list] of Object.entries(JSON.parse(raw || "{}"))) scripts[m] = [...(scripts[m] ?? []), ...list];
@@ -165,6 +178,12 @@ const server = http.createServer((req, res) => {
     if (req.method !== "POST" || !req.url.startsWith("/v1/messages")) return send(404, { type: "error", error: { type: "not_found_error", message: "not found" } });
 
     const body = JSON.parse(raw);
+    if (isIntake(body)) {
+      const result = intakeResult(body);
+      requests.push({ url: req.url, kind: "intake", model: body.model, problems: req.headers["x-api-key"] === process.env.EXPECTED_API_KEY ? [] : ["x-api-key が違う"], result });
+      return send(200, { id: "msg_mock_intake", type: "message", role: "assistant", model: body.model, content: [{ type: "text", text: JSON.stringify(result) }],
+        stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 900, output_tokens: 60 } });
+    }
     if (isImport(body)) {
       const bad = importProblems(req, body);
       const content = body.messages[0].content;
@@ -173,7 +192,11 @@ const server = http.createServer((req, res) => {
         sources: content.filter((c) => c.type === "text" && /^資料\d+：/.test(c.text)).map((c) => c.text),
         images: content.filter((c) => c.type === "image" || c.type === "document").length });
       if (bad.length) return send(400, { type: "error", error: { type: "invalid_request_error", message: bad.join(" / ") } });
-      const reply = () => sse(res, body.model, IMPORT_RAW);
+      // 模範解答なしモード（ver6 の下書き）：問題用紙から解いた答えとして返す
+      const generated = /模範解答なしモード/.test(sysText(body))
+        ? JSON.stringify({ ...JSON.parse(IMPORT_RAW), questions: JSON.parse(IMPORT_RAW).questions.map((q) => (q.correct ? { ...q, correct_status: "generated", correct_file: 1 } : q)) })
+        : IMPORT_RAW;
+      const reply = () => sse(res, body.model, generated);
       if (mode === "slow") setTimeout(reply, 2500); else reply();
       return;
     }
@@ -250,7 +273,10 @@ const server = http.createServer((req, res) => {
       stop_sequence: null,
       usage: { input_tokens: 1200, output_tokens: 300 },
     });
-    if (mode === "slow") setTimeout(reply, 2500); else reply();
+    inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+    const done = () => { inFlight--; reply(); };
+    const delay = mode === "slow" ? 2500 : Number(process.env.GRADE_DELAY_MS || 0);
+    if (delay) setTimeout(done, delay); else done();
   });
 });
 

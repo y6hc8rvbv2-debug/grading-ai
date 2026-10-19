@@ -1,7 +1,7 @@
 // Docker を使わない画面テスト用の、Supabase の入り口の代役（tests/e2e-lite/run.sh から起動する）。
 //   /rest/v1/*     → 本物の PostgREST（素の PostgreSQL＋全マイグレーション。RLS は本物）へ中継
 //   /auth/v1/*     → ログイン（パスワード）・利用者の取得・ログアウトだけを再現（JWT は PostgREST と同じ秘密で署名）
-//   /storage/v1/*  → 署名付きURLの発行と、答案画像の代わりの白い PNG
+//   /storage/v1/*  → 署名付きURLの発行と、答案画像の代わりの白い PNG。ver6：アップロードされた画像はメモリに置き、読むときに返す
 // 受けた要求はすべて記録し、GET /__requests で返す（AI への要求が無いことの確認に使う）。
 // 本番・検証環境では使わない。
 import http from "node:http";
@@ -44,6 +44,9 @@ function png(w, h) {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
 }
 const PAGE = png(800, 1100);
+// アップロードされた画像（パス → 中身）。無いパスは白い PNG を返す
+const objects = new Map();
+const objectPath = (pathname) => decodeURIComponent(pathname.replace(/^\/storage\/v1\/object\/(?:sign\/|authenticated\/|public\/)?[^/]+\//, "").split("?")[0]);
 
 const log = [];
 const cors = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "GET,POST,PATCH,PUT,DELETE,OPTIONS,HEAD", "access-control-expose-headers": "*" };
@@ -91,12 +94,30 @@ http.createServer(async (req, res) => {
       if (!verify(bearer)) return send(res, 400, { statusCode: "403", error: "Unauthorized", message: "invalid token" });
       return send(res, 200, { signedURL: `${url.pathname.replace("/storage/v1", "")}?token=lite` });
     }
-    return send(res, 200, PAGE, { "content-type": "image/png" });
+    const o = objects.get(objectPath(url.pathname));
+    return send(res, 200, o ? o.buf : PAGE, { "content-type": o ? o.type : "image/png" });
+  }
+  // ver6：答案画像のアップロード（先生のブラウザは multipart、サーバー（生徒の提出）は本文そのまま）
+  if (url.pathname.startsWith("/storage/v1/object/") && (req.method === "POST" || req.method === "PUT")) {
+    if (!verify(bearer)) return send(res, 400, { statusCode: "403", error: "Unauthorized", message: "invalid token" });
+    let buf = body, type = req.headers["content-type"] || "application/octet-stream";
+    if (/multipart\/form-data/.test(type)) {
+      const fd = await new Request("http://x", { method: "POST", headers: { "content-type": type }, body }).formData();
+      for (const [, v] of fd) if (typeof v !== "string") { buf = Buffer.from(await v.arrayBuffer()); type = v.type || "application/octet-stream"; }
+    }
+    const path = objectPath(url.pathname);
+    objects.set(path, { buf, type });
+    return send(res, 200, { Key: `answer-sheets/${path}`, Id: crypto.randomUUID() });
+  }
+  if (url.pathname.startsWith("/storage/v1/object/") && req.method === "DELETE") {
+    try { for (const p of JSON.parse(body.toString() || "{}").prefixes ?? []) objects.delete(p); } catch { /* 無視 */ }
+    return send(res, 200, []);
   }
   // サーバー（採点の API・service_role）が答案画像を読む（料金の画面テスト tests/e2e-lite/billing.mjs で使う）
   if (url.pathname.startsWith("/storage/v1/object/") && req.method === "GET") {
     if (!verify(bearer)) return send(res, 400, { statusCode: "403", error: "Unauthorized", message: "invalid token" });
-    return send(res, 200, PAGE, { "content-type": "image/png" });
+    const o = objects.get(objectPath(url.pathname));
+    return send(res, 200, o ? o.buf : PAGE, { "content-type": o ? o.type : "image/png" });
   }
   if (url.pathname.startsWith("/rest/v1/")) {
     const target = new URL(REST + url.pathname.replace("/rest/v1", "") + url.search);
