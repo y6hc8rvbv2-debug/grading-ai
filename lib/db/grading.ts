@@ -14,7 +14,7 @@ import type {
   MarkPos,
   AuditRow, ClassRoom, GradingInput, GradingLog, ImportResult, Item, ItemPatch, Mark, NewTestInput, Profile,
   QType, Quality, QuestionStat, RateRow, Retention, ReviewEntry, Rubric, School,
-  Student, Submission, Test, Workspace, SubmitLink, LinkUpload,
+  Student, Submission, Test, Workspace, SubmitLink, LinkUpload, AiUsage,
 } from "@/lib/types";
 
 
@@ -781,4 +781,26 @@ export async function revokeSubmitLink(linkId: string) {
   const sb = createClient();
   const { error } = await sb.from("submission_links").update({ revoked_at: new Date().toISOString() }).eq("id", linkId);
   if (error) throw error;
+}
+
+/* ---------------------------------------------------------- AI採点の利用状況（ver6） */
+export async function aiUsage(since?: string): Promise<AiUsage | null> {
+  const sb = createClient();
+  const now = new Date();
+  // 既定は日本時間の今月1日から
+  const jst = new Date(now.getTime() + 9 * 3600_000);
+  const from = since ?? new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), 1) - 9 * 3600_000).toISOString();
+  const { data, error } = await sb.from("grading_jobs").select("status, final_stage, total_cost_usd, created_at, finished_at").gte("created_at", from).limit(10000);
+  if (error) return null;
+  const rows = data ?? [];
+  const done = rows.filter((r) => r.status === "done");
+  const secs = done.filter((r) => r.finished_at).map((r) => (Date.parse(r.finished_at) - Date.parse(r.created_at)) / 1000).filter((x) => x >= 0 && x < 3600);
+  const byStage: Record<string, number> = {};
+  done.forEach((r) => { if (r.final_stage) byStage[r.final_stage] = (byStage[r.final_stage] ?? 0) + 1; });
+  return {
+    jobs: rows.length, done: done.length, failed: rows.filter((r) => r.status === "failed").length,
+    costUsd: rows.reduce((a, r) => a + Number(r.total_cost_usd ?? 0), 0),
+    avgSec: secs.length ? Math.round(secs.reduce((a, b) => a + b, 0) / secs.length) : null,
+    byStage,
+  };
 }

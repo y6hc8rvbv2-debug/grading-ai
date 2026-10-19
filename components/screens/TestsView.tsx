@@ -16,6 +16,29 @@ export default function TestsView() {
   const [removing, setRemoving] = useState<{ id: string; name: string; questions: number; maxScore: number; submissions: number | null } | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // ver6：テストの複製（別クラス・来年度用に、設問・配点・正答・解説をそのまま写す。答案・成績は写さない）
+  const duplicate = async (id: string) => {
+    const t = testById(id);
+    if (!t || busy) return;
+    setBusy(true);
+    try {
+      const newId = await ds.createTest({
+        name: `${t.name}（コピー）`, subject: t.subject, grade: t.grade, term: t.term, date: t.date, testNo: t.testNo, units: t.units,
+        questions: t.questions.map((q) => ({
+          type: q.type, unit: q.unit, points: q.points, correct: q.correct, model: q.model, difficulty: q.difficulty,
+          big: q.big, sub: /^大問\d+-(.+)$/.exec(q.label)?.[1] ?? "", figure: q.figure ?? null,
+        })),
+      });
+      await refresh();
+      toast(`「${t.name}（コピー）」を作りました。名前・実施日は設問の画面で直せます`);
+      void newId;
+    } catch (e) {
+      toast(friendlyError(e, "テストの複製"), "ng");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const askRemove = async (id: string) => {
     const t = testById(id);
     if (!t) return;
@@ -108,6 +131,7 @@ export default function TestsView() {
                   ]), "text/csv;charset=utf-8");
                   toast("設問一覧を書き出しました");
                 }}>CSV</Btn>
+                <Btn size="sm" disabled={busy} onClick={() => duplicate(t.id)} title="設問・配点・正答をそのまま写した新しいテストを作ります">複製</Btn>
               </div>
             </Card>
           );

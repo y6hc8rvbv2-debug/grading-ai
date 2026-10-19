@@ -4,7 +4,7 @@
 //   - demo    : Supabase 未設定時。メモリ上のデモデータで動き、再読み込みで元に戻る（lib/data/demo.ts）
 import type {
   AiGradeSummary, AiStatus, AuditRow, GradingInput, GradingLog, ImportResult, ItemPatch, NewTestInput, Profile, QuestionStat, RateRow,
-  MarkPos, Retention, ReviewEntry, Rubric, School, Submission, Workspace, SubmitLink, LinkUpload,
+  MarkPos, Retention, ReviewEntry, Rubric, School, Submission, Workspace, SubmitLink, LinkUpload, AiUsage,
 } from "@/lib/types";
 import type { GradingMode, GradingStage } from "@/lib/grading/cost";
 
@@ -81,6 +81,9 @@ export interface DataSource {
   submitLinkStatus(linkId: string): Promise<{ link: SubmitLink; uploads: LinkUpload[] }>;
   /** リンクを取り消す（以後は提出できない。届いた答案は残る） */
   revokeSubmitLink(linkId: string): Promise<void>;
+
+  /** 期間（既定：今月）の AI採点の件数・実際の費用（USD）・平均時間。記録の表が無い・デモでは null */
+  aiUsage(since?: string): Promise<AiUsage | null>;
 
   signedImageUrl(path: string): Promise<string>;
   loadAudit(): Promise<AuditRow[]>;

@@ -137,9 +137,11 @@ export function StudentSubmitPanel({ open, onClose, testId: initialTest, classId
       ) : (
         <div style={{ display: "grid", gap: 14, gridTemplateColumns: big ? "1fr" : "minmax(260px, 340px) 1fr" }}>
           <div style={{ textAlign: "center" }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            {qr ? <img src={qr} alt="提出用のQRコード" style={{ width: big ? "min(80vh, 100%)" : "100%", maxWidth: big ? 620 : 320, imageRendering: "pixelated", background: "#fff", borderRadius: 12, border: `1px solid ${T.line}` }} />
-              : <div style={{ padding: 40, color: T.textFaint }}>QRコードを作っています…</div>}
+            {qr && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={qr} alt="提出用のQRコード" style={{ width: big ? "min(80vh, 100%)" : "100%", maxWidth: big ? 620 : 320, imageRendering: "pixelated", background: "#fff", borderRadius: 12, border: `1px solid ${T.line}` }} />
+            )}
+            {!qr && <div style={{ padding: 40, color: T.textFaint }}>QRコードを作っています…</div>}
             <div style={{ fontSize: big ? 22 : 13, fontWeight: 700, marginTop: 6 }}>{test?.name}・{classById(link.classId)?.label}</div>
             <div style={{ fontSize: 11.5, color: T.textSub, wordBreak: "break-all", marginTop: 4 }}>{url}</div>
             <div style={{ display: "flex", gap: 6, justifyContent: "center", flexWrap: "wrap", marginTop: 8 }}>

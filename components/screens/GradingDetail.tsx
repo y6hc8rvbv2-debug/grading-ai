@@ -19,6 +19,7 @@ import { TutorReviewCard } from "@/components/tutor/TeacherTutor";
 import { GradingModeSelect } from "@/components/GradingModePicker";
 import { MODE_LABEL, STAGE_LABEL } from "@/lib/grading/cost";
 import type { Item, MarkPos, Submission } from "@/lib/types";
+import { CommentEditor } from "@/components/CommentEditor";
 
 /** 得点の入力欄。入力中は保存せず、確定（フォーカスが外れる・Enter）したときに保存する。 */
 function EarnedInput({ item, onCommit }: { item: Item; onCommit: (v: number) => void }) {
@@ -472,16 +473,11 @@ export default function GradingDetail({ subId }: { subId: string }) {
                     <span style={{ font: `14px ${FONT_HAND}` }}>{it.blank ? "（無記入）" : it.detected}</span>
                   </div>
                   {editing === it.qno ? (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <input defaultValue={it.comment} id={`cm_${it.qno}`} style={{ ...inputStyle(T), flex: 1 }} placeholder="赤ペンコメント" />
-                      <Btn size="sm" variant="primary" onClick={async () => {
-                        const el = document.getElementById(`cm_${it.qno}`) as HTMLInputElement | null;
-                        const ok = await applyEdit(it, { comment: el ? el.value : it.comment });
-                        setEditing(null);
-                        if (ok) toast("コメントを更新しました");
-                      }}>保存</Btn>
-                      <Btn size="sm" variant="ghost" onClick={() => setEditing(null)}>取消</Btn>
-                    </div>
+                    <CommentEditor id={`cm_${it.qno}`} initial={it.comment} onCancel={() => setEditing(null)} onSave={async (text) => {
+                      const ok = await applyEdit(it, { comment: text });
+                      setEditing(null);
+                      if (ok) toast("コメントを更新しました");
+                    }} />
                   ) : (
                     <div onClick={() => setEditing(it.qno)} style={{
                       fontSize: 12.5, color: it.comment ? T.shu : T.textFaint, cursor: "pointer",

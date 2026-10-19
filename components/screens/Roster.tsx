@@ -7,6 +7,7 @@ import { clamp, download, pct, toCSV } from "@/lib/util";
 import { useUI } from "@/components/ui-context";
 import { Badge, Btn, Card, Empty, Field, Input, Select, Stat, Table, grid } from "@/components/ui";
 import type { Student, Submission, Test } from "@/lib/types";
+import { deviation, scoreStats } from "@/lib/grading/stats";
 
 const counted = (s: Submission) => !["processing", "uploaded", "blank"].includes(s.status);
 
@@ -130,6 +131,7 @@ export function ClassesView() {
 export function ScoresView() {
   const { T, go, subs, toast, who, ws, classById, testById } = useUI();
   const [classId, setClassId] = useState(ws.classes[0]?.id ?? "");
+  const [statTest, setStatTest] = useState("");
   const roster = ws.students.filter((s) => s.classId === classId);
   const tests = ws.tests.filter((t) => subs.some((s) => s.classId === classId && s.testId === t.id));
   const klass = classById(classId);
@@ -152,6 +154,31 @@ export function ScoresView() {
     const vals = roster.map((st) => cell(st.id, t.id)).filter((s): s is Submission => !!s && counted(s));
     return vals.length ? Math.round(vals.reduce((a, s) => a + s.result.total, 0) / vals.length * 10) / 10 : null;
   };
+  // ver6：テストごとの統計（平均・中央値・標準偏差・最高・最低・度数分布）と偏差値
+  const statsOf = (t: Test) => scoreStats(roster.map((st) => cell(st.id, t.id)).filter((s): s is Submission => !!s && counted(s)).map((s) => s.result.total), t.maxScore);
+  const statusLabel = (s?: Submission) => !s ? "未提出" : s.status === "blank" ? "白紙" : s.status === "processing" || s.status === "uploaded" ? "採点待ち" : s.status === "review" || s.status === "quality" ? "要確認" : "採点済";
+  // 校務支援システム・Excel 向けの成績CSV（1テスト・名簿の全員。未提出も行を出す。設問ごとの得点つき）
+  const exportForSchool = (t: Test) => {
+    const st = statsOf(t);
+    const data = [...roster].sort((a, b) => a.number - b.number).map((stu) => ({ stu, sub: cell(stu.id, t.id) }));
+    const headers = [
+      { label: "学年", get: () => klass.grade },
+      { label: "クラス", get: () => klass.name },
+      { label: "出席番号", get: (r: (typeof data)[number]) => r.stu.number },
+      { label: "受験番号", get: (r: (typeof data)[number]) => r.stu.examNo },
+      { label: "状態", get: (r: (typeof data)[number]) => statusLabel(r.sub) },
+      { label: "合計", get: (r: (typeof data)[number]) => (r.sub && counted(r.sub) ? r.sub.result.total : "") },
+      { label: "得点率(%)", get: (r: (typeof data)[number]) => (r.sub && counted(r.sub) ? pct(r.sub.result.total, t.maxScore) : "") },
+      { label: "偏差値", get: (r: (typeof data)[number]) => (r.sub && counted(r.sub) && st ? deviation(r.sub.result.total, st) : "") },
+      ...t.questions.map((q) => ({
+        label: `${q.label || `問${q.no}`}(${q.points}点)`,
+        get: (r: (typeof data)[number]) => (r.sub && counted(r.sub) ? r.sub.result.items.find((i) => i.qno === q.no)?.earned ?? "" : ""),
+      })),
+    ];
+    download(`seiseki_${klass.label}_${t.name}.csv`, toCSV(data, headers), "text/csv;charset=utf-8");
+    toast(`${t.name} の成績CSV（全${data.length}人・未提出 ${data.filter((d) => !d.sub).length}人）を書き出しました`);
+  };
+  const shownTest = tests.find((t) => t.id === statTest) ?? tests[0];
 
   return (
     <div>
@@ -173,6 +200,40 @@ export function ScoresView() {
           }}>CSVを書き出す</Btn>
         </div>
       </Card>
+
+      {shownTest && (() => {
+        const st = statsOf(shownTest);
+        const missing = roster.filter((stu) => !cell(stu.id, shownTest.id));
+        return (
+          <Card title="テストの統計" sub="平均・中央値・ばらつき・得点の分布（白紙・採点待ち・未提出は含めません）" style={{ marginBottom: 14 }}
+            right={<div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <Select value={shownTest.id} onChange={setStatTest} options={tests.map((t) => ({ value: t.id, label: `${t.subject}／${t.name}` }))} />
+              <Btn size="sm" variant="primary" onClick={() => exportForSchool(shownTest)}>校務用CSV（設問別・Excel）</Btn>
+            </div>}>
+            {!st ? <div style={{ fontSize: 12.5, color: T.textSub }}>採点済みの答案がまだありません。</div> : (
+              <div style={{ display: "grid", gap: 12 }}>
+                <div style={grid(120, 8)}>
+                  <Stat label="人数" value={st.n} unit="人" />
+                  <Stat label="平均" value={st.mean} unit="点" tone="accent" sub={`満点 ${shownTest.maxScore}`} />
+                  <Stat label="中央値" value={st.median} unit="点" />
+                  <Stat label="標準偏差" value={st.sd} />
+                  <Stat label="最高 / 最低" value={`${st.max} / ${st.min}`} unit="点" />
+                </div>
+                <div aria-label="得点率の分布" style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 90 }}>
+                  {st.hist.map((n, i) => (
+                    <div key={i} style={{ flex: 1, textAlign: "center", fontSize: 10, color: T.textSub }}>
+                      <div title={`${i * 10}〜${i === 9 ? 100 : i * 10 + 9}%：${n}人`} style={{ height: `${(n / Math.max(1, ...st.hist)) * 64}px`, minHeight: n ? 4 : 0, background: i < 5 ? T.warn : T.accent, borderRadius: 4 }} />
+                      <div>{n}</div>
+                      <div>{i * 10}%</div>
+                    </div>
+                  ))}
+                </div>
+                {missing.length > 0 && <div style={{ fontSize: 12, color: T.warn }}>未提出：{missing.sort((a, b) => a.number - b.number).map((m) => `${m.number}番`).join("・")}（{missing.length}人）</div>}
+              </div>
+            )}
+          </Card>
+        );
+      })()}
 
       <Card pad={0} title={`${klass.label} の成績一覧`} sub="セルをタップすると答案を開きます">
         {tests.length === 0 ? (

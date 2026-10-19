@@ -261,3 +261,6 @@ export type AuditRow = {
 export type SubmitLink = { id: string; token: string; testId: string; classId: string; expiresAt: string; maxUploads: number; usedCount: number; revokedAt: string | null; note: string };
 /** 提出リンクから届いた答案（だれが・何ページ・いつ・本人確認済みか） */
 export type LinkUpload = { id: string; studentId: string; submissionId: string; pages: number; verified: boolean; status: "receiving" | "done" | "failed"; createdAt: string };
+
+/** 今月の AI採点の利用状況（ver6 の便利機能。grading_jobs から集計） */
+export type AiUsage = { jobs: number; done: number; failed: number; costUsd: number; avgSec: number | null; byStage: Record<string, number> };

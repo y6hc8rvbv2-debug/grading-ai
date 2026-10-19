@@ -1,7 +1,9 @@
 "use client";
 // ダッシュボード。docs/prototype-v3.jsx から移植。
 // 表示するのは、この学校の実際のデータと、アプリが実際にできることだけ（デモの数値・架空の利用者の声・料金表は出さない）。
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import type { AiUsage } from "@/lib/types";
+import { STAGE_LABEL } from "@/lib/grading/cost";
 import { FONT_UI, FONT_HAND } from "@/lib/ui/theme";
 import { pct } from "@/lib/util";
 import { useUI, type View } from "@/components/ui-context";
@@ -14,15 +16,20 @@ const QA = [
   { q: "採点結果は修正できますか？", a: "できます。採点結果の画面で、丸・三角・バツと得点を1問ずつ直せます。直した内容は赤ペン画像と合計点に反映されます。" },
   { q: "答案が全問白紙のときはどうなりますか？", a: "採点はせず「白紙」として記録します。模範解答の画面で、テストに登録した正答・解説をもとにした下書きを確認できます。" },
   { q: "印刷機やコピー機の答案を取り込めますか？", a: "複合機で PDF にスキャンして保存し、「新規採点」の「PDF一括」で取り込めます。" },
-  { q: "生徒のスマートフォンから提出できますか？", a: "生徒が自分で提出する機能はありません。答案は先生が撮影・取り込みます。採点結果は、先生が確認したあと、生徒のアカウントに返却できます。" },
+  { q: "生徒のスマートフォンから提出できますか？", a: "できます（ver6）。「新規採点」の「生徒のタブレット・スマホから」で QR コードを表示すると、生徒が自分の端末で答案を撮って提出できます。届いた答案はそのまま AI 採点できます。" },
+  { q: "100枚以上の答案もまとめて採点できますか？", a: "できます。一度に500枚まで取り込め、複数の答案を同時に採点します（同時に採点する数は設定画面の「AIエンジン」で変えられます）。ほかの画面に移っても採点は続き、終わると通知します。" },
+  { q: "新しい AI が出たら使えますか？", a: "使えます。設定画面の「AIエンジン」に新しいモデルが表示され、管理者がワンタップで切り替えられます。" },
   { q: "AIの採点はどのくらい信頼できますか？", a: "AI の採点は下書きです。設問ごとに読み取りの確かさを記録し、低いものや記述式（設定による）は「要確認」に回します。成績は、返却前に先生が確認して決めてください。" },
   { q: "答案の写真はどこに送られますか？", a: "採点のため、答案の写真と設問・正答を AI の提供元（Anthropic）に送ります。初めて AI 採点を使うときに確認の画面が出ます。詳しくはプライバシーポリシーをご覧ください。" },
-  { q: "対応言語は？", a: "メニューなどの主な表示は、設定画面で言語を切り替えられます（本文は日本語です）。アラビア語などの右から左に書く言語の表示にも対応しています。" },
+  { q: "対応言語は？", a: "画面右上の 🌐 アイコン（または設定画面）で表示言語を切り替えられます（メニューなどの主な表示。本文は日本語です）。アラビア語などの右から左に書く言語の表示にも対応しています。" },
 ];
 
 export default function Dashboard() {
-  const { T, t, go, subs, toast, testById, session } = useUI();
+  const { T, t, go, subs, toast, testById, session, ds } = useUI();
   const [openQA, setOpenQA] = useState(0);
+  // ver6：今月の AI採点の利用状況（件数・実際の費用・平均時間）
+  const [usage, setUsage] = useState<AiUsage | null>(null);
+  useEffect(() => { ds.aiUsage().then(setUsage).catch(() => setUsage(null)); }, [ds]);
   const [contact, setContact] = useState({ name: "", email: "", body: "" });
 
   const done = subs.filter((s) => s.status !== "processing");
@@ -58,10 +65,21 @@ export default function Dashboard() {
         <Stat label="削減した採点時間" value={savedMin} unit="分" tone="shu" sub="1枚あたり4.5分換算" />
       </div>
 
+      {usage && usage.jobs > 0 && (
+        <Card title="今月の AI採点" sub="実際に使ったモデルとトークン数から計算した費用（Anthropic の請求は米ドル）" style={{ marginBottom: 18 }}>
+          <div style={grid(150, 10)}>
+            <Stat label="AI採点" value={usage.done} unit="件" tone="accent" sub={usage.failed ? `失敗 ${usage.failed} 件` : "失敗なし"} />
+            <Stat label="AIの費用" value={`$${usage.costUsd.toFixed(2)}`} tone="ok" sub={usage.done ? `1件あたり $${(usage.costUsd / Math.max(1, usage.done)).toFixed(4)}` : ""} />
+            <Stat label="1件の採点時間" value={usage.avgSec ?? "—"} unit={usage.avgSec != null ? "秒" : ""} sub="同時に複数件を採点します" />
+            <Stat label="確定した段階" value={Object.entries(usage.byStage).map(([k, n]) => `${STAGE_LABEL[k as keyof typeof STAGE_LABEL] ?? k} ${n}`).join("・") || "—"} />
+          </div>
+        </Card>
+      )}
+
       <Section title="はじめる">
         <div style={grid(200)}>
           {[
-            { k: "new", icon: "📤", t: "答案をアップロード", d: "カメラ・PC・PDF から取り込み" },
+            { k: "new", icon: "📤", t: "答案をアップロード", d: "カメラ・PC・PDF・生徒の端末から取り込み" },
             { k: "processing", icon: "⏳", t: "採点中を確認", d: "処理の進み具合をリアルタイム表示" },
             { k: "review", icon: "🔍", t: "要確認を片づける", d: "認識信頼度が低い設問だけを集約" },
             { k: "weakness", icon: "📊", t: "弱点分析を見る", d: "単元別・設問形式別の定着度" },

@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { THEME, FONT_UI, FONT_MONO, FONT_HAND } from "@/lib/ui/theme";
-import { LANGS, makeT, isRTL } from "@/lib/i18n";
+import { makeT, isRTL } from "@/lib/i18n";
 import { clamp, uid } from "@/lib/util";
 import { DEFAULT_RUBRIC } from "@/lib/grading/engine";
 import { friendlyError } from "@/lib/errors";
@@ -12,11 +12,13 @@ import { isSupabaseConfigured, type DataSource, type SessionInfo } from "@/lib/d
 import { createDemoSource } from "@/lib/data/demo";
 import { createSupabaseSource } from "@/lib/data/supabase";
 import { Ctx, useUI, type DisplayMode, type UIContext, type View } from "@/components/ui-context";
-import { Btn, Toast, inputStyle } from "@/components/ui";
+import { Btn, Toast } from "@/components/ui";
 import type { AiGradeSummary, AiStatus, Item, ItemPatch, Rubric, Submission, Workspace } from "@/lib/types";
 import { MODE_LABEL, STAGE_LABEL, type GradingMode } from "@/lib/grading/cost";
 import type { AiGradeProgress } from "@/lib/data/source";
 import { AiConsentDialog } from "@/components/AiConsentDialog";
+import { LanguageMenu } from "@/components/LanguageMenu";
+import { CommandPalette } from "@/components/CommandPalette";
 
 /** 採点結果の通知に添える方式（例: 3モデル併用・Sonnetで確定） */
 const modeNote = (r: AiGradeSummary) =>
@@ -345,6 +347,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={ctx}>
       <AiConsentDialog />
+      <CommandPalette nav={NAV.filter((n) => !n.admin || ctx.isAdmin).map((n) => ({ k: n.k, i: n.i, label: t(n.tk) }))} />
       <div dir={rtl ? "rtl" : "ltr"} style={{
         display: "flex", minHeight: "100vh", background: T.bg, color: T.text,
         font: `14px/1.6 ${FONT_UI}`, WebkitFontSmoothing: "antialiased",
@@ -381,15 +384,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
             {!mobile && reviewCount > 0 && view !== "review" && (
               <Btn size="sm" variant="soft" onClick={() => go("review")}>要確認 {reviewCount}</Btn>
             )}
-            <select value={lang} onChange={(e) => setLang(e.target.value)} aria-label="language"
-              style={{ ...inputStyle(T), width: "auto", padding: "6px 8px", fontSize: 12 }}>
-              {LANGS.map((l) => <option key={l.c} value={l.c}>{l.f} {l.n}</option>)}
-            </select>
+            <button onClick={() => window.dispatchEvent(new Event("saiten:palette"))} aria-label="すばやく移動（Ctrl+K）" title="すばやく移動（Ctrl+K / ⌘+K）"
+              style={{ border: `1px solid ${T.lineStrong}`, background: T.panel, borderRadius: 9, width: 36, height: 34, cursor: "pointer", color: T.text, fontSize: 14 }}>🔍</button>
             <button onClick={() => setMode(mode === "light" ? "dark" : "light")} aria-label="theme"
               style={{ border: `1px solid ${T.lineStrong}`, background: T.panel, borderRadius: 9, width: 36, height: 34, cursor: "pointer", color: T.text, fontSize: 14 }}>
               {mode === "light" ? "🌙" : "☀"}
             </button>
             {!mobile && <Btn size="sm" variant="shu" onClick={() => go("new")}>新規採点</Btn>}
+            {/* ver6：言語の切り替えはヘッダーの右上（いちばん右）の 🌐 アイコンから */}
+            <LanguageMenu />
           </header>
 
           <div style={{ padding: mobile ? "14px 12px 60px" : "20px 22px 70px", maxWidth: 1240, width: "100%", boxSizing: "border-box" }}>

@@ -235,6 +235,7 @@ export function createDemoSource(): DataSource {
       return { link: { ...clone(d.link), usedCount: n }, uploads };
     },
     revokeSubmitLink: async (id) => { const d = demoLinks.get(id); if (d) d.link.revokedAt = new Date().toISOString(); },
+    aiUsage: async () => null,
     signedImageUrl: async () => "",
     loadAudit: async () => clone(audit),
     verifyAudit: async () => ({ total: audit.length, broken: 0 }),

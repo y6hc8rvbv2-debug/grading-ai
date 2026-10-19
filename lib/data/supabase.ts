@@ -153,6 +153,7 @@ export function createSupabaseSource(): DataSource {
     submitLinkStatus: (id) => db.submitLinkStatus(id),
     revokeSubmitLink: (id) => db.revokeSubmitLink(id),
 
+    aiUsage: (since) => db.aiUsage(since),
     signedImageUrl: (path) => db.signedImageUrl(path),
     loadAudit: () => db.loadAudit(),
     verifyAudit: () => db.verifyAuditChain(schoolId()),
