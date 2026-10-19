@@ -30,8 +30,8 @@ check(existsSync(ROOT + "android/app/build.gradle") && read("android/app/build.g
 check(existsSync(ROOT + "ios/App/App.xcodeproj/project.pbxproj") && read("ios/App/App.xcodeproj/project.pbxproj").includes(`PRODUCT_BUNDLE_IDENTIFIER = ${appId};`), "iOS の Bundle ID", "npx cap add ios をやり直す");
 const plist = existsSync(ROOT + "ios/App/App/Info.plist") ? read("ios/App/App/Info.plist") : "";
 check(plist.includes("NSCameraUsageDescription") && plist.includes("NSPhotoLibraryUsageDescription"), "iOS のカメラ・写真の使い道の説明", "Info.plist に NSCameraUsageDescription・NSPhotoLibraryUsageDescription を入れる");
-check(plist.includes("<string>テスト採点ver5</string>"), "iOS のアプリ名", "Info.plist の CFBundleDisplayName をテスト採点ver5にする");
-check(existsSync(ROOT + "android/app/src/main/res/values/strings.xml") && read("android/app/src/main/res/values/strings.xml").includes(">テスト採点ver5<"), "Android のアプリ名", "strings.xml の app_name をテスト採点ver5にする");
+check(plist.includes("<string>テスト採点ver6</string>"), "iOS のアプリ名", "Info.plist の CFBundleDisplayName をテスト採点ver6にする");
+check(existsSync(ROOT + "android/app/src/main/res/values/strings.xml") && read("android/app/src/main/res/values/strings.xml").includes(">テスト採点ver6<"), "Android のアプリ名", "strings.xml の app_name をテスト採点ver6にする");
 check(existsSync(ROOT + "android/app/src/main/AndroidManifest.xml") && read("android/app/src/main/AndroidManifest.xml").includes("android.permission.CAMERA"), "Android のカメラの権限", "AndroidManifest.xml に CAMERA を入れる");
 for (const f of ["store/icon-1024.png", "store/icon-512.png", "store/feature-graphic.png", "public/icons/icon-512.png", "ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png"]) {
   check(existsSync(ROOT + f), `画像 ${f}`, "node scripts/mobile/make-icons.mjs を実行する");

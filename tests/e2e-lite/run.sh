@@ -141,6 +141,6 @@ PIDS+=($!)
   node_modules/.bin/next start -p "$V6_PORT" > "$WORK/v6.log" 2>&1 &
 PIDS+=($!)
 for _ in $(seq 1 40); do curl -sf -o /dev/null "http://localhost:$V6_PORT/login" && curl -sf -o /dev/null "http://127.0.0.1:$MOCK_PORT/__requests" && break; sleep 1; done
-V6_URL="http://localhost:$V6_PORT" MOCK_URL="http://127.0.0.1:$MOCK_PORT" GATEWAY_URL="http://127.0.0.1:$GW_PORT" SERVICE_JWT="$SERVICE" \
+V6_SHOT_DIR="${V6_SHOT_DIR:-}" V6_URL="http://localhost:$V6_PORT" MOCK_URL="http://127.0.0.1:$MOCK_PORT" GATEWAY_URL="http://127.0.0.1:$GW_PORT" SERVICE_JWT="$SERVICE" \
   PG_URL="postgresql://postgres@127.0.0.1:$PG_PORT/lite" \
   node tests/e2e-lite/ver6.mjs || { echo "--- v6.log"; tail -60 "$WORK/v6.log"; echo "--- mock-ai.log"; tail -20 "$WORK/mock-ai.log"; echo "--- gateway.log"; tail -20 "$WORK/gateway.log"; exit 1; }

@@ -4,7 +4,7 @@
 //   NEXT_PUBLIC_APP_PROVIDER       提供者名
 //   NEXT_PUBLIC_SUPPORT_EMAIL      問い合わせ用メールアドレス（ストアの「サポート」欄と同じもの）
 //   NEXT_PUBLIC_APP_URL            本番の URL。ネイティブアプリはこの URL を開く（capacitor.config.ts も同じ値）
-export const APP_NAME = "テスト採点ver5";
+export const APP_NAME = "テスト採点ver6";
 export const DEFAULT_PROVIDER = "椎井重臣";
 export const DEFAULT_SUPPORT_EMAIL = "testsaiten.support@gmail.com";
 export const DEFAULT_APP_URL = "https://saiten.school-app1.com";

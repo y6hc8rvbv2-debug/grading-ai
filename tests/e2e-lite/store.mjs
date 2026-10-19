@@ -28,7 +28,7 @@ const ID = (n) => `eeeeeeee-0000-0000-0000-0000000000${n}`;
 const pub = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true })).newPage();
 watch(pub, "公開");
 for (const [path, must] of [
-  ["/start", ["テスト採点ver5", "先生・職員", "生徒", "プライバシーポリシー"]],
+  ["/start", ["テスト採点ver6", "先生・職員", "生徒", "プライバシーポリシー"]],
   ["/privacy", ["プライバシーポリシー", "検証用の提供者", "support@example.com", "Anthropic", "Stripe", "氏名は扱いません", "13歳未満", "削除"]],
   ["/terms", ["利用規約", "検証用の提供者", "AI の採点は下書き", "ストア用のアプリの中では、購入・支払いはできません", "特定商取引法に基づく表記"]],
   ["/tokushoho", ["特定商取引法に基づく表記", "検証用の提供者", "月額1,650円（税込）", "月額40,000円（税別）", "月額240,000円（税別）", "月6,500枚まで", "消費税（10%）", "55円", "support@example.com", "解約", "請求があった場合には、遅滞なく開示"]],
@@ -43,7 +43,7 @@ for (const [path, must] of [
   ok((await pub.evaluate(() => document.documentElement.scrollWidth)) <= 390, `${path} はスマホ幅で横にはみ出さない`);
 }
 const manifest = await (await fetch(BASE + "/manifest.webmanifest")).json();
-ok(manifest.name === "テスト採点ver5" && manifest.start_url === "/start" && manifest.icons.length >= 3, "アプリの情報（manifest）：名前・起動画面・アイコン");
+ok(manifest.name === "テスト採点ver6" && manifest.start_url === "/start" && manifest.icons.length >= 3, "アプリの情報（manifest）：名前・起動画面・アイコン");
 for (const icon of manifest.icons) {
   const r = await fetch(BASE + icon.src);
   ok(r.status === 200 && r.headers.get("content-type") === "image/png", `アイコン ${icon.src} が開ける`);

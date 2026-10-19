@@ -19,7 +19,7 @@ import type { LinkUpload, SubmitLink } from "@/lib/types";
 export function StudentSubmitPanel({ open, onClose, testId: initialTest, classId: initialClass }: {
   open: boolean; onClose: () => void; testId?: string; classId?: string;
 }) {
-  const { T, ws, ds, toast, ai, aiGradeSub, refresh, who, testById, classById } = useUI();
+  const { T, ws, ds, toast, ai, aiGradeSub, refresh, who, testById, classById, subs } = useUI();
   const demo = ds.mode === "demo";
   const tests = useMemo(() => ws.tests.filter((t) => !t.archivedAt), [ws.tests]);
   const [testId, setTestId] = useState(initialTest || "");
@@ -104,6 +104,9 @@ export function StudentSubmitPanel({ open, onClose, testId: initialTest, classId
   };
   const closed = !!link && (!!link.revokedAt || Date.parse(link.expiresAt) <= Date.now());
   const submitted = roster.filter((s) => latest.get(s.id)?.status === "done").length;
+  // 先生がすでに取り込んだ答案（リンク以外の方法）。生徒が出し直しても上書きされない
+  const scanned = (studentId: string) => !!link && subs.some((x) => x.testId === link.testId && x.studentId === studentId && x.source !== "mobile");
+  const scannedCount = roster.filter((s) => !latest.get(s.id) && scanned(s.id)).length;
 
   return (
     <Modal open={open} onClose={onClose} title="生徒のタブレット・スマホから答案を集める" width={big ? 1100 : 860}
@@ -157,6 +160,7 @@ export function StudentSubmitPanel({ open, onClose, testId: initialTest, classId
             <div>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
                 <b style={{ fontSize: 15 }}>提出 {submitted} / {roster.length} 人</b>
+                {scannedCount > 0 && <Badge tone="mute">先生が取り込み済み {scannedCount} 人</Badge>}
                 {ai.enabled && !demo && <Badge tone="info">AI採点済み {gradedCount} 人</Badge>}
                 {demo && <Badge tone="mute">デモ：数秒ごとに1人ずつ提出したことにします</Badge>}
               </div>
@@ -169,12 +173,13 @@ export function StudentSubmitPanel({ open, onClose, testId: initialTest, classId
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(78px, 1fr))", gap: 6 }}>
                 {roster.map((s) => {
                   const u = latest.get(s.id);
+                  const already = !u && scanned(s.id);
                   const tone = u?.status === "done" ? T.ok : u?.status === "failed" ? T.ng : u ? T.info : T.line;
                   return (
                     <div key={s.id} title={u ? `${fmtDateTime(u.createdAt)}・${u.pages}ページ${u.verified ? "・本人確認済み" : "・出席番号の自己申告"}` : "未提出"}
                       style={{ border: `2px solid ${tone}`, borderRadius: 10, padding: "6px 4px", textAlign: "center", background: u?.status === "done" ? T.okSoft : T.panel }}>
                       <div style={{ fontWeight: 700 }}>{s.number}</div>
-                      <div style={{ fontSize: 10.5, color: T.textSub }}>{u?.status === "done" ? `✓ ${u.pages}枚` : u?.status === "failed" ? "失敗" : u ? "受信中" : "未提出"}</div>
+                      <div style={{ fontSize: 10.5, color: T.textSub }}>{u?.status === "done" ? `✓ ${u.pages}枚` : u?.status === "failed" ? "失敗" : u ? "受信中" : already ? "先生が取込済" : "未提出"}</div>
                     </div>
                   );
                 })}

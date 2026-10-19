@@ -1,4 +1,4 @@
-# テスト採点ver.3
+# テスト採点ver6
 
 答案画像をアップロードすると、AIが採点・赤ペン添削・弱点分析までを自動で行う学校向けWebアプリ。
 
@@ -8,6 +8,35 @@
 ---
 
 ## 現在地
+
+### ver6（2026-10-19。ブランチ claude/test-scoring-v6-app-ii46ie）
+
+ver5（コミット 578d949）を土台に、ユーザーの改善要望①〜13を実装。先生の設定は `docs/V6-SETUP.md`、検証の記録は `docs/V6-VERIFICATION.md`、画面の写真は `docs/screenshots/ver6/`。
+DB は **0019_ver6.sql**（ai_settings・submission_links の列・link_uploads・submit_link_* 関数・billing_prepaid・billing_apply_prepaid・billing_reserve の置き換え）。
+
+- **⑦ AIエンジン**：`lib/grading/models.ts`（高速/標準/最上位。既定 Haiku 5.5 / Sonnet 5.5 / Opus 5.5。料金・呼び出し方・将来のモデルを名前から推定）。
+  優先順は 学校の設定（ai_settings。設定画面「AIエンジン」・`/api/ai/models`）→ `ANTHROPIC_MODEL_FAST/STANDARD/TOP`（ver5 の HAIKU/SONNET/ANTHROPIC_MODEL も読む）→ 既定。
+  Models API で新しいモデルを見つけてワンタップで切り替え。DB の段階名は ver5 と同じ haiku/sonnet/opus。チャッピー先生から lib/ai に依存しない規則のため、登録表は lib/grading に置く
+- **採点の呼び出し**：設問・正答・採点基準は system の2つ目のブロック（cache_control）＝プロンプトキャッシュ（`buildCachedGradingPrompt`。比較試験は従来の `buildGradingPrompt`）。
+  1段目 effort low・2段目 medium・最上位 high。SDK の再試行4回。fallbacks は対応モデルだけ
+- **①⑨ 並列化**：`lib/workflow/pool.ts`（runPool・withBusyRetry）。新規採点は1人分ずつ「保存 → 採点」を N 人分同時（ai_settings.concurrency、既定8）。採点中の画面の一括も並列。
+  取り込みは500枚まで。ヘッダーに「AI採点中 N件」・タブを閉じる前の確認・完了の通知（`lib/notify.ts`）
+- **② おまかせモード**（新規採点。既定オン・端末に記憶）：答案を入れると自動振り分け（並列6）→ `lib/workflow/auto-check.ts`（autoCheck・matchTest・bestClass）で
+  クラス・生徒・テストを決め、問題がなければ確認のチェックを自動で付け、5秒後に自動開始（取り消し可）。問題のある答案だけを上に表示。画質の注意は止めない。
+  自動振り分けの API は印刷されたテスト名（title）も返す（intake-v2）。失敗した写真はやり直せる
+- **③ 模範解答の作成**（模範解答なし）：`lib/ai/answer-key.ts`。下書き（標準・medium）と独立検算（最上位・下書きを見せない）を同時に → 食い違いと記述だけ最上位が大問ごとに並列で判定。
+  一致した計算・選択・穴埋めは要確認の理由を外す（ImportedQuestion.check）。検算が失敗・時間切れでも ver5 と同じ要確認で返す
+- **④ 生徒の端末から提出**：先生 `components/StudentSubmitPanel.tsx`（新規採点の取り込み方法・採点中の画面。QR は qrcode）、生徒 `/submit/[token]`、API `/api/submit/[token]`（service_role で 0019 の関数だけ）。
+  ログインした生徒は本人だけ（verified）。先生の取り込み済み・採点開始後は上書きしない。届いた答案はパネルを開いている間、届いたそばから採点
+- **⑩ 支払い**：月額はカード・Apple Pay・Google Pay・Link（Stripe の動的な支払い方法）。前払い 1/3/6/12か月（`/api/billing/prepaid`。Stripe の1回払い＝コンビニ・PayPay・銀行振込など）。
+  暗号資産は `lib/billing/crypto.ts`（NOWPayments か Coinbase Commerce。Stripe の暗号資産は日本の事業者が使えないため）。通知 `/api/billing/crypto/webhook`。
+  前払いの期間中は月額を申し込めない。前払いの途中解約・返金の扱いは利用規約に従う（**規約の文言はユーザーの確認待ち**）
+- **12** ヘッダーのいちばん右に 🌐（`components/LanguageMenu.tsx`）。**11** 便利機能10個：完了通知・同じ解答のまとめ判定・要確認のキー操作・校務用CSV・統計・テストの複製・
+  コメントの定型文（`components/CommentEditor.tsx`）・音声入力・今月のAI採点（`ds.aiUsage`）・すばやく移動（`components/CommandPalette.tsx`、Ctrl+K）
+- 検証：単体 122・DB（0019 と ver6_test.sql）・料金 DB 37・画面 260（`tests/e2e-lite/ver6.mjs` 48件。`LITE_ONLY=ver6` で単独）。採点AI の代役は `tests/e2e/mock-anthropic.mjs`
+  （振り分けは PNG の tEXt の印を読む・検算/判定・同時数 /__stats）。Supabase の入り口の代役はアップロードを保存する
+- 未確認：本物の Claude・本物のスマホ・本物の Stripe（コンビニ/PayPay の入金）・本物の暗号資産の決済代行・Vercel（HTTP/2）での同時数（手元は HTTP/1.1 で6件まで）
+
 
 ### 料金・決済・採点枠・夜間予約（PR #2 をこのブランチに取り込み。2026-10-11）
 

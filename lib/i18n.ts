@@ -124,7 +124,7 @@ export const LANGS: Lang[] = [
 ];
 
 export const JA: Dict = {
-  appName: "テスト採点ver5",
+  appName: "テスト採点ver6",
   appSub: "答案の写真から、AI が採点の下書きと赤ペン添削を作ります。先生が確認して生徒に返却します",
   nav_dashboard: "ダッシュボード",
   nav_new: "新規採点",

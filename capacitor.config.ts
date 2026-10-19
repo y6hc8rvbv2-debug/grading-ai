@@ -12,7 +12,7 @@ if (!/^https:\/\/[^/\s]+$/.test(url)) {
 const config: CapacitorConfig = {
   // アプリの ID（Bundle ID / パッケージ名）。ios/・android/ の設定と同じ値。ストアに一度アップロードすると変えられない
   appId: "jp.testgrade.app",
-  appName: "テスト採点ver5",
+  appName: "テスト採点ver6",
   // 通信できないときに出す画面（mobile/www/offline.html）。ここには秘密もデータも置かない
   webDir: "mobile/www",
   // アプリから開いたことをサーバー・画面が知るための印（lib/native.ts）。アプリの中では料金の申し込み・支払いの操作を出さない

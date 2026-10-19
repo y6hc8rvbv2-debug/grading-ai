@@ -59,6 +59,8 @@ const api = (path, body) => page.evaluate(async ([p, b]) => {
   return { status: r.status, json: await r.json().catch(() => null) };
 }, [path, body]);
 const text = () => page.evaluate(() => document.body.innerText);
+// V6_SHOT_DIR を指定すると、主な画面の写真を撮る（docs/screenshots/ver6/ の更新用）
+const shot = async (name, p = page) => { if (process.env.V6_SHOT_DIR) await p.screenshot({ path: `${process.env.V6_SHOT_DIR}/${name}.png`, fullPage: false }); };
 const consent = async () => { const b = page.getByRole("button", { name: "同意して AI に送る" }); if (await b.isVisible().catch(() => false)) await b.click(); };
 
 await page.goto(BASE + "/login");
@@ -85,8 +87,11 @@ ok(intakes.length === 3 && intakes.every((r) => r.model === "claude-haiku-5-5" &
 ok(await page.getByLabel("生徒・ページ順・不足や見切れがないことを確認しました").isChecked(), "問題がないので、確認のチェックを自動で付けた");
 ok(await page.getByLabel("今回の答案と、テスト名・設問・正答・配点が一致しています").isChecked(), "テスト名が一致したので、正答・配点の確認も自動で付けた");
 await page.getByText(/秒後に採点を始めます/).waitFor({ timeout: 10000 });
+await page.getByText("おまかせモード").first().scrollIntoViewIfNeeded();
+await shot("01-omakase-ready");
 ok(true, "準備がそろうと、数秒後に自動で採点を始める（取り消せる）");
 await page.getByText("採点が完了しました").waitFor({ timeout: 90000 });
+await shot("02-graded-in-parallel");
 const elapsed = (Date.now() - t0) / 1000;
 const grades = (await mockReq()).filter((r) => r.kind === "grade");
 ok(grades.length === 3 && grades.every((g) => g.model === "claude-haiku-5-5" && g.problems.length === 0), `3人分を高速AIで採点（形の検査OK：effort low・設問と採点基準をキャッシュに載せる）`);
@@ -106,6 +111,7 @@ await dialog.locator("select").nth(0).selectOption({ label: `数学／${TITLE}` 
 await dialog.locator("select").nth(1).selectOption({ value: CLASS });
 await page.getByRole("button", { name: "提出リンクを作る" }).click();
 await page.getByAltText("提出用のQRコード").waitFor();
+await shot("03-teacher-qr-link");
 const link = (await text()).match(/http:\/\/localhost:\d+\/submit\/[A-Za-z0-9_-]{24,}/)?.[0];
 ok(!!link, "提出リンクとQRコードを表示");
 ok(Number(sql(`select count(*) from public.submission_links where test_id = '${TEST}' and char_length(token) >= 32`)) === 1, "推測できない長さのトークンで保存");
@@ -119,6 +125,7 @@ ok(!(await phone.evaluate(() => document.body.innerText)).match(/V60\d|生徒V/)
 await phone.getByRole("button", { name: "4", exact: true }).click();
 await phone.locator('input[type="file"][multiple]').setInputFiles({ name: "IMG_0004.png", mimeType: "image/png", buffer: answerPng("V604", 9) });
 await phone.getByText("1ページ目").waitFor();
+await shot("04-student-phone-submit", phone);
 await phone.getByRole("button", { name: "③ 提出する" }).click();
 await phone.getByText("提出しました").waitFor({ timeout: 20000 });
 ok(await phone.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "生徒の画面はスマホ幅で横にはみ出さない");
@@ -129,6 +136,7 @@ await page.getByText(/提出 1 \/ 5 人/).waitFor({ timeout: 15000 }).catch(asyn
 });
 ok(true, "先生の画面に、届いた答案が出席番号の一覧で出る（4秒ごとに確認）");
 await page.getByText(/AI採点済み 1 人/).waitFor({ timeout: 30000 });
+await shot("05-teacher-received-and-graded");
 const mobileSub = sql(`select source || '/' || status || '/' || total_score || '/' || cardinality(image_paths) from public.submissions where test_id = '${TEST}' and student_id = 'eeeeeeee-0000-0000-0000-000000000074'`);
 ok(mobileSub === "mobile/done/10/1", `届いた答案を、そのまま AI採点した（${mobileSub}）`);
 // 先生が取り込んだ答案（1番）は、生徒が上書きできない
@@ -173,6 +181,8 @@ ok((await mockReq()).some((r) => r.kind === "adjudicate" && r.model === "claude-
 // ================================================================ ⑦ AIエンジン
 await page.goto(BASE + "/settings");
 await page.getByText("新しいモデル：Claude Sonnet 6").waitFor({ timeout: 15000 });
+await page.getByText("新しいモデル：Claude Sonnet 6").scrollIntoViewIfNeeded();
+await shot("06-ai-engine");
 body = await text();
 ok(body.includes("Claude Haiku 5.5") && body.includes("Claude Sonnet 5.5") && body.includes("Claude Opus 5.5"), "設定画面に段階ごとのモデル（Haiku 5.5 / Sonnet 5.5 / Opus 5.5）を表示");
 await page.getByRole("button", { name: "このモデルに切り替える" }).click();
@@ -190,6 +200,7 @@ const gb = await globe.boundingBox();
 const others = await page.locator("header button").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().right));
 ok(gb && header && Math.abs(Math.max(...others) - (gb.x + gb.width)) < 1 && gb.y < header.y + header.height, "🌐 はヘッダーのいちばん右（右上）にある");
 await globe.click();
+await shot("07-language-menu-top-right");
 await page.getByPlaceholder(/言語を検索/).fill("english");
 await page.getByRole("dialog", { name: "表示言語" }).getByRole("option", { name: /English/ }).first().click();
 await page.locator("h1").filter({ hasText: "Settings" }).first().waitFor();
@@ -207,6 +218,7 @@ await page.locator("h1").filter({ hasText: "設定" }).first().waitFor();
 // すばやく移動
 await page.keyboard.press("Control+k");
 await page.getByPlaceholder(/画面・生徒/).fill("成績");
+await shot("08-command-palette");
 await page.keyboard.press("Enter");
 await page.waitForURL(BASE + "/scores");
 ok(true, "Ctrl+K で画面の名前を探して移動できる");
@@ -214,6 +226,8 @@ ok(true, "Ctrl+K で画面の名前を探して移動できる");
 await page.getByText("テストの統計").waitFor();
 await page.locator("select").first().selectOption({ value: CLASS });
 await page.getByText(/未提出：5番/).waitFor();
+await page.getByText("テストの統計").scrollIntoViewIfNeeded();
+await shot("09-score-stats");
 body = await text();
 ok(body.includes("平均") && body.includes("中央値") && body.includes("標準偏差"), "テストの統計（平均・中央値・標準偏差）と未提出者を表示");
 const [dl] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /校務用CSV/ }).click()]);
@@ -224,6 +238,7 @@ sql(`update public.submission_items set need_review = true, detected = '12' wher
 sql(`update public.submission_items set need_review = true, detected = 'x=3' where qno = 2 and submission_id in (select id from public.submissions where test_id = '${TEST}' and source = 'mobile')`);
 await page.goto(BASE + "/review");
 await page.getByText("同じ解答をまとめて確定").waitFor();
+await shot("10-same-answer-bulk");
 await page.getByRole("button", { name: "3件を ○ で確定" }).click();
 await page.getByText("3 件をまとめて ○ で確定しました").waitFor();
 ok(sql(`select count(*) from public.submission_items i join public.submissions s on s.id = i.submission_id where s.test_id = '${TEST}' and i.need_review`) === "1", "同じ解答の3人分を1回で確定");
@@ -244,12 +259,15 @@ await page.goto(`${BASE}/history/${subId}`);
 await page.getByRole("tab", { name: /設問別採点/ }).click();
 await page.getByText("よくできました").first().click();
 await page.getByRole("button", { name: "単位を忘れずに" }).first().click();
+await shot("11-comment-templates");
 await page.getByRole("button", { name: "保存", exact: true }).first().click();
 await page.getByText("コメントを更新しました").waitFor();
 ok(sql(`select count(*) from public.submission_items where submission_id = '${subId}' and comment = '単位を忘れずに'`) === "1", "赤ペンコメントを定型文からワンタップで入れる");
 // 今月の AI採点
 await page.goto(BASE + "/");
 await page.getByText("今月の AI採点").waitFor();
+await page.getByText("今月の AI採点").scrollIntoViewIfNeeded();
+await shot("12-dashboard-ai-usage");
 ok(/AI採点\s*\n?\s*[4-9]/.test(await text()) || (await text()).includes("AIの費用"), "ダッシュボードに今月の AI採点（件数・費用・時間）を表示");
 
 // ================================================================ ⑨ 100枚以上：120人分を一度に入れて、おまかせで採点する
@@ -266,6 +284,7 @@ await page.locator('input[type="file"]').first().setInputFiles(Array.from({ leng
   return { name: `scan_${no}.png`, mimeType: "image/png", buffer: answerPng(no, 40 + i) };
 }));
 await page.getByText(/自動確認：120 人分の生徒の割り当て・ページ順に問題はありません/).waitFor({ timeout: 120000 });
+await shot("13-120-sheets-auto-checked");
 ok(true, "120枚を一度に取り込み、全員を受験番号で自動で振り分けた");
 await page.getByText("採点が完了しました").waitFor({ timeout: 240000 }).catch(async (e) => { console.log("--- 画面", (await text()).slice(-1500)); throw e; });
 const bigSec = (Date.now() - tBig) / 1000;

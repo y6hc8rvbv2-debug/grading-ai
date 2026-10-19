@@ -217,7 +217,7 @@ export function ScoresView() {
                   <Stat label="平均" value={st.mean} unit="点" tone="accent" sub={`満点 ${shownTest.maxScore}`} />
                   <Stat label="中央値" value={st.median} unit="点" />
                   <Stat label="標準偏差" value={st.sd} />
-                  <Stat label="最高 / 最低" value={`${st.max} / ${st.min}`} unit="点" />
+                  <Stat label="最高・最低" value={`${st.max}・${st.min}`} unit="点" />
                 </div>
                 <div aria-label="得点率の分布" style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 90 }}>
                   {st.hist.map((n, i) => (
