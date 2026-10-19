@@ -18,7 +18,7 @@ import { requireAiConsent } from "@/lib/ai-consent";
 import { CANCELLED_MESSAGE, IMPORT_TOTAL_TIMEOUT_MS, ImportStopped } from "@/lib/test-import-client";
 import { useUI } from "@/components/ui-context";
 import { Badge, Btn, Field, Input, Modal, Select, grid, inputStyle } from "@/components/ui";
-import type { FigureRef, ImportBox, ImportResult, NewTestInput, QType } from "@/lib/types";
+import type { FigureRef, ImportBox, ImportResult, ImportedQuestion, NewTestInput, QType } from "@/lib/types";
 
 type Kind = "key" | "paper" | "student";
 const KIND_LABEL: Record<Kind, string> = {
@@ -42,6 +42,7 @@ type Row = {
   confirmed: boolean;           // 教師が確認したか
   answerBox?: Ref;              // 元画像での正答の位置
   figure?: Ref;                 // 作図の模範図の位置
+  check?: ImportedQuestion["check"]; // 模範解答の自動作成での検算の結果（ver6）
 };
 /** 元の資料の中の位置。資料は id で指す（資料を削除しても、ほかの設問の参照がずれない） */
 type Ref = { sourceId: string; page: number; x: number; y: number; w: number; h: number } | null;
@@ -378,7 +379,7 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
     setRows(res.questions.map((q) => fillAnswer(blankRow({
       big: q.big, sub: q.sub, type: q.type, unit: "", points: q.points ?? "", pointsHint: q.pointsHint,
       correct: q.correct, model: q.model, flags: q.flags, confirmed: q.flags.length === 0,
-      answerBox: toRef(q.answerBox), figure: toRef(q.figure),
+      answerBox: toRef(q.answerBox), figure: toRef(q.figure), check: q.check,
     }))));
     if (!name && res.title) setName(res.title);
     if (res.subject) setSubject((s) => s || res.subject);
@@ -641,7 +642,7 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
             )}
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               <Btn variant="primary" onClick={runImport} disabled={!!importing || !sources.length || (!generateKey && !sources.some((s) => s.kind === "key"))}>
-                {importing === "consent" ? "同意を待っています…" : importing === "upload" ? "資料を保存しています…" : importing === "read" ? "AIが読み取っています…（1〜3分）" : "AIで読み取って入力する"}
+                {importing === "consent" ? "同意を待っています…" : importing === "upload" ? "資料を保存しています…" : importing === "read" ? "AIが読み取っています…（1〜2分）" : "AIで読み取って入力する"}
               </Btn>
               <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11.5, color: T.textSub }}>
                 <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} disabled={!!importing} />
@@ -798,6 +799,9 @@ export default function NewTestForm({ open, onClose, initialFiles, onCreated, dr
                           <td colSpan={9} style={{ padding: "0 8px 8px 8px", fontSize: 11.5, color: T.text }}>
                             <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
                               <Badge tone={r.confirmed ? "ok" : "warn"}>{r.confirmed ? "確認済み" : "要確認"}</Badge>
+                              {r.check?.status === "agree" && <Badge tone="ok">✓ 検算一致（2つのAIが同じ答え）</Badge>}
+                              {r.check?.status === "adjudicated" && <Badge tone="info">最上位AIが検算済み</Badge>}
+                              {r.check?.status === "disagree" && <Badge tone="warn">AIの答えが食い違い{r.check.other ? `（検算：${r.check.other}）` : ""}</Badge>}
                               <ul style={{ margin: 0, paddingInlineStart: 16, flex: 1, minWidth: 240, lineHeight: 1.7 }}>
                                 {r.flags.map((f, i) => <li key={i}>{f}</li>)}
                                 {r.type === "graph" && (

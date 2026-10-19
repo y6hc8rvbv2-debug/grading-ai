@@ -15,16 +15,22 @@ import { readFileSync } from "node:fs";
 
 // 模範解答からの自動入力の代役：今回のテスト（20問・100点、5・5・1・3・1・3・2）を読み取った結果を返す
 const IMPORT_RAW = readFileSync(new URL("../fixtures/import-raw.json", import.meta.url), "utf8");
-const isImport = (body) => /テストを登録する教員の補助/.test(String(body.system));
+const sysText = (body) => (Array.isArray(body.system) ? body.system.map((b) => b.text ?? "").join("\n") : String(body.system ?? ""));
+const isImport = (body) => /テストを登録する教員の補助/.test(sysText(body));
+// ver6：模範解答の自動作成の検算・判定
+const isVerify = (body) => /模範解答を検算する教員/.test(sysText(body));
+const isAdjudicate = (body) => /模範解答を最終確認する教員/.test(sysText(body));
+// ver6：既定のモデル（lib/grading/models.ts の DEFAULT_MODELS）
+const TOP = "claude-opus-5-5", STANDARD = "claude-sonnet-5-5", FAST = "claude-haiku-5-5";
 function importProblems(req, body) {
   const p = [];
   if (req.headers["x-api-key"] !== process.env.EXPECTED_API_KEY) p.push("x-api-key が違う");
-  if (body.model !== "claude-opus-5") p.push(`model が claude-opus-5 でない（${body.model}）`);
+  if (![TOP, STANDARD].includes(body.model)) p.push(`model が ${TOP} / ${STANDARD} でない（${body.model}）`);
   if (body.stream !== true) p.push("stream で受け取っていない");
   if (body.thinking?.type !== "adaptive") p.push("thinking が adaptive でない");
   if (body.output_config?.format?.type !== "json_schema") p.push("output_config.format が json_schema でない");
   const content = body.messages?.[0]?.content ?? [];
-  if (!content.some((c) => c.type === "text" && /資料1：模範解答/.test(c.text))) p.push("資料の種類（模範解答）を示していない");
+  if (!content.some((c) => c.type === "text" && /資料1：/.test(c.text))) p.push("資料の種類を示していない");
   if (!content.some((c) => (c.type === "image" || c.type === "document") && c.source?.data)) p.push("資料の画像が無い");
   return p;
 }
@@ -53,6 +59,8 @@ const MODELS = [
   { type: "model", id: "claude-sonnet-5-5", display_name: "Claude Sonnet 5.5", created_at: "2026-08-01T00:00:00Z" },
   { type: "model", id: "claude-sonnet-5", display_name: "Claude Sonnet 5", created_at: "2026-05-01T00:00:00Z" },
   { type: "model", id: "claude-opus-5", display_name: "Claude Opus 5", created_at: "2026-05-01T00:00:00Z" },
+  { type: "model", id: "claude-haiku-5-5", display_name: "Claude Haiku 5.5", created_at: "2026-09-01T00:00:00Z" },
+  { type: "model", id: "claude-opus-5-5", display_name: "Claude Opus 5.5", created_at: "2026-09-01T00:00:00Z" },
 ];
 const COMPARE_IDS = ["claude-haiku-4-5-20251001", "claude-sonnet-5-5", "claude-opus-5"];
 const isCompare = (body) => !("fallbacks" in body) && /比較試験/.test(JSON.stringify(body.messages?.[0]?.content ?? ""));
@@ -88,27 +96,33 @@ function compareResult(model) {
   };
 }
 
-// 採点のリクエストの形を、モデルごとの決まりで検査する
-//   claude-opus-5     … adaptive thinking・effort high・fallbacks（Opus単独とこれまでの採点）
-//   claude-sonnet-5-5 … adaptive thinking・effort high、fallbacks なし（3モデル併用の2段目）
-//   claude-haiku-4-5  … thinking・effort なし（Haiku 4.5 は非対応）、fallbacks なし（3モデル併用の1段目）
+// 採点のリクエストの形を、段階ごとの決まりで検査する（ver6 の既定のモデル）
+//   claude-opus-5-5   … adaptive thinking・effort high・fallbacks（Opus単独・3モデル併用の最上位）
+//   claude-sonnet-5-5 … adaptive thinking・effort medium、fallbacks なし（3モデル併用の2段目）
+//   claude-haiku-5-5  … adaptive thinking・effort low、fallbacks なし（3モデル併用の1段目）
+//   claude-haiku-4-5  … thinking・effort なし（学校が Haiku 4.5 を選んだとき）
 function problems(req, body) {
   const p = [];
   if (req.headers["x-api-key"] !== process.env.EXPECTED_API_KEY) p.push("x-api-key が違う");
   const beta = String(req.headers["anthropic-beta"] || "");
-  if (body.model === "claude-opus-5") {
+  const noFallback = (who) => { if ("fallbacks" in body || beta.includes("server-side-fallback")) p.push(`3モデル併用の ${who} に fallbacks を付けている`); };
+  if (body.model === TOP) {
     if (!beta.includes("server-side-fallback-2026-07-01")) p.push("fallback の beta ヘッダーが無い");
     if (body.fallbacks !== "default") p.push("fallbacks が default でない");
     if (body.thinking?.type !== "adaptive") p.push("thinking が adaptive でない");
     if (body.output_config?.effort !== "high") p.push("effort が high でない");
-  } else if (body.model === "claude-sonnet-5-5") {
+  } else if (body.model === STANDARD) {
     if (body.thinking?.type !== "adaptive") p.push("Sonnet の thinking が adaptive でない");
-    if (body.output_config?.effort !== "high") p.push("Sonnet の effort が high でない");
-    if ("fallbacks" in body || beta.includes("server-side-fallback")) p.push("3モデル併用の Sonnet に fallbacks を付けている");
+    if (body.output_config?.effort !== "medium") p.push("Sonnet の effort が medium でない");
+    noFallback("Sonnet");
+  } else if (body.model === FAST) {
+    if (body.thinking?.type !== "adaptive") p.push("Haiku 5.5 の thinking が adaptive でない");
+    if (body.output_config?.effort !== "low") p.push("Haiku 5.5 の effort が low でない");
+    noFallback("Haiku");
   } else if (body.model === "claude-haiku-4-5") {
-    if ("thinking" in body) p.push("Haiku に thinking を付けている（非対応）");
-    if (body.output_config?.effort) p.push("Haiku に effort を付けている（非対応）");
-    if ("fallbacks" in body || beta.includes("server-side-fallback")) p.push("3モデル併用の Haiku に fallbacks を付けている");
+    if ("thinking" in body) p.push("Haiku 4.5 に thinking を付けている（非対応）");
+    if (body.output_config?.effort) p.push("Haiku 4.5 に effort を付けている（非対応）");
+    noFallback("Haiku");
   } else {
     p.push(`想定外のモデル（${body.model}）`);
   }
@@ -118,12 +132,14 @@ function problems(req, body) {
   const img = content.find((c) => c.type === "image" || c.type === "document");
   if (!img || img.source?.type !== "base64" || !img.source?.data) p.push("答案画像（base64）が無い");
   if (img?.type === "image" && !/^image\/(jpeg|png|webp|gif)$/.test(img.source.media_type)) p.push("画像の media_type が不正");
-  if (!/氏名/.test(String(body.system))) p.push("system に氏名を書かない指示が無い");
+  if (!/氏名/.test(sysText(body))) p.push("system に氏名を書かない指示が無い");
+  // ver6：設問・正答・採点基準は system の2つ目のブロックに置き、プロンプトキャッシュに載せる
+  if (!Array.isArray(body.system) || body.system[1]?.cache_control?.type !== "ephemeral") p.push("設問・採点基準をキャッシュに載せていない");
   return p;
 }
 
 function questionsFrom(body) {
-  const text = body.messages[0].content.find((c) => c.type === "text")?.text ?? "";
+  const text = sysText(body);
   const m = text.match(/設問（qno・配点・正答・模範解答）:\n([\s\S]*?)\n\n採点基準:/);
   return m ? JSON.parse(m[1]) : [];
 }
@@ -161,6 +177,16 @@ const server = http.createServer((req, res) => {
       if (mode === "slow") setTimeout(reply, 2500); else reply();
       return;
     }
+    if (isVerify(body) || isAdjudicate(body)) {
+      // 検算は取り込み用の結果（IMPORT_RAW）の正答をそのまま答える＝下書きと一致。台本 "verify": ["differ"] で1問目だけ違う答え
+      const mode = scripts[isVerify(body) ? "verify" : "adjudicate"]?.shift() ?? "clean";
+      requests.push({ url: req.url, kind: isVerify(body) ? "verify" : "adjudicate", model: body.model, mode, problems: [] });
+      const qs = JSON.parse(IMPORT_RAW).questions ?? [];
+      const text = isVerify(body)
+        ? JSON.stringify({ answers: qs.map((q, i) => ({ big: q.big, sub: q.sub, answer: mode === "differ" && i === 0 ? "999" : q.correct, solvable: !!q.correct })) })
+        : JSON.stringify({ decisions: [] });
+      return sse(res, body.model, text);
+    }
     if (isCompare(body)) {
       const bad = compareProblems(req, body);
       requests.push({ url: req.url, kind: "compare", model: body.model, problems: bad });
@@ -179,7 +205,7 @@ const server = http.createServer((req, res) => {
     const customBoxes = typeof scripted === "object" && scripted ? scripted.bboxes : null;
     const mode = nextMode || (typeof scripted === "object" && scripted ? scripted.mode : scripted) || "clean"; nextMode = "";
     requests.push({ url: req.url, kind: "grade", beta: req.headers["anthropic-beta"], model: body.model, mode, problems: bad, questions: qs,
-      rubric: body.messages[0].content.find((c) => c.type === "text")?.text.split("採点基準:\n")[1] ?? "",
+      rubric: sysText(body).split("採点基準:\n")[1] ?? "",
       imageType: body.messages[0].content[0]?.source?.media_type ?? body.messages[0].content[0]?.type,
       images: body.messages[0].content.filter((c) => c.type === "image" || c.type === "document").length });
 

@@ -379,21 +379,21 @@ page.once("dialog", (d) => d.accept());
 await page.getByRole("button", { name: "AIで採点し直す" }).click();
 await toastSeen(/AI採点が終わりました（\d+点・3モデル併用・Haikuで確定）/);
 let calls = (await allReqs()).slice(mark);
-await ok(calls.length === 1 && calls[0].model === "claude-haiku-4-5" && calls[0].problems.length === 0,
+await ok(calls.length === 1 && calls[0].model === "claude-haiku-5-5" && calls[0].problems.length === 0,
   `問題の無い答案は Haiku だけで確定（${calls.map((c) => c.model).join(",")} ${JSON.stringify(calls.flatMap((c) => c.problems))}）`);
 await settle(800);
 await ok((await text()).includes("採点方式：3モデル併用（Haikuで確定）"), "答案詳細に採点方式を表示");
 await page.getByRole("button", { name: /^AI採点の記録/ }).click(); await settle(1000);
-await ok((await text()).includes("claude-haiku-4-5") && /入力 1200・出力 300 トークン/.test(await text()), "AI採点の記録：モデルID・トークン数");
+await ok((await text()).includes("claude-haiku-5-5") && /入力 1200・出力 300 トークン/.test(await text()), "AI採点の記録：モデルID・トークン数");
 await ok(/\$0\.00\d+/.test(await text()), "AI採点の記録：概算費用");
 await ok((await rowText("A組 3番")).includes("3モデル併用（Haiku）"), "採点履歴に採点方式を保存・表示");
 
 // (3) Haiku で回答の欠落 → Sonnet で解決
 mark = (await allReqs()).length;
-await script({ "claude-haiku-4-5": ["missing"] });
+await script({ "claude-haiku-5-5": ["missing"] });
 let r = await gradeApi(ids.s4, "cascade");
 calls = (await allReqs()).slice(mark);
-await ok(r.done && r.finalStage === "sonnet" && calls.map((c) => c.model).join(",") === "claude-haiku-4-5,claude-sonnet-5-5"
+await ok(r.done && r.finalStage === "sonnet" && calls.map((c) => c.model).join(",") === "claude-haiku-5-5,claude-sonnet-5-5"
   && calls.every((c) => c.problems.length === 0), `回答の欠落 → Sonnet で確定（${calls.map((c) => c.model).join(",")}）`);
 // 上のモデルには、問題のあった設問だけを送る（模範解答・配点・採点基準は Haiku に送ったものと同じ）
 const sameQ = (c) => c.questions.length > 0 && c.questions.every((q) => calls[0].questions.some((q0) => JSON.stringify(q0) === JSON.stringify(q)));
@@ -406,7 +406,7 @@ await ok((await text()).includes("回答の欠落") && (await text()).includes("
 
 // (4) Haiku で採点基準と矛盾 → Sonnet で判読不能 → Opus でも Sonnet と判定が分かれた → 要確認（理由を記録）
 mark = (await allReqs()).length;
-await script({ "claude-haiku-4-5": ["contradict"], "claude-sonnet-5-5": ["unreadable"], "claude-opus-5": ["disagree"] });
+await script({ "claude-haiku-5-5": ["contradict"], "claude-sonnet-5-5": ["unreadable"], "claude-opus-5-5": ["disagree"] });
 r = await gradeApi(ids.s5, "cascade");
 calls = (await allReqs()).slice(mark);
 await ok(r.done && r.finalStage === "opus" && r.needReview >= 1 && calls.length === 3 && calls.every((c) => c.problems.length === 0),
@@ -419,7 +419,7 @@ await ok((log5.includes("正答との照合と判定が矛盾") || log5.includes
 
 // (5) 複数ページの答案：各段階に全ページを送り、ページ別に赤ペンを重ねる
 mark = (await allReqs()).length;
-await script({ "claude-haiku-4-5": ["missing"] });
+await script({ "claude-haiku-5-5": ["missing"] });
 r = await gradeApi(ids.s1, "cascade");
 calls = (await allReqs()).slice(mark);
 await ok(r.done && calls.length === 2 && calls.every((c) => c.images === 2), `2ページの答案は Haiku・Sonnet とも2枚の画像を送る（${calls.map((c) => c.images).join(",")}）`);
@@ -431,7 +431,7 @@ await ok((await text()).includes("原本 2 / 2 ページ") && await page.locator
 
 // (6) 二重実行の防止：連打（同じ requestId の同時送信）と再送では、同じモデルを二重に呼ばない
 mark = (await allReqs()).length;
-await script({ "claude-haiku-4-5": ["slow"] });
+await script({ "claude-haiku-5-5": ["slow"] });
 const ridDup = randomUUID();
 const [a1, a2] = await Promise.all([
   page.request.post(BASE + "/api/grade", { data: { submissionId: ids.s7, mode: "cascade", requestId: ridDup } }),
@@ -442,7 +442,7 @@ const resent = await gradeApi(ids.s7, "cascade", ridDup);
 await ok(resent.done && resent.finalStage === "haiku", "再送：同じ requestId は確定済みの結果を返す");
 await ok((await allReqs()).length - mark === 1, `連打・再送でもモデルの呼び出しは1回（${(await allReqs()).length - mark}回）`);
 // 採点中の答案に、別の操作で採点を始めようとしても断る
-await script({ "claude-haiku-4-5": ["missing"] });
+await script({ "claude-haiku-5-5": ["missing"] });
 const rA = randomUUID();
 const first = await (await page.request.post(BASE + "/api/grade", { data: { submissionId: ids.s7, mode: "cascade", requestId: rA } })).json();
 await ok(first.done === false && first.next === "sonnet", "Haiku の結果に問題があれば、次は Sonnet と返す");
@@ -454,7 +454,7 @@ await ok(rest.done && rest.finalStage === "sonnet", "続きは同じ requestId �
 // (7) 途中失敗：Sonnet が失敗しても、既存の成績（得点・状態）を壊さない
 const before6 = await rowText("A組 6番");
 mark = (await allReqs()).length;
-await script({ "claude-haiku-4-5": ["missing"], "claude-sonnet-5-5": ["error500"] });
+await script({ "claude-haiku-5-5": ["missing"], "claude-sonnet-5-5": ["error500"] });
 r = await gradeApi(ids.s6, "cascade");
 calls = (await allReqs()).slice(mark);
 await ok(!r.ok && r.status >= 500 && calls.length === 2, `Sonnet が失敗したら採点を止める（HTTP ${r.status}・${calls.map((c) => c.model).join(",")}）`);
@@ -862,7 +862,7 @@ boxesFor.push({ page: 1, x: 0, y: 0, w: 0, h: 0 }, hand(1, SHEET[1][3], 1), hand
 boxesFor.push({ ...hand(2, SHEET[2][0], 0), page: 3 });
 boxesFor.push(hand(2, SHEET[2][1], 0, 3.4), { ...hand(2, SHEET[2][1], 1, 3.4), page: 1 }, hand(2, SHEET[2][1], 2, 3.4));
 boxesFor.push(hand(2, SHEET[2][2], 0, 1.6), hand(2, SHEET[2][2], 1, 1.6));
-await script({ "claude-haiku-4-5": [{ mode: "clean", bboxes: boxesFor }] });
+await script({ "claude-haiku-5-5": [{ mode: "clean", bboxes: boxesFor }] });
 const rpGraded = await gradeApi(rpSub.id, "cascade");
 await ok(rpGraded.done, "（前提）台本の位置で AI 採点（代役）");
 const itemsBefore = JSON.stringify(await rp(`submission_items?select=qno,mark,earned,need_review,comment&submission_id=eq.${rpSub.id}&order=qno`));

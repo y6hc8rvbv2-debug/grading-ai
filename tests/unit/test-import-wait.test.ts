@@ -136,7 +136,10 @@ test("サーバーは AI の呼び出しに期限を付け、強制終了で残�
   const deadline = Number(route.match(/AI_DEADLINE_MS = (\d+)_(\d+)/)?.slice(1).join(""));
   const maxDuration = Number(route.match(/maxDuration = (\d+)/)?.[1]);
   assert.ok(deadline > 0 && deadline < maxDuration * 1000, "Vercel の上限より前に AI の呼び出しを打ち切る");
-  assert.match(route, /\{ signal: deadline\.signal \}\)\.finalMessage\(\)/);
+  // ver6：1回の呼び出しは ask() にまとめ、どの呼び出しにも期限（deadline.signal か、それに連動する判定の signal）を渡す
+  assert.match(route, /\{ signal: o\.signal \}\)\.finalMessage\(\)/);
+  assert.match(route, /signal: deadline\.signal/);
+  assert.match(route, /deadline\.signal\.addEventListener\("abort", onDeadline/);
   assert.match(route, /\.eq\("input_sha", inputSha\)\.eq\("status", "running"\)\.lt\("created_at", staleBefore\)/);
   assert.match(route, /STALE_RUNNING_MS = \(maxDuration \+ 60\) \* 1000/);
 });

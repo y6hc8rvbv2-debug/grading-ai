@@ -220,6 +220,8 @@ export type ImportedQuestion = {
   big: number; bigLabel: string; sub: string; type: QType; correct: string;
   points: number | null; pointsHint: number | null; pointsOrigin?: string; model: string;
   answerBox: ImportBox; figure: ImportBox; flags: string[];
+  /** 模範解答の自動作成での検算の結果（ver6）。agree=2つのAIが一致、adjudicated=最上位のAIが判定、disagree=食い違いが残った、unverified=検算できなかった */
+  check?: { status: "agree" | "adjudicated" | "disagree" | "unverified"; other?: string };
 };
 export type ImportResult = { title: string; subject: string; maxScore: number | null; questions: ImportedQuestion[]; warnings: string[] };
 

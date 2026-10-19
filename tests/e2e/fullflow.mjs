@@ -61,7 +61,7 @@ const img = `${OUT}fullflow-answer.png`;
   await p.screenshot({ path: img });
   await p.close();
 }
-await fetch(MOCK + "/__script", { method: "POST", body: JSON.stringify({ "claude-opus-5": ["disagree"] }) });
+await fetch(MOCK + "/__script", { method: "POST", body: JSON.stringify({ "claude-opus-5-5": ["disagree"] }) });
 const gradeBefore = (await (await fetch(MOCK + "/__requests")).json()).length;
 await page.goto(BASE + "/new"); await settle(1200);
 await page.locator('input[type=file]:not([capture])').setInputFiles([img]);

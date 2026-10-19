@@ -25,7 +25,12 @@ import { heicToJpeg, looksLikeHeic } from "@/lib/ai/heic";
 import {
   GENERATE_KEY_SYSTEM, proposePoints, IMPORT_SCHEMA, IMPORT_SYSTEM, buildImportContent, normalizeImport, type ImportSource, type SourceKind,
 } from "@/lib/ai/test-import";
-import { costOfStage } from "@/lib/grading/cost";
+import { costOfModel, traitsOf, type TokenUsage } from "@/lib/grading/models";
+import { loadSchoolAi } from "@/lib/ai/settings";
+import {
+  ADJUDICATE_SCHEMA, ADJUDICATE_SYSTEM, VERIFY_SCHEMA, VERIFY_SYSTEM, mergeVerification, needsAdjudication,
+  type Decision, type VerifyAnswer,
+} from "@/lib/ai/answer-key";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,6 +75,7 @@ export async function POST(request: Request) {
   const { data: prof } = await supabase.from("profiles").select("school_id, role").eq("id", user.id).maybeSingle();
   if (!prof?.school_id || !["admin", "teacher"].includes(prof.role)) return fail("所属校が設定されていません。管理者に確認してください。", 403);
   const schoolId = prof.school_id as string;
+  const models = aiConfig((await loadSchoolAi(supabase, schoolId)).overrides).models;
   const prefix = `${schoolId}/imports/${requestId}/`;
   if (files.some((f) => !f.path.startsWith(prefix) || f.path.includes(".."))) return fail("資料の保存先が正しくありません。もう一度選び直してください。", 400);
 
@@ -108,7 +114,7 @@ export async function POST(request: Request) {
     sources.push({ kind: f.kind, name: f.name || `資料${sources.length + 1}`, mediaType, data: buf.toString("base64") });
   }
   if (total > MAX_TOTAL_BYTES) return fail("資料が大きすぎます（合計20MBまで）。PDF はページを分けて選んでください。", 400);
-  const inputSha = createHash("sha256").update(`${generate ? "generate-v1" : "read"}|${hashes.join("|")}`).digest("hex");
+  const inputSha = createHash("sha256").update(`${generate ? "generate-v2" : "read"}|${hashes.join("|")}`).digest("hex");
 
   /* ------------------------------------------------ 同じ資料の読み取り */
   if (!force) {
@@ -121,7 +127,7 @@ export async function POST(request: Request) {
     .eq("school_id", schoolId).eq("input_sha", inputSha).eq("status", "running").lt("created_at", staleBefore);
   const { data: job, error: e1 } = await supabase.from("test_imports").insert({
     school_id: schoolId, created_by: user.id, request_id: requestId, input_sha: inputSha,
-    files: files.map((f) => ({ path: f.path, kind: f.kind, name: f.name })), model: cfg.model,
+    files: files.map((f) => ({ path: f.path, kind: f.kind, name: f.name })), model: generate ? `${models.standard}+${models.top}` : models.top,
   }).select("id").single();
   if (e1?.code === "23505") {
     const { data: again } = await supabase.from("test_imports").select("id").eq("request_id", requestId).maybeSingle();
@@ -135,21 +141,81 @@ export async function POST(request: Request) {
   const timer = setTimeout(() => deadline.abort(), Math.max(1000, AI_DEADLINE_MS - (Date.now() - startedAt)));
   try {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2 });
-    // 設問が多いと出力が長くなるので、時間切れを避けるため stream で受け取る
-    const message = await client.beta.messages.stream({
-      model: cfg.model,
-      max_tokens: 32000,
-      thinking: { type: "adaptive" },
-      output_config: { effort: "high", format: { type: "json_schema", schema: IMPORT_SCHEMA as unknown as Record<string, unknown> } },
-      system: generate ? GENERATE_KEY_SYSTEM : IMPORT_SYSTEM,
-      messages: [{ role: "user", content: buildImportContent(sources) }],
-      ...(cfg.fallbacks ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
-    }, { signal: deadline.signal }).finalMessage();
-    const { parsed, model, usage } = readGradingResponse(message);
-    const result = proposePoints(normalizeImport(parsed, files.map((f) => f.kind), generate));
-    const tokens = { input: usage.input_tokens ?? 0, output: usage.output_tokens ?? 0, cacheWrite: usage.cache_creation_input_tokens ?? 0, cacheRead: usage.cache_read_input_tokens ?? 0 };
+    const spent: TokenUsage & { usd: number } = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, usd: 0 };
+    // 1回の呼び出し（設問が多いと出力が長くなるので、時間切れを避けるため stream で受け取る）
+    const ask = async (o: { model: string; system: string; schema: unknown; effort: "low" | "medium" | "high"; content: ReturnType<typeof buildImportContent>; signal: AbortSignal; maxTokens?: number }) => {
+      const traits = traitsOf(o.model);
+      const message = await client.beta.messages.stream({
+        model: o.model,
+        max_tokens: o.maxTokens ?? 32000,
+        ...(traits.adaptive ? { thinking: { type: "adaptive" as const } } : {}),
+        output_config: { ...(traits.effort ? { effort: o.effort } : {}), format: { type: "json_schema", schema: o.schema as Record<string, unknown> } },
+        system: o.system,
+        messages: [{ role: "user", content: o.content }],
+        ...(cfg.fallbacks && traits.fallbacks ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
+      }, { signal: o.signal }).finalMessage();
+      const r = readGradingResponse(message);
+      const u = { input: r.usage.input_tokens ?? 0, output: r.usage.output_tokens ?? 0, cacheWrite: r.usage.cache_creation_input_tokens ?? 0, cacheRead: r.usage.cache_read_input_tokens ?? 0 };
+      spent.input += u.input; spent.output += u.output; spent.cacheWrite! += u.cacheWrite; spent.cacheRead! += u.cacheRead;
+      spent.usd += costOfModel(r.model || o.model, u);
+      return r;
+    };
+    const content = buildImportContent(sources);
+    let result: ReturnType<typeof normalizeImport>;
+    let served = models.top;
+    if (!generate) {
+      // 模範解答がある：最上位モデルで読み取る（ver5 と同じ）
+      const r = await ask({ model: models.top, system: IMPORT_SYSTEM, schema: IMPORT_SCHEMA, effort: "high", content, signal: deadline.signal });
+      served = r.model;
+      result = proposePoints(normalizeImport(r.parsed, files.map((f) => f.kind), false));
+    } else {
+      // 模範解答がない（ver6）：下書き（標準モデル）と独立検算（最上位モデル）を同時に動かす → 食い違いだけを判定
+      const verifyContent = [...content.slice(0, -1), { type: "text" as const, text: "上の資料の問題を、すべて自分で解いてください。" }];
+      const [draft, check] = await Promise.allSettled([
+        ask({ model: models.standard, system: GENERATE_KEY_SYSTEM, schema: IMPORT_SCHEMA, effort: "medium", content, signal: deadline.signal }),
+        ask({ model: models.top, system: VERIFY_SYSTEM, schema: VERIFY_SCHEMA, effort: "medium", content: verifyContent, signal: deadline.signal, maxTokens: 16000 }),
+      ]);
+      if (draft.status === "rejected") throw draft.reason;
+      served = draft.value.model;
+      result = proposePoints(normalizeImport(draft.value.parsed, files.map((f) => f.kind), true));
+      const verify = check.status === "fulfilled"
+        ? (((check.value.parsed as { answers?: VerifyAnswer[] })?.answers) ?? []).filter((v) => v && typeof v.big === "number" && typeof v.sub === "string")
+        : null;
+      const verifyError = check.status === "rejected"
+        ? (deadline.signal.aborted ? "時間内に終わりませんでした" : (check.reason instanceof Error ? check.reason.message : "失敗しました")).slice(0, 120)
+        : undefined;
+      // 判定（食い違った設問・記述問題だけ。大問ごとに並列）。残り時間が少なければ行わない（要確認のまま返す）
+      const pending = needsAdjudication(result, verify);
+      let decisions: Decision[] | null = null;
+      const left = AI_DEADLINE_MS - (Date.now() - startedAt);
+      if (pending.length && left > 45_000) {
+        const judge = new AbortController();
+        const stop = setTimeout(() => judge.abort(), left - 15_000);
+        const onDeadline = () => judge.abort();
+        deadline.signal.addEventListener("abort", onDeadline, { once: true });
+        try {
+          const bigs = [...new Set(pending.map((x) => x.q.big))];
+          const groups = bigs.length <= 6 ? bigs.map((b) => [b]) : Array.from({ length: 6 }, (_, i) => bigs.filter((_, j) => j % 6 === i));
+          const parts = await Promise.allSettled(groups.map((g) => {
+            const items = pending.filter((x) => g.includes(x.q.big)).map((x) => ({
+              big: x.q.big, sub: x.q.sub, label: `大問${x.q.bigLabel}${x.q.sub ? `-${x.q.sub}` : ""}`, type: x.q.type, A: x.q.correct, B: x.other,
+            }));
+            return ask({
+              model: models.top, system: ADJUDICATE_SYSTEM, schema: ADJUDICATE_SCHEMA, effort: "high", signal: judge.signal, maxTokens: 16000,
+              content: [...content.slice(0, -1), { type: "text" as const, text: `次の設問について、答えAと答えBのどちらが正しいかを判定してください。\n${JSON.stringify(items, null, 2)}` }],
+            });
+          }));
+          decisions = parts.flatMap((p) => (p.status === "fulfilled" ? (((p.value.parsed as { decisions?: Decision[] })?.decisions) ?? []) : []));
+        } finally {
+          clearTimeout(stop);
+          deadline.signal.removeEventListener("abort", onDeadline);
+        }
+      }
+      result = mergeVerification(result, verify, decisions, { verifyError });
+    }
+    const tokens = { input: spent.input, output: spent.output, cacheWrite: spent.cacheWrite, cacheRead: spent.cacheRead };
     await supabase.from("test_imports").update({
-      status: "done", result, model, usage: tokens, cost_usd: costOfStage("opus", tokens), finished_at: new Date().toISOString(),
+      status: "done", result, model: served, usage: tokens, cost_usd: spent.usd, finished_at: new Date().toISOString(),
     }).eq("id", job.id);
     return NextResponse.json({ ok: true, importId: job.id, result, cached: false });
   } catch (e) {
