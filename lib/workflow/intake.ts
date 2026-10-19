@@ -7,6 +7,8 @@ export type PageInfo = {
   last: number;
   totalPages: number;
   issues: string[];
+  /** 答案に印刷されたテスト名（ver6。読めなければ空文字） */
+  title?: string;
 };
 /** 番号だけでは生徒を推測しない。後続ページの継続は確認対象とする。 */
 export function assignPages(pages: PageInfo[], roster: Student[]) {

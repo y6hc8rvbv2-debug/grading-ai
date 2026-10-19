@@ -125,6 +125,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [ai, setAi] = useState<AiStatus>({ enabled: false, model: null });
   const [toasts, setToasts] = useState<{ id: string; msg: string; tone: string }[]>([]);
   const [drawer, setDrawer] = useState(false);
+  // いま AI採点している答案の数（ver6：どの画面でもヘッダーに表示し、タブを閉じる前に確かめる）
+  const [gradingNow, setGradingNow] = useState(0);
+  useEffect(() => {
+    if (!gradingNow) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [gradingNow]);
   const [mobile, setMobile] = useState(false);
 
   useEffect(() => {
@@ -254,6 +262,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const aiGradeSub = useCallback(async (submissionId: string, opts: { silent?: boolean; mode?: GradingMode; onProgress?: (p: AiGradeProgress) => void } = {}) => {
     // 採点中の表示にする（サーバーも status = processing にしている）
     setSubs((prev) => prev.map((s) => (s.id === submissionId ? { ...s, status: "processing", progress: 30 } : s)));
+    setGradingNow((n) => n + 1);
     try {
       const r = await ds.aiGrade(submissionId, { mode: opts.mode ?? gradingMode, onProgress: opts.onProgress });
       await refreshSub(submissionId);
@@ -269,6 +278,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
       const error = friendlyError(e, "AI採点");
       if (!opts.silent) toast(error, "ng");
       return { ok: false as const, error };
+    } finally {
+      setGradingNow((n) => Math.max(0, n - 1));
     }
   }, [ds, refreshSub, toast, gradingMode]);
 
@@ -361,6 +372,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
               background: T.warnSoft, color: T.warn, border: `1px solid ${T.warn}`, borderRadius: 999,
               padding: "3px 10px", fontSize: 11, fontWeight: 700,
             }}>デモモード（保存されません）</span>}
+            {gradingNow > 0 && (
+              <button onClick={() => go("processing")} title="AI採点の進み具合を見る" style={{
+                background: T.accentSoft, color: T.accent, border: `1px solid ${T.accent}`, borderRadius: 999,
+                padding: "3px 10px", fontSize: 11.5, fontWeight: 700, cursor: "pointer",
+              }}>⏳ AI採点中 {gradingNow} 件</button>
+            )}
             {!mobile && reviewCount > 0 && view !== "review" && (
               <Btn size="sm" variant="soft" onClick={() => go("review")}>要確認 {reviewCount}</Btn>
             )}

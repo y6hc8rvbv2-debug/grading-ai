@@ -2,7 +2,13 @@
 // 新規採点（取り込み → 5ステップ処理）。docs/prototype-v3.jsx の NewGrading を移植。
 //
 // 採点の方法（mode）:
-//   - ai     : Supabase 接続時・採点AIあり。答案画像を保存し、続けて /api/grade で1枚ずつ AI 採点する
+//   - ai     : Supabase 接続時・採点AIあり。答案画像を保存し、続けて /api/grade で AI 採点する
+//              ver6：1人分ずつ「保存 → 採点」を流れ作業にして、同時に N 人分（設定画面の「AIエンジン」）ずつ進める
+//
+// おまかせモード（ver6・既定でオン）:
+//   答案を入れると AI が受験番号・出席番号・テスト名を読んで生徒とテストを自動で決め（並列）、
+//   割り当て・ページ順に問題がなければ確認のチェックを自動で付ける（lib/workflow/auto-check.ts）。
+//   問題がある答案だけを先生に見せ、準備がそろえば数秒後に自動で採点を始める（取り消せる）。
 //   - upload : 採点AIが無い、または「保存だけ」を選んだとき。画像を保存して「AI採点待ち」にする
 //   - local  : デモモード、または採点AIが無い環境で「動作確認用の仮採点」を選んだとき。
 //              ルールベースの仮採点（点数は答案の内容と無関係）
@@ -19,14 +25,35 @@ import { Badge, Bar, Btn, Card, Empty, Field, Section, Select, Table, grid } fro
 import type { GradingInput, Quality, Source, Submission } from "@/lib/types";
 
 import { assignPages, type PageInfo } from "@/lib/workflow/intake";
+import { runPool, withBusyRetry } from "@/lib/workflow/pool";
+import { autoCheck, bestClass, matchTest } from "@/lib/workflow/auto-check";
 import NewTestForm from "./NewTestForm";
 import FileThumbnail from "@/components/FileThumbnail";
 import { preflight } from "@/lib/workflow/preflight";
 import { requireAiConsent } from "@/lib/ai-consent";
+import { askNotifyPermission, notifyDone } from "@/lib/notify";
 
-type Picked = { id: string; name: string; kb: number; src: Source; file?: File; studentId: string; warnings?: string[]; hash?: string };
+type Picked = {
+  id: string; name: string; kb: number; src: Source; file?: File; studentId: string; warnings?: string[]; hash?: string;
+  /** 生徒の決め方：AI が受験番号で照合 / 取り込み順の仮の割り当て / 先生が選んだ（ver6） */
+  assignedBy?: "ai" | "order" | "teacher";
+  /** 自動振り分けで読み取った内容（読み取り済みなら同じ写真を二度送らない） */
+  scan?: PageInfo | null;
+};
 
-const MAX_FILES = 80;
+// ver6：100枚以上の答案を一度に取り込めるようにした（ver5 は80枚）
+const MAX_FILES = 500;
+// 自動振り分けを同時に送る数
+const SCAN_CONCURRENCY = 6;
+
+/** 端末に覚える小さな設定（おまかせモードなど） */
+function useLocalFlag(key: string, initial: boolean): [boolean, (v: boolean) => void] {
+  const [v, setV] = useState(initial);
+  useEffect(() => {
+    try { const raw = window.localStorage.getItem(`saiten.${key}`); if (raw != null) setV(raw === "1"); } catch { /* 既定値のまま */ }
+  }, [key]);
+  return [v, (next: boolean) => { setV(next); try { window.localStorage.setItem(`saiten.${key}`, next ? "1" : "0"); } catch { /* 無視 */ } }];
+}
 // 1人分の答案のページ数の上限（app/api/grade/route.ts の MAX_PAGES と同じ）
 const MAX_PAGES = 10;
 const ACCEPT = "image/jpeg,image/png,image/heic,image/heif,.heic,.heif,application/pdf";
@@ -54,6 +81,14 @@ export default function NewGrading() {
   const [uploadOnly, setUploadOnly] = useState(false);
   // 1人分の答案が何枚の写真か。2以上なら、取り込んだ順に p.1, p.2 … として同じ生徒にまとめる
   const [pagesPer, setPagesPer] = useState(1);
+  // おまかせモード（自動振り分け・自動確認）と、準備がそろったら自動で採点を始めるか
+  const [omakase, setOmakase] = useLocalFlag("omakase", true);
+  const [autoStart, setAutoStart] = useLocalFlag("autoStart", true);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [autoStartOff, setAutoStartOff] = useState(false);
+  const [printedTitles, setPrintedTitles] = useState<string[]>([]);
+  const [testAuto, setTestAuto] = useState<"" | "matched" | "created">("");
+  const [onlyProblems, setOnlyProblems] = useState(false);
   const [aiProgress, setAiProgress] = useState<{ done: number; total: number } | null>(null);
   const [savedCount, setSavedCount] = useState(0);
   const [saveErrors, setSaveErrors] = useState(0);
@@ -96,15 +131,17 @@ export default function NewGrading() {
 
   // クラスを変えたら、取り込んだ答案を出席番号順に割り当て直す
   // （1人分が複数枚なら、pagesPer 枚ずつ同じ生徒にする）
+  // （AI が受験番号で照合した答案・先生が選んだ答案はそのまま）
   useEffect(() => {
     setChecked(false);
-    setFiles((prev) => prev.map((f, i) => ({ ...f, studentId: roster[Math.floor(i / pagesPer)]?.id ?? "" })));
+    setFiles((prev) => prev.map((f, i) => (f.assignedBy === "ai" || f.assignedBy === "teacher" ? f
+      : { ...f, studentId: roster[Math.floor(i / pagesPer)]?.id ?? "", assignedBy: "order" })));
   }, [roster, pagesPer]);
 
   const addPicked = (list: Omit<Picked, "studentId" | "id">[]) => {
     setFiles((prev) => {
       const next = [...prev, ...list.map((f, i) => ({
-        ...f, id: uid("f"), studentId: roster[Math.floor((prev.length + i) / pagesPer)]?.id ?? "",
+        ...f, id: uid("f"), studentId: roster[Math.floor((prev.length + i) / pagesPer)]?.id ?? "", assignedBy: "order" as const,
       }))];
       if (next.length > MAX_FILES) toast(`一度にアップロードできるのは${MAX_FILES}枚までです。残りは次の回に分けてください`, "warn");
       return next.slice(0, MAX_FILES);
@@ -120,35 +157,75 @@ export default function NewGrading() {
     })));
   };
 
-  const scanPages = async () => {
+  // 自動振り分け（ver6：並列で読み取り、読み取り済みの写真は送り直さない。合うクラス・テストも自動で選ぶ）
+  const canScan = !demo && ai.enabled;
+  const scanning = useRef(false);
+  const scanPages = async (opts: { auto?: boolean } = {}) => {
+    if (scanning.current) return;
+    scanning.current = true;
     setScanBusy(true); setChecked(false);
     try {
       await requireAiConsent();   // 答案の写真を AI に送る前に、明示の同意
-      const pages: PageInfo[] = [];
-      for (const f of files) {
-        if (!f.file) throw new Error("実際の画像を選んでください");
-        const body = new FormData(); body.set("file", f.file);
-        const res = await fetch("/api/intake", { method: "POST", body }); const value = await res.json();
-        if (!res.ok) throw new Error(value.error);
-        pages.push(value);
-      }
-      const assigned = assignPages(pages, roster);
+      const current = files;
+      const targets = current.map((f, i) => ({ f, i })).filter(({ f }) => f.file && (f.scan === undefined || (!opts.auto && f.scan === null)) && /^image\/(jpeg|png)$/.test(f.file.type));
+      const scans = new Map<string, PageInfo | null>(current.filter((f) => f.scan !== undefined).map((f) => [f.id, f.scan ?? null]));
+      let failedCount = 0;
+      await runPool(targets, SCAN_CONCURRENCY, async ({ f }) => {
+        const body = new FormData(); body.set("file", f.file!);
+        const res = await fetch("/api/intake", { method: "POST", body }); const value = await res.json().catch(() => ({}));
+        if (!res.ok) { failedCount++; scans.set(f.id, null); throw new Error(value.error || "読み取りに失敗しました"); }
+        scans.set(f.id, value as PageInfo);
+      });
+      // 読み取れた写真で、いちばんよく合うクラスを選ぶ
+      const read = current.map((f) => scans.get(f.id) ?? null);
+      const pages = read.map((pg) => pg ?? { examNo: "", number: 0, page: 0, first: 0, last: 0, totalPages: 0, issues: [] });
+      const best = bestClass(read.filter(Boolean) as PageInfo[], ws.classes, ws.students);
+      const useClass = best && best.classId !== classId ? best.classId : classId;
+      const rosterOf = ws.students.filter((st) => st.classId === useClass).sort((x, y) => x.number - y.number);
+      const assigned = assignPages(pages, rosterOf);
       const counts = new Map<string, number>();
-      assigned.forEach(x => { if(x.studentId) counts.set(x.studentId,(counts.get(x.studentId)||0)+1); });
-      setFiles(prev => prev.map((f,i) => ({...f,studentId:assigned[i].studentId,warnings:[...(f.warnings||[]),...assigned[i].issues,
-        ...(pages[i].totalPages>0 && counts.get(assigned[i].studentId)!==pages[i].totalPages ? ["ページ数が印刷の総枚数と一致しません"] : [])]})));
-      setAutoAssign(true); toast("振り分け案を作成しました。生徒・順序・全ページを確認してください");
-    } catch(e) { toast(e instanceof Error ? e.message : "読み取り失敗", "ng"); }
-    finally { setScanBusy(false); }
+      assigned.forEach((x) => { if (x.studentId) counts.set(x.studentId, (counts.get(x.studentId) || 0) + 1); });
+      setFiles((prev) => prev.map((f) => {
+        const i = current.findIndex((c) => c.id === f.id);
+        if (i < 0) return f;   // 読み取り中に追加された写真は次の回に読む
+        const pg = read[i];
+        if (!pg) return { ...f, scan: scans.has(f.id) ? null : f.scan };   // PDF・読めなかった写真は取り込み順のまま
+        const extra = pg.totalPages > 0 && assigned[i].studentId && counts.get(assigned[i].studentId) !== pg.totalPages ? ["ページ数が印刷の総枚数と一致しません"] : [];
+        const keepTeacher = f.assignedBy === "teacher";
+        return {
+          ...f, scan: pg,
+          studentId: keepTeacher ? f.studentId : assigned[i].studentId,
+          assignedBy: keepTeacher ? "teacher" : assigned[i].studentId ? "ai" : "order",
+          warnings: [...(f.warnings || []).filter((w) => !/名簿と照合|一致しません|重複|順序|続きと推定|生徒を選んで/.test(w)), ...assigned[i].issues, ...extra],
+        };
+      }));
+      setAutoAssign(true);
+      if (useClass !== classId) { setClassId(useClass); toast(`答案の受験番号から、クラスを「${classById(useClass)?.label ?? ""}」にしました`); }
+      // 答案に印刷されたテスト名から、テストを選ぶ（先生が選んでいなければ）
+      const titles = read.map((pg) => pg?.title ?? "").filter(Boolean);
+      setPrintedTitles(titles);
+      const hit = matchTest(titles, ws.tests);
+      if (hit && !testId) { setTestId(hit); setTestAuto("matched"); }
+      if (failedCount) toast(`${failedCount} 枚は自動で読み取れませんでした。一覧で生徒を確かめてください`, "warn");
+      else if (!opts.auto) toast("振り分けが終わりました。確認が必要な答案だけを一覧の上に表示します");
+    } catch (e) { toast(e instanceof Error ? e.message : "読み取り失敗", "ng"); }
+    finally { setScanBusy(false); scanning.current = false; }
   };
+  // おまかせモード：答案を入れたら、自動で振り分ける
+  useEffect(() => {
+    if (!omakase || !canScan || scanning.current || preparing || stage !== "select") return;
+    if (files.some((f) => f.file && f.scan === undefined && /^image\/(jpeg|png)$/.test(f.file.type))) scanPages({ auto: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files, omakase, canScan, preparing, stage]);
+
   const onPickFiles = async (fileList: FileList | null, src: Source = "file") => {
     const picked = Array.from(fileList || []);
     if (!picked.length) return;
     // 大きな写真は、採点AIが受け付ける大きさ（1枚5MBまで）に縮小してから保存する
     // HEIC（iPhone の写真）は JPEG に変換する。メモリを使うので1枚ずつ順に処理する
+    // ver6：4枚ずつ並べて準備する（100枚以上でも待ち時間を短く）
     setPreparing(true);
-    const arr: File[] = [];
-    for (const f of picked) arr.push(await prepareImage(f));
+    const arr: File[] = (await runPool(picked, 4, (f) => prepareImage(f))).map((r, i) => (r.ok ? r.value : picked[i]));
     setPreparing(false);
     const heicLeft = arr.filter(isHeic).length;
     if (heicLeft) toast(`${heicLeft} 件の HEIC 写真をこのブラウザで変換できませんでした。保存と採点はできますが、画面に原本を表示できない場合があります`, "warn");
@@ -157,11 +234,17 @@ export default function NewGrading() {
     if (tooBig.length) toast(`${tooBig.length} 件は20MBを超えているため外しました。解像度を下げて撮り直してください`, "warn");
     if (!ok.length) return;
     setSource(src);
+    const checkedList = await runPool(ok, 4, async (f) => ({
+      f,
+      hash: Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await f.arrayBuffer()))).map(x=>x.toString(16).padStart(2,"0")).join(""),
+      warnings: await preflight(f).catch(()=>["画質を確認してください"]),
+    }));
     const prepared: Omit<Picked,"studentId"|"id">[] = [];
-    for(const f of ok) {
-      const hash=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await f.arrayBuffer()))).map(x=>x.toString(16).padStart(2,"0")).join("");
+    for (const r of checkedList) {
+      if (!r.ok) continue;
+      const { f, hash, warnings } = r.value;
       if(files.some(x=>x.hash===hash) || prepared.some(x=>x.hash===hash)) {toast(`${f.name} は同じ画像のため追加しません`,"warn");continue;}
-      prepared.push({name:f.name,kb:Math.max(1,Math.round(f.size/1024)),src,file:f,hash,warnings:await preflight(f).catch(()=>["画質を確認してください"])});
+      prepared.push({name:f.name,kb:Math.max(1,Math.round(f.size/1024)),src,file:f,hash,warnings});
     }
     setChecked(false);addPicked(prepared);
     toast(`${ok.length} 件のファイルを追加しました`);
@@ -180,7 +263,39 @@ export default function NewGrading() {
   const tooManyPages = groups.some((g) => g.length > MAX_PAGES);
 
   const missingAnswers = test?.questions.filter(q => q.type === "graph" ? !q.model.trim() : !q.correct.trim()) ?? [];
+
+  /* ------------------------------------------------ おまかせモード：自動確認 */
+  const omakaseOn = omakase && !demo;
+  const check = useMemo(() => autoCheck(files.map((f) => ({
+    studentId: f.studentId, warnings: f.warnings, assignedBy: f.assignedBy, isPdf: f.file?.type === "application/pdf" || f.src === "pdf",
+  })), MAX_PAGES), [files]);
+  const problemIdx = useMemo(() => new Set(check.problems.map((x) => x.index)), [check]);
+  // 割り当て・ページ順に問題がなければ、確認のチェックを自動で付ける（問題が出たら外す）
+  useEffect(() => {
+    if (!omakaseOn || scanBusy || preparing) return;
+    if (check.ok && !checked) setChecked(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [omakaseOn, check, scanBusy, preparing]);
+  // テストが答案に印刷されたテスト名と一致する（または、この画面で今作ったテスト）なら、正答・配点の確認も自動で付ける
+  const titleMatches = !!test && matchTest(printedTitles, ws.tests) === test.id;
+  useEffect(() => {
+    if (!omakaseOn || !test || missingAnswers.length) return;
+    if ((titleMatches || testAuto === "created") && !testChecked) setTestChecked(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [omakaseOn, test?.id, titleMatches, testAuto, missingAnswers.length]);
   const nextStep = !files.length ? 1 : !checked ? 2 : !test || missingAnswers.length ? 3 : 4;
+  const readyToRun = stage === "select" && files.length > 0 && !preparing && !scanBusy && !!test && !!klass && testChecked
+    && !missingAnswers.length && !files.some((f) => !f.studentId) && (demo || checked) && !tooManyPages;
+  // 準備がそろったら、5秒数えてから自動で採点を始める（「取り消す」で止められる。答案を足したらまた数える）
+  useEffect(() => { setAutoStartOff(false); setCountdown(null); }, [files.length, testId]);
+  useEffect(() => {
+    if (!omakaseOn || !autoStart || autoStartOff || !readyToRun || mode === "local") { if (countdown !== null) setCountdown(null); return; }
+    if (countdown === null) { setCountdown(5); return; }
+    if (countdown <= 0) { setCountdown(null); setAutoStartOff(true); run(); return; }
+    const t = setTimeout(() => setCountdown((c) => (c === null ? null : c - 1)), 1000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [omakaseOn, autoStart, autoStartOff, readyToRun, countdown, mode]);
   const jumpTo = (n: number) => document.getElementById(`grading-step-${n}`)?.scrollIntoView({behavior:"smooth",block:"start"});
 
   /* ------------------------------------------------------------- 実行 */
@@ -217,6 +332,7 @@ export default function NewGrading() {
     if (!demo && !checked) {toast("生徒・ページ順・画質を確認し、確認済みにチェックしてください", "warn");return;}
     if (tooManyPages) { toast(`1人分の答案は${MAX_PAGES}枚までです。一覧で生徒の割り当てを直してください`, "warn"); return; }
 
+    if (mode === "ai") askNotifyPermission();
     setSavedCount(0); setSaveErrors(0); setGradeErrors(0); setAiProgress(null);
     setStartedAt(Date.now()); setElapsed(0); setCurrentWork("答案を保存しています");
     setStage("run"); setStep(0); setLog([]); setCreatedIds([]); setFailed(0);
@@ -248,57 +364,54 @@ export default function NewGrading() {
       timers.current.push(setTimeout(resolve, PIPELINE.length * 1050 + 900));
     });
 
-    const saving = (async () => {
-      const ids: string[] = [];
-      const names: string[] = [];
-      let ng = 0;
-      for (let i = 0; i < groups.length; i++) {
-        const group = groups[i];
-        const f = group[0];
-        try {
-          setCurrentWork(`${who(f.studentId)}：答案画像を保存中`);
-          const id = await ds.saveGrading(buildInput(group, i), group.flatMap((g) => (g.file ? [g.file] : [])));
-          ids.push(id); setSavedCount(ids.length);
-          names.push(who(f.studentId));
-          const what = group.length > 1 ? `${group.length} 枚（${group.map((g) => g.name).join("・")}）` : f.name;
-          if (!grading) addLog("保存", `${who(f.studentId)}：${what} を保存しました（${i + 1}/${groups.length}）`);
-        } catch (e) {
-          ng++; setSaveErrors(ng);
-          addLog("エラー", `${who(f.studentId)}：${friendlyError(e, "保存")}`);
-        }
+    // ver6：1人分ずつ「保存 → AI採点」を流れ作業にし、同時に N 人分ずつ進める（ver5 は全員を保存してから1人ずつ採点）
+    const concurrency = mode === "ai" ? Math.max(1, ai.concurrency ?? 8) : 4;
+    const ids: (string | null)[] = new Array(groups.length).fill(null);
+    let ng = 0, aiNg = 0, aiDone = 0;
+    if (mode === "ai") { setAiProgress({ done: 0, total: groups.length }); addLog("AI採点", `採点方式：${MODE_LABEL[gradingMode]}・${concurrency} 人分ずつ同時に処理します`); }
+    const pipeline = runPool(groups, concurrency, async (group, i) => {
+      const f = group[0];
+      const name = who(f.studentId);
+      let id: string;
+      try {
+        setCurrentWork(`${name}：答案画像を保存中`);
+        id = await ds.saveGrading(buildInput(group, i), group.flatMap((g) => (g.file ? [g.file] : [])));
+        ids[i] = id; setSavedCount((c) => c + 1);
+        const what = group.length > 1 ? `${group.length} 枚（${group.map((g) => g.name).join("・")}）` : f.name;
+        if (!grading) addLog("保存", `${name}：${what} を保存しました`);
+      } catch (e) {
+        ng++; setSaveErrors(ng);
+        addLog("エラー", `${name}：${friendlyError(e, "保存")}`);
+        if (mode === "ai") setAiProgress((p) => (p ? { ...p, total: p.total - 1 } : p));
+        return;
       }
-      return { ids, names, ng };
-    })();
-
-    const [, { ids, names, ng }] = await Promise.all([animation, saving]);
-    await refresh();
-    setCreatedIds(ids);
-
-    // 保存できた答案を、1枚ずつ AI で採点する
-    let aiNg = 0;
-    if (mode === "ai" && ids.length) {
-      setAiProgress({ done: 0, total: ids.length });
-      addLog("AI採点", `採点方式：${MODE_LABEL[gradingMode]}`);
-      for (let i = 0; i < ids.length; i++) {
-        const name = names[i];
-        setCurrentWork(`${name}：${gradingMode === "cascade" ? "Haiku" : "Opus"}で採点中`);
-        addLog("AI採点", `${name}：採点しています…（${i + 1}/${ids.length}）`);
-        const r = await aiGradeSub(ids[i], {
+      if (mode !== "ai") return;
+      setCurrentWork(`${name}：${gradingMode === "cascade" ? "Haiku" : "Opus"}で採点中`);
+      // 混み合い（API の利用上限）のときは、少し待ってから同じ答案をやり直す
+      const r = await withBusyRetry(async () => {
+        const x = await aiGradeSub(id, {
           silent: true,
-          onProgress: (p) => { setCurrentWork(`${name}：${p.next ? STAGE_LABEL[p.next] : STAGE_LABEL[p.stage]}で確認中`); addLog("AI採点", `${name}：${STAGE_LABEL[p.stage]}の結果に確認が必要な点があるため、${p.next ? STAGE_LABEL[p.next] : "次のモデル"}で採点し直します（${(p.reasons ?? []).slice(0, 3).join("／")}${(p.reasons?.length ?? 0) > 3 ? " ほか" : ""}）`); },
+          onProgress: (p) => { addLog("AI採点", `${name}：${STAGE_LABEL[p.stage]}の結果に確認が必要な点があるため、${p.next ? STAGE_LABEL[p.next] : "次のモデル"}で採点し直します（${(p.reasons ?? []).slice(0, 3).join("／")}${(p.reasons?.length ?? 0) > 3 ? " ほか" : ""}）`); },
         });
-        if (r.ok) {
-          const where = r.summary.mode === "cascade" && r.summary.finalStage ? `・${STAGE_LABEL[r.summary.finalStage]}で確定` : "";
-          addLog("AI採点", r.summary.queued ? `${name}：採点予約を受け付けました。結果は採点履歴で確認してください` : r.summary.blank
-            ? `${name}：全問白紙でした`
-            : `${name}：${r.summary.total}点${where}${r.summary.needReview ? `（要確認 ${r.summary.needReview} 問）` : ""}`);
-        } else {
-          aiNg++; setGradeErrors(aiNg);
-          addLog("エラー", `${name}：${r.error}（画像は保存済みです。「採点中」の画面から採点し直せます）`);
-        }
-        setAiProgress({ done: i + 1, total: ids.length });
+        if (!x.ok && /混み合って/.test(x.error)) throw new Error(x.error);
+        return x;
+      }).catch((e) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }));
+      if (r.ok) {
+        const where = r.summary.mode === "cascade" && r.summary.finalStage ? `・${STAGE_LABEL[r.summary.finalStage]}で確定` : "";
+        addLog("AI採点", r.summary.queued ? `${name}：採点予約を受け付けました。結果は採点履歴で確認してください` : r.summary.blank
+          ? `${name}：全問白紙でした`
+          : `${name}：${r.summary.total}点${where}${r.summary.needReview ? `（要確認 ${r.summary.needReview} 問）` : ""}`);
+      } else {
+        aiNg++; setGradeErrors(aiNg);
+        addLog("エラー", `${name}：${r.error}（画像は保存済みです。「採点中」の画面から採点し直せます）`);
       }
-    }
+      aiDone++;
+      setAiProgress((p) => (p ? { ...p, done: aiDone } : p));
+    });
+    await Promise.all([animation, pipeline]);
+    await refresh();
+    setCreatedIds(ids.filter((x): x is string => !!x));
+    notifyDone(mode === "ai" ? `${aiDone - aiNg} 人分のAI採点が終わりました${aiNg ? `（${aiNg} 人分は失敗）` : ""}` : `${groups.length - ng} 人分の答案を保存しました`);
 
     setCurrentWork(ng || aiNg ? "処理終了：失敗した答案は処理ログを確認してください" : "処理が完了しました");
     setFailed(ng);
@@ -306,13 +419,13 @@ export default function NewGrading() {
     setStage("done");
     if (ng) toast(`${ng} 名分を保存できませんでした。処理ログを確認して、もう一度取り込んでください`, "ng");
     else if (aiNg) toast(`${aiNg} 名分をAI採点できませんでした。処理ログを確認してください（画像は保存済みです）`, "ng");
-    else if (mode === "ai") toast(`${ids.length} 枚のAI採点が終わりました。返却前に結果を確認してください`);
-    else toast(grading ? `${ids.length} 枚の採点が完了しました` : `${ids.length} 枚の答案を保存しました。あとで「採点中」の画面からAI採点できます`);
+    else if (mode === "ai") toast(`${aiDone} 人分のAI採点が終わりました。返却前に結果を確認してください`);
+    else toast(grading ? `${groups.length} 人分の採点が完了しました` : `${groups.length} 人分の答案を保存しました。あとで「採点中」の画面からAI採点できます`);
   };
 
   const reset = () => {
     timers.current.forEach(clearTimeout);
-    setTestId(""); setTestChecked(false); setTestSetup(null); setSetupOpen(false); setStage("select"); setFiles([]); setStep(-1); setLog([]); setCreatedIds([]); setFailed(0); setAiProgress(null);
+    setTestId(""); setTestChecked(false); setTestAuto(""); setPrintedTitles([]); setCountdown(null); setAutoStartOff(false); setTestSetup(null); setSetupOpen(false); setStage("select"); setFiles([]); setStep(-1); setLog([]); setCreatedIds([]); setFailed(0); setAiProgress(null);
   };
 
   /* ------------------------------------------------ 前提（テスト・クラス） */
@@ -343,7 +456,12 @@ export default function NewGrading() {
                 <div style={{width:`${gradeErrors/Math.max(1,savedCount)*100}%`,background:T.ng}} />
               </div>
               <p>緑：採点成功　赤：失敗　空白：処理中・待機中</p>
-              <small>人数に基づく進捗です。1人分のAI応答を待つ間は帯が止まります。残り時間の推測は表示しません。</small>
+              {(() => {
+                const done = aiProgress?.done ?? 0, total = aiProgress?.total ?? groups.length;
+                if (!done || done >= total || stage === "done") return <small>{Math.max(1, ai.concurrency ?? 8)} 人分ずつ同時に採点しています。</small>;
+                const left = Math.ceil(((elapsed / done) * (total - done)) / 60);
+                return <small>{Math.max(1, ai.concurrency ?? 8)} 人分ずつ同時に採点しています。これまでの速さから、残りは約 {left} 分の見込みです（目安）。</small>;
+              })()}
             </>}
           </Card>}
           {grading ? (
@@ -380,8 +498,8 @@ export default function NewGrading() {
               {mode === "ai" ? (
                 <>
                   <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.8, marginBottom: 10 }}>
-                    答案画像を学校専用の保管場所（非公開）に保存し、1枚ずつ AI が採点しています。1枚あたり数十秒かかります。
-                    この画面を閉じると、残りの答案は「AI採点待ち」のまま残ります（「採点中」の画面から採点し直せます）。
+                    答案画像を学校専用の保管場所（非公開）に保存しながら、{Math.max(1, ai.concurrency ?? 8)} 人分ずつ同時に AI が採点しています。
+                    ほかの画面に移っても採点は続きます（終わると通知します）。ブラウザのタブを閉じると、残りの答案は「AI採点待ち」のまま残り、「採点中」の画面から再開できます。
                   </div>
                 </>
               ) : (
@@ -461,6 +579,43 @@ export default function NewGrading() {
         <p style={{fontWeight:700,color:T.accent}}>次にすること：{nextStep === 1 ? "答案写真を選んでください" : nextStep === 2 ? "同じ生徒の全ページと順番を確認し、チェックしてください" : nextStep === 3 ? "新しいテストを作成するか、正答・配点がそろった既存テストを選んでください" : "正答・配点を確認し、採点開始ボタンを押してください"}</p>
         <Btn variant="shu" onClick={() => jumpTo(nextStep)}>➜ 手順{nextStep}へ移動する</Btn>
       </Card>
+      {!demo && (
+        <Card style={{ marginBottom: 16, border: `1px solid ${omakaseOn ? T.ok : T.line}` }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", flex: "1 1 280px", cursor: "pointer" }}>
+              <input type="checkbox" checked={omakase} onChange={(e) => setOmakase(e.target.checked)} style={{ marginTop: 4 }} />
+              <span>
+                <b style={{ color: T.text }}>おまかせモード</b>
+                <span style={{ display: "block", fontSize: 12, color: T.textSub, lineHeight: 1.7 }}>
+                  答案を入れると、AI が受験番号・テスト名を読んで生徒・クラス・テストを自動で決め、問題がなければ確認のチェックも自動で付けます。
+                  {ai.enabled ? "" : "（採点AIが設定されていないため、自動振り分けは使えません）"}
+                </span>
+              </span>
+            </label>
+            {omakase && (
+              <label style={{ display: "flex", gap: 8, alignItems: "flex-start", flex: "1 1 220px", cursor: "pointer" }}>
+                <input type="checkbox" checked={autoStart} onChange={(e) => setAutoStart(e.target.checked)} style={{ marginTop: 4 }} />
+                <span style={{ fontSize: 12.5, color: T.text }}>準備がそろったら、5秒後に自動で採点を始める</span>
+              </label>
+            )}
+          </div>
+          {omakaseOn && files.length > 0 && (
+            <div role="status" style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.8 }}>
+              {scanBusy ? <span style={{ color: T.info }}>● AI が答案の受験番号・テスト名を読み取っています…</span>
+                : check.ok ? <span style={{ color: T.ok, fontWeight: 700 }}>✓ 自動確認：{groups.length} 人分の生徒の割り当て・ページ順に問題はありません</span>
+                : <span style={{ color: T.warn, fontWeight: 700 }}>● 確認が必要な答案が {check.problems.length} 枚あります（一覧の上に表示しています）</span>}
+              {test && testAuto === "matched" && <div style={{ color: T.ok }}>✓ 答案に印刷されたテスト名から「{test.name}」を選びました</div>}
+            </div>
+          )}
+          {countdown !== null && (
+            <div role="alert" style={{ marginTop: 10, padding: 10, borderRadius: 10, background: T.accentSoft, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <b style={{ color: T.accent }}>準備がそろいました。{countdown} 秒後に採点を始めます</b>
+              <Btn size="sm" onClick={() => { setAutoStartOff(true); setCountdown(null); }}>取り消す</Btn>
+              <Btn size="sm" variant="shu" onClick={() => { setAutoStartOff(true); setCountdown(null); run(); }}>今すぐ始める</Btn>
+            </div>
+          )}
+        </Card>
+      )}
       <div id="grading-step-1" style={{scrollMarginTop:110}} />
       <Section title="1. 答案の取り込み方法を選ぶ">
         <div style={grid(180)}>
@@ -494,7 +649,7 @@ export default function NewGrading() {
         <div style={{ fontSize: 26, marginBottom: 7 }}>{drag ? "📥" : "🗂"}</div>
         <div style={{ fontSize: 13.5, fontWeight: 700, color: T.text }}>ここに答案画像をドラッグ＆ドロップ</div>
         <div style={{ fontSize: 11.5, color: T.textSub, marginTop: 5, lineHeight: 1.7 }}>
-          JPEG / PNG / HEIC（iPhone の写真）/ PDF に対応。HEIC は自動で JPEG に変換します。1ファイル20MBまで、一度に最大{MAX_FILES}枚まで。
+          JPEG / PNG / HEIC（iPhone の写真）/ PDF に対応。HEIC は自動で JPEG に変換します。1ファイル20MBまで、一度に最大{MAX_FILES}枚まで（100枚以上もまとめて入れられます）。
         </div>
         <div style={{ marginTop: 11, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
           <Btn size="sm" onClick={() => { setSource("file"); inputRef.current?.click(); }}>ファイルを選ぶ</Btn>
@@ -506,7 +661,12 @@ export default function NewGrading() {
       <Section title={`2. 取り込んだ答案（${files.length} / ${MAX_FILES} 枚）`}
         right={files.length ? <Btn size="sm" variant="ghost" onClick={() => setFiles([])}>すべて外す</Btn> : null}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-          {!demo && <Btn disabled={scanBusy || preparing || !files.length} onClick={scanPages}>{scanBusy ? "読み取り中…" : "問題番号・受験番号から自動振り分け（AI使用）"}</Btn>}
+          {!demo && <Btn disabled={scanBusy || preparing || !files.length} onClick={() => scanPages()}>{scanBusy ? "読み取り中…" : "問題番号・受験番号から自動振り分け（AI使用）"}</Btn>}
+          {check.problems.length > 0 && files.length > 1 && (
+            <label style={{ fontSize: 12, color: T.textSub, display: "flex", gap: 6, alignItems: "center" }}>
+              <input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} /> 確認が必要な答案だけ表示（{check.problems.length} 枚）
+            </label>
+          )}
           <label htmlFor="pages-per" style={{ fontSize: 12, fontWeight: 700, color: T.textSub }}>1人分の答案の枚数</label>
           <select id="pages-per" value={pagesPer} onChange={(e) => setPagesPer(Number(e.target.value))}
             style={{ padding: "5px 8px", borderRadius: 8, border: `1px solid ${T.line}`, background: T.panel, color: T.text, font: "inherit", fontSize: 12.5 }}>
@@ -528,8 +688,9 @@ export default function NewGrading() {
               </div>
             )}
             <div style={grid(170, 9)}>
-              {files.map((f) => (
-                <div key={f.id} style={{ border: `1px solid ${f.studentId ? T.line : T.warn}`, borderRadius: 10, padding: 9, background: T.panelAlt, position: "relative" }}>
+              {files.map((f, idx) => ({ f, idx })).filter(({ idx }) => !onlyProblems || problemIdx.has(idx))
+                .sort((x, y) => Number(problemIdx.has(y.idx)) - Number(problemIdx.has(x.idx)) || x.idx - y.idx).map(({ f, idx }) => (
+                <div key={f.id} style={{ border: `${problemIdx.has(idx) ? 2 : 1}px solid ${problemIdx.has(idx) ? T.warn : T.line}`, borderRadius: 10, padding: 9, background: T.panelAlt, position: "relative" }}>
                   <div style={{ height: 114, borderRadius: 7, background: T.bgAlt, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19, marginBottom: 7 }}>
                     <FileThumbnail file={f.file} />
                   </div>
@@ -538,10 +699,12 @@ export default function NewGrading() {
                     {f.kb.toLocaleString()} KB
                     {pageOf(f) && <Badge tone="info">{pageOf(f)!.n} / {pageOf(f)!.of} ページ</Badge>}
                   </div>
+                  {f.assignedBy === "ai" && !problemIdx.has(idx) && <div style={{ color: T.ok, fontSize: 11.5 }}>✓ 受験番号で照合</div>}
+                  {check.problems.find((x) => x.index === idx)?.reasons.filter((r) => !(f.warnings ?? []).includes(r)).map((r, i) => <div key={`p${i}`} style={{ color: T.warn, fontSize: 12 }}>{r}</div>)}
                   {f.warnings?.map((w,i)=><div key={i} style={{color:T.warn,fontSize:12}}>{w}</div>)}
                   <div><Btn size="sm" disabled={files.indexOf(f)===0} onClick={()=>{setChecked(false);setFiles(p=>{const a=[...p],i=a.findIndex(x=>x.id===f.id);[a[i-1],a[i]]=[a[i],a[i-1]];return a})}}>前へ</Btn><Btn size="sm" disabled={files.indexOf(f)===files.length-1} onClick={()=>{setChecked(false);setFiles(p=>{const a=[...p],i=a.findIndex(x=>x.id===f.id);[a[i+1],a[i]]=[a[i],a[i+1]];return a})}}>後へ</Btn></div>
                   <Select value={f.studentId} style={{ padding: "5px 7px", fontSize: 11.5 }}
-                    onChange={(v: string) => {setChecked(false);setFiles((p) => p.map((x) => (x.id === f.id ? { ...x, studentId: v } : x)));}}
+                    onChange={(v: string) => {setChecked(false);setFiles((p) => p.map((x) => (x.id === f.id ? { ...x, studentId: v, assignedBy: v ? "teacher" : "order", warnings: (x.warnings ?? []).filter((w) => !/名簿と照合|生徒を選んで|続きと推定/.test(w)) } : x)));}}
                     options={[{ value: "", label: "生徒を選ぶ" }, ...roster.map((s) => ({ value: s.id, label: who(s.id) }))]} />
                   <button onClick={() => {setChecked(false);setFiles((p) => p.filter((x) => x.id !== f.id));}} aria-label="この答案を外す"
                     style={{ position: "absolute", top: 5, insetInlineEnd: 5, border: "none", background: "transparent", color: T.textFaint, cursor: "pointer", fontSize: 13 }}>✕</button>
@@ -576,14 +739,14 @@ export default function NewGrading() {
           {!checked && <p>先に上の「生徒・ページ順・不足や見切れがないことを確認しました」にチェックしてください。</p>}
         </Card>
         {testSetup && <NewTestForm open={setupOpen} initialFiles={testSetup.files} draftKey={testSetup.key}
-          onClose={() => setSetupOpen(false)} onCreated={id => { setTestId(id); setTestChecked(false); setTestSetup(null); }} />}
+          onClose={() => setSetupOpen(false)} onCreated={id => { setTestId(id); setTestChecked(false); setTestAuto("created"); setTestSetup(null); }} />}
       </Section>
       <div id="grading-step-4" style={{scrollMarginTop:110}} />
       <Section title="4. テストを確認して採点する">
         <Card>
           <div style={grid(220, 14)}>
             <Field label="対象のテスト">
-              <Select value={testId} onChange={id => { setTestId(id); setTestChecked(false); }}
+              <Select value={testId} onChange={id => { setTestId(id); setTestChecked(false); setTestAuto(""); }}
                 options={[{ value: "", label: "今回のテストを選択（自動選択しません）" }, ...activeTests.map((t) => ({ value: t.id, label: `${t.subject}／${t.name}（${t.questions.length}問・${t.maxScore}点）` }))]} />
             </Field>
             <Field label="対象クラス" hint="答案は出席番号の順に割り当てます。違う場合は上の一覧で直せます。">
@@ -602,6 +765,7 @@ export default function NewGrading() {
               {test.questions.map(q => <p key={q.id}>{q.label || `問${q.no}`}：{q.correct || q.model || "【未入力：採点できません】"} ／ {q.points}点</p>)}
             </details>
             <label><input type="checkbox" disabled={missingAnswers.length > 0} checked={testChecked} onChange={e => setTestChecked(e.target.checked)} /> 今回の答案と、テスト名・設問・正答・配点が一致しています</label>
+            {omakaseOn && testChecked && (titleMatches || testAuto === "created") && <div style={{ fontSize: 11.5, color: T.ok }}>{testAuto === "created" ? "✓ この画面で作成したテストのため、自動で確認済みにしました" : "✓ 答案に印刷されたテスト名と一致したため、自動で確認済みにしました"}</div>}
           </div>}
           {demo ? (
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 4 }}>
@@ -619,7 +783,7 @@ export default function NewGrading() {
               <div style={{ fontSize: 12.5, fontWeight: 700, color: T.info, marginBottom: 4 }}>AI（Claude）が答案を読み取って採点します</div>
               <div style={{ fontSize: 12, color: T.text, lineHeight: 1.8 }}>
                 答案画像・正答・配点・採点基準をもとに、設問ごとに判定・得点・赤ペンコメントを付けます。
-                1枚あたり数十秒かかります。結果は下書きなので、返却前に「要確認一覧」を確認してください。
+                複数の答案を同時に採点するので、40人分でも数分で終わります。結果は下書きなので、返却前に「要確認一覧」を確認してください。
               </div>
               <div style={{ marginTop: 10 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 6 }}>採点方式</div>

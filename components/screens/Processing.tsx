@@ -9,6 +9,8 @@ import { PIPELINE, SOURCES } from "@/lib/grading/engine";
 import { useUI } from "@/components/ui-context";
 import { Badge, Bar, Btn, Card, Empty } from "@/components/ui";
 import { GradingModeSelect } from "@/components/GradingModePicker";
+import { runPool, withBusyRetry } from "@/lib/workflow/pool";
+import { askNotifyPermission, notifyDone } from "@/lib/notify";
 
 export default function Processing() {
   const { T, go, subs, testById, who, refresh, ds, ai, aiGradeSub, toast } = useUI();
@@ -23,16 +25,27 @@ export default function Processing() {
     return r.ok;
   };
 
+  // ver6：同時に N 枚ずつ採点する（設定画面の「AIエンジン」の「同時に採点する答案の数」）。混み合ったら少し待ってやり直す
   const gradeAll = async () => {
     const targets = list.filter((s) => s.imagePaths.length && !running.has(s.id)).map((s) => s.id);
     if (!targets.length) return;
-    let ng = 0;
+    let ng = 0, done = 0;
+    askNotifyPermission();
     setBulk({ done: 0, total: targets.length });
-    for (let i = 0; i < targets.length; i++) {
-      if (!(await gradeOne(targets[i], true))) ng++;
-      setBulk({ done: i + 1, total: targets.length });
-    }
+    await runPool(targets, Math.max(1, ai.concurrency ?? 8), async (id) => {
+      const ok = await withBusyRetry(async () => {
+        setRunning((p) => new Set(p).add(id));
+        const r = await aiGradeSub(id, { silent: true });
+        setRunning((p) => { const n = new Set(p); n.delete(id); return n; });
+        if (!r.ok && /混み合って/.test(r.error)) throw new Error(r.error);
+        return r.ok;
+      }).catch(() => false);
+      if (!ok) ng++;
+      done++;
+      setBulk({ done, total: targets.length });
+    });
     setBulk(null);
+    notifyDone(`${targets.length - ng} 枚のAI採点が終わりました${ng ? `（${ng} 枚は失敗）` : ""}`);
     if (ng) toast(`${targets.length - ng} 枚の採点・予約を受け付け、${ng} 枚は採点できませんでした。1枚ずつ「AIで採点する」を押すと理由が表示されます`, "ng");
     else toast(`${targets.length} 枚の採点・予約を受け付けました。採点履歴で状態を確認してください`);
   };
@@ -50,7 +63,7 @@ export default function Processing() {
             {ds.mode === "demo"
               ? "デモでは採点中の答案をそのまま表示しています。"
               : ai.enabled
-                ? "「AIで採点する」を押すと、答案画像・正答・配点・採点基準をもとに AI が採点します（1枚あたり数十秒）。"
+                ? `「AIで採点する」を押すと、答案画像・正答・配点・採点基準をもとに AI が採点します。「まとめてAI採点」は ${Math.max(1, ai.concurrency ?? 8)} 枚ずつ同時に採点します。`
                 : "採点AIが設定されていません。サーバーに ANTHROPIC_API_KEY を設定すると、ここから採点できます。"}
             {bulk && <div style={{ marginTop: 6 }}><Bar value={bulk.done} max={bulk.total} tone="accent" height={6} label={`まとめて採点中 ${bulk.done} / ${bulk.total} 枚`} /></div>}
           </div>
