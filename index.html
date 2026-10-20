@@ -52,6 +52,8 @@ color:#666;
 
 <h1>📘 小学生テスト採点AI</h1>
 
+<p id="user"></p>
+
 <div class="card">
 
 <input type="file" id="imageInput" />
@@ -68,6 +70,29 @@ color:#666;
 
 <script>
 
+// 未ログインならログイン画面へ移動する
+fetch("/api/auth/me").then(async (response)=>{
+
+if(!response.ok){
+location.href = "/login.html";
+return;
+}
+
+const data = await response.json();
+
+document.getElementById("user").innerHTML =
+`${data.username} さん <button onclick="logout()">ログアウト</button>`;
+
+});
+
+async function logout(){
+
+await fetch("/api/auth/logout",{ method:"POST" });
+
+location.href = "/login.html";
+
+}
+
 async function gradeTest(){
 
 const result = document.getElementById("result");
@@ -80,6 +105,11 @@ try{
 const response = await fetch("/api/grade",{
 method:"POST"
 });
+
+if(response.status === 401){
+location.href = "/login.html";
+return;
+}
 
 const data = await response.json();
 

@@ -1,4 +1,11 @@
+import { getSessionUser } from "../lib/session.js";
+
 export default async function handler(req, res) {
+
+// ログインしていない人は採点APIを使えない
+if (!getSessionUser(req)) {
+return res.status(401).json({ error: "ログインしてください" });
+}
 
 const response = await fetch(
 "https://api.openai.com/v1/chat/completions",

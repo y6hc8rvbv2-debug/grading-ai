@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+<title>ログイン | 小学生テスト採点AI</title>
+
+<style>
+body{
+font-family:sans-serif;
+background:#f5f7fb;
+padding:40px;
+max-width:700px;
+margin:auto;
+}
+
+.card{
+background:white;
+padding:24px;
+border-radius:16px;
+box-shadow:0 4px 20px rgba(0,0,0,0.08);
+margin-bottom:24px;
+}
+
+input{
+font-size:16px;
+padding:10px;
+border:1px solid #ccc;
+border-radius:8px;
+width:100%;
+box-sizing:border-box;
+margin-bottom:12px;
+}
+
+button{
+background:#4f46e5;
+color:white;
+border:none;
+padding:12px 24px;
+border-radius:12px;
+cursor:pointer;
+font-size:16px;
+}
+
+.note{
+color:#666;
+font-size:14px;
+}
+
+.message{
+margin-top:16px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>👁️ 虹彩認証でログイン</h1>
+
+<div class="card">
+
+<h2>ログイン</h2>
+
+<input id="loginName" placeholder="ユーザー名" autocomplete="username webauthn" />
+
+<button onclick="login()">
+目でログインする
+</button>
+
+<p class="note">
+端末の虹彩センサー（Windows Hello など）が起動します。
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>はじめての登録</h2>
+
+<input id="registerName" placeholder="ユーザー名（英数字3〜32文字）" />
+<input id="registrationCode" placeholder="登録コード" type="password" />
+
+<button onclick="register()">
+虹彩を登録する
+</button>
+
+<p class="note">
+虹彩のデータは端末の中だけに保存され、サーバーには送られません。
+</p>
+
+</div>
+
+<div class="message" id="message"></div>
+
+<script src="https://unpkg.com/@simplewebauthn/browser@13.2.2/dist/bundle/index.umd.min.js"></script>
+
+<script>
+
+const { startRegistration, startAuthentication, browserSupportsWebAuthn } = SimpleWebAuthnBrowser;
+
+const message = document.getElementById("message");
+
+if(!browserSupportsWebAuthn()){
+message.innerHTML = "このブラウザは生体認証ログインに対応していません";
+}
+
+async function postJSON(url, body){
+
+const response = await fetch(url,{
+method:"POST",
+headers:{ "Content-Type":"application/json" },
+body:JSON.stringify(body)
+});
+
+const data = await response.json();
+
+if(!response.ok){
+throw new Error(data.error || "エラーが発生しました");
+}
+
+return data;
+
+}
+
+async function register(){
+
+message.innerHTML = "端末のセンサーを見てください...";
+
+try{
+
+const optionsJSON = await postJSON("/api/auth/register-options",{
+username:document.getElementById("registerName").value,
+registrationCode:document.getElementById("registrationCode").value
+});
+
+const credential = await startRegistration({ optionsJSON });
+
+await postJSON("/api/auth/register-verify", credential);
+
+location.href = "/";
+
+}catch(error){
+
+message.innerHTML = error.name === "NotAllowedError"
+? "キャンセルされたか、時間切れになりました"
+: error.message;
+
+}
+
+}
+
+async function login(){
+
+message.innerHTML = "端末のセンサーを見てください...";
+
+try{
+
+const optionsJSON = await postJSON("/api/auth/login-options",{
+username:document.getElementById("loginName").value
+});
+
+const credential = await startAuthentication({ optionsJSON });
+
+await postJSON("/api/auth/login-verify", credential);
+
+location.href = "/";
+
+}catch(error){
+
+message.innerHTML = error.name === "NotAllowedError"
+? "キャンセルされたか、時間切れになりました"
+: error.message;
+
+}
+
+}
+
+</script>
+
+</body>
+</html>
