@@ -1,4 +1,5 @@
 -- DB の状態の指紋（読み取りだけ）：public の表・ビュー・関数・ポリシー・トリガー・列の数と名前。
+-- 名前を変えない変更（関数の中身・列の既定値。例 0020）も見分けるため、その2つは md5 で持つ（2026-10-20 追加）
 -- scripts/verify-db/apply.mjs が、各マイグレーションの適用前後に supabase/runbook/verify-expected.json と比べる。
 -- 1つの JSON を返す式（select を付けずに使う）
 json_build_object(
@@ -16,5 +17,11 @@ json_build_object(
   'columns', (select count(*) from information_schema.columns c join pg_class k on k.relname = c.table_name and k.relnamespace = 'public'::regnamespace and k.relkind in ('r', 'p')
               where c.table_schema = 'public'),
   'rls_off', (select coalesce(json_agg(c.relname order by c.relname), '[]') from pg_class c
-              where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p') and not c.relrowsecurity)
+              where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p') and not c.relrowsecurity),
+  'function_bodies', (select md5(coalesce(string_agg(p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' || p.prosrc, '|' order by p.proname, pg_get_function_identity_arguments(p.oid)), '')) from pg_proc p
+              where p.pronamespace = 'public'::regnamespace
+               and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')),
+  'column_defaults', (select md5(coalesce(string_agg(c.table_name || '.' || c.column_name || '=' || c.column_default, '|' order by c.table_name, c.column_name), ''))
+              from information_schema.columns c join pg_class k on k.relname = c.table_name and k.relnamespace = 'public'::regnamespace and k.relkind in ('r', 'p')
+              where c.table_schema = 'public' and c.column_default is not null)
 )

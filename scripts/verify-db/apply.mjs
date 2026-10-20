@@ -27,6 +27,12 @@ const ROOT = new URL("../../", import.meta.url).pathname;
 // 別のフォルダのマイグレーションは、手元のテスト（VERIFY_DB_TEST_URL）のときだけ使える（途中のエラーを再現するため）
 const MIG = process.env.VERIFY_DB_TEST_URL && process.env.VERIFY_DB_MIGRATIONS ? process.env.VERIFY_DB_MIGRATIONS.replace(/\/?$/, "/") : ROOT + "supabase/migrations/";
 const EXPECTED = JSON.parse(readFileSync(ROOT + "supabase/runbook/verify-expected.json", "utf8"));
+// 続く番号の指紋が同じだと、どこまで適用済みか見分けられない（あとの番号を適用済みと誤って飛ばす）。そのときは何もせずに止める
+{
+  const ks = Object.keys(EXPECTED).sort();
+  const same = ks.slice(1).filter((k, i) => JSON.stringify(EXPECTED[k]) === JSON.stringify(EXPECTED[ks[i]]));
+  if (same.length) { console.log(`✗ 停止：${same.join(", ")} の適用後の状態が直前の番号と同じで、適用済みかどうか見分けられません（fingerprint.sql で見分けられるようにしてください）`); process.exit(1); }
+}
 const ACL_EXPECTED = readFileSync(ROOT + "supabase/runbook/acl-expected.txt", "utf8").trim();
 const ACL_SQL = readFileSync(ROOT + "supabase/runbook/acl-snapshot.sql", "utf8");
 

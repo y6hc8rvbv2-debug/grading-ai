@@ -56,6 +56,13 @@ out=$(run --apply --to latest --confirm-ref cpfhsxbmzoyrlkynveqd) || { echo "$ou
 echo "$out" | grep -q "完了：0016・.*$last を適用" || { echo "$out"; fail "--to latest で $last まで適用していない"; }
 out=$(run --apply --to latest --confirm-ref cpfhsxbmzoyrlkynveqd); echo "$out" | grep -q "適用するファイルはありません" || { echo "$out"; fail "--to latest の2回目に何かを適用した"; }
 echo "✓ --to latest：0016〜$last を番号順に適用し、2回目は何もしない（自動適用と同じ）"
+# 2d. 名前を変えない変更（0020 は関数の中身と列の既定値だけを変える）：0019 まで適用済みの DB を「0020 まで適用済み」と誤らず、0020 を適用する
+#     （以前の指紋は名前だけを見ていたため、0019 の DB を 0020 済みと判定して何も適用しなかった：2026-10-20 の検証用 DB で発生）
+fresh; apply_until 0019
+out=$(run --check); echo "$out" | grep -q "0019 まで適用済みと一致" || { echo "$out"; fail "0019 の DB を 0019 と判定しない"; }
+out=$(run --apply --to latest --confirm-ref cpfhsxbmzoyrlkynveqd) || { echo "$out"; fail "0019 の DB に 0020 を適用できない"; }
+echo "$out" | grep -q "完了：0020 を適用" || { echo "$out"; fail "0019 の DB に 0020 を適用していない"; }
+echo "✓ 名前を変えない変更（0020）も見分け、0019 の DB に 0020 を適用する"
 # 3. 状態が期待と違う DB（0007 の後に余分な表がある）：何も適用せずに止まる
 fresh; apply_until 0007; "${PSQL[@]}" -c "create table public.extra_table (id int)" >/dev/null
 before=$(fp); out=$(run --apply --to 0014 --confirm-ref cpfhsxbmzoyrlkynveqd || true)
