@@ -7,6 +7,20 @@
 
 ---
 
+## 作業の進め方（自動プレビュー。2026-10-20 ユーザーの決定＝B方式。`docs/AUTO-PREVIEW.md`）
+
+ユーザーの作業は「Preview の URL を見て手直しを頼む」だけにする。変更を push したら、毎回つぎを行ってから報告する。
+1. 手元の自動テスト → push（ブランチ claude/**）
+2. GitHub Actions の `checks`（単体・DB）と `verify-db`（新しいマイグレーションを検証用 saiten-verify に自動適用。`scripts/verify-db/apply.mjs --to latest`）の結果を確かめる
+3. Vercel の Preview の URL を GitHub の Deployments（コミットの statuses / deployments）から読み、`npm run preview:check -- <URL> --shots <scratchpad>` で確かめる
+   （`VERCEL_AUTOMATION_BYPASS_SECRET` で Deployment Protection を通る。`PREVIEW_TEACHER_EMAIL`・`PREVIEW_TEACHER_PASSWORD` があれば `--email "$PREVIEW_TEACHER_EMAIL" --password-env PREVIEW_TEACHER_PASSWORD` でログインと準備状況も）
+4. 「確認済みの URL」・確かめたこと・確かめられなかったことをユーザーに報告する
+- 新しいマイグレーションを足したら `bash supabase/tests/verify_db_test.sh --write-expected`（root では `su postgres -c`）で `supabase/runbook/verify-expected.json` を更新してから push（無いと verify-db は止まる）
+- 自動にしないもの：本番の DB・本番のサイト・本物の AI の大量呼び出し・本物の決済
+- ユーザーの1回だけの設定（GitHub Secret `SUPABASE_ACCESS_TOKEN`・Vercel の Preview 環境変数と Protection Bypass・この環境の `*.vercel.app` 許可）が済むまでは、2・3 の一部ができない。できなかったことはそのまま報告する
+
+---
+
 ## 現在地
 
 ### ver6（2026-10-19。ブランチ claude/test-scoring-v6-app-ii46ie）

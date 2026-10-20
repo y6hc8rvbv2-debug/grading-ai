@@ -21,7 +21,8 @@
     "mobile:open:ios": "cap open ios",
     "mobile:open:android": "cap open android",
     "test:billing:db": "node tests/db/billing.mjs",
-    "billing:audit": "node --import tsx scripts/billing/audit.mjs"
+    "billing:audit": "node --import tsx scripts/billing/audit.mjs",
+    "preview:check": "NODE_USE_ENV_PROXY=1 node scripts/preview/check.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

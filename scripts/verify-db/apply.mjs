@@ -3,7 +3,7 @@
 //   node scripts/verify-db/apply.mjs --check
 //       読み取りだけ。接続先・現在の状態（どの番号まで適用済みか）・CLI の移行履歴を表示する
 //   node scripts/verify-db/apply.mjs --apply --to 0014 --confirm-ref cpfhsxbmzoyrlkynveqd
-//       次の番号から --to まで、番号順に1ファイルずつ適用する
+//       次の番号から --to まで、番号順に1ファイルずつ適用する（--to latest は最後の番号まで。GitHub Actions の自動適用が使う）
 //
 // 接続（どちらか）
 //   既定：Supabase Management API（HTTPS）。SQL Editor と同じ経路でファイルの中身をそのまま送る
@@ -33,7 +33,8 @@ const ACL_SQL = readFileSync(ROOT + "supabase/runbook/acl-snapshot.sql", "utf8")
 const args = process.argv.slice(2);
 const arg = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
 const APPLY = args.includes("--apply");
-const TO = arg("--to") ?? "0014";
+const TO_ARG = arg("--to") ?? "0014";
+const TO = TO_ARG === "latest" ? readdirSync(MIG).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort().at(-1).slice(0, 4) : TO_ARG;
 const TEST_URL = process.env.VERIFY_DB_TEST_URL ?? "";
 const TOKEN = process.env.SUPABASE_ACCESS_TOKEN ?? "";
 
@@ -116,6 +117,8 @@ async function main() {
   if (!APPLY) { console.log(`\n読み取りだけで終わりました。次に適用するファイル：${todo.join(", ") || "なし"}`); return; }
   if (arg("--confirm-ref") !== TARGET_REF) stop(`適用するには --confirm-ref ${TARGET_REF} を付けてください`);
   if (!todo.length) { console.log("適用するファイルはありません"); return; }
+  const noExp = todo.filter((f) => !EXPECTED[f.slice(0, 4)]);
+  if (noExp.length) stop(`${noExp.join(", ")} の適用後の期待の状態が verify-expected.json にありません（開発側で bash supabase/tests/verify_db_test.sh --write-expected を実行してから）`);
 
   for (const f of todo) {
     const n = f.slice(0, 4);

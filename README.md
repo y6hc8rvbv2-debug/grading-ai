@@ -9,6 +9,7 @@
 | `docs/V6-SETUP.md` | **先生（管理者）がする設定**（Supabase で SQL を1つ実行・環境変数の確認）と、最低限の確認 |
 | `docs/V6-VERIFICATION.md` | 開発側で行った検証の結果と、まだ確かめられていないこと |
 | `docs/screenshots/ver6/` | ver6 の主な画面の写真 |
+| `docs/AUTO-PREVIEW.md` | **自動プレビューのしくみ**（push → 自動テスト・検証用DBへ自動適用・Preview の URL）と、最初に1回だけする設定 |
 | `CLAUDE.md` | プロジェクトの現在地と次のタスク（Claude Code が自動で読む） |
 | `docs/SUPABASE-SETUP.md`・`docs/DB-RUNBOOK.md` | Supabase の接続と DB の移行の手順 |
 

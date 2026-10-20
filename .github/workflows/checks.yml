@@ -1,0 +1,28 @@
+# push のたびに、手早く終わる自動テストを動かす（AI・決済・本物の DB には接続しない）
+name: checks
+
+on:
+  push:
+    branches: ["claude/**", "main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 単体テスト
+        run: npm run test:unit
+      - name: DB（全マイグレーション＋RLS。PGlite）
+        run: npm run test:db:memory
+      - name: DB（料金・前払い）
+        run: npm run test:billing:db

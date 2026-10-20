@@ -1,0 +1,38 @@
+# 検証用 Supabase（saiten-verify）に、新しいマイグレーションを自動で適用する（本番には使えない）。
+#   - claude/** のブランチに supabase/migrations/ の変更を push したとき・手動（Actions → verify-db → Run workflow）で動く
+#   - 中身は scripts/verify-db/apply.mjs（接続先は saiten-verify だけ・適用の前後で DB の状態を照合・食い違えば何もせず止まる）
+#   - GitHub の Secret「SUPABASE_ACCESS_TOKEN」が無ければ、何もせずに成功で終わる（設定は docs/AUTO-PREVIEW.md）
+name: verify-db
+
+on:
+  push:
+    branches: ["claude/**"]
+    paths: ["supabase/migrations/**", "supabase/runbook/**", "scripts/verify-db/**"]
+  workflow_dispatch:
+
+# 同時に2つ走らせない（あとから来たものは前の完了を待つ）
+concurrency:
+  group: verify-db
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 検証用 DB に適用（最新の番号まで）
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "::notice::Secret SUPABASE_ACCESS_TOKEN が無いので、検証用 DB への適用を省きました（docs/AUTO-PREVIEW.md）"
+            exit 0
+          fi
+          node scripts/verify-db/apply.mjs --apply --to latest --confirm-ref cpfhsxbmzoyrlkynveqd

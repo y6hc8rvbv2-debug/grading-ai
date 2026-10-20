@@ -50,6 +50,12 @@ echo "✓ 2回目の実行は何もしない"
 out=$(run --apply --to 0015 --confirm-ref cpfhsxbmzoyrlkynveqd) || { echo "$out"; fail "0015 の適用に失敗"; }
 echo "$out" | grep -q "完了：0015" || { echo "$out"; fail "0015 だけを適用した表示が無い"; }
 echo "✓ 0014 まで適用済みの DB に、0015 だけを足し、前後の状態が期待と一致"
+# 2c. GitHub Actions の自動適用と同じ --to latest：0015 まで適用済みの DB に、残り（0016 以降）をすべて足す → 2回目は何もしない
+last=$(ls supabase/migrations/[0-9][0-9][0-9][0-9]_*.sql | tail -1 | xargs basename | cut -c1-4)
+out=$(run --apply --to latest --confirm-ref cpfhsxbmzoyrlkynveqd) || { echo "$out"; fail "--to latest の適用に失敗"; }
+echo "$out" | grep -q "完了：0016・.*$last を適用" || { echo "$out"; fail "--to latest で $last まで適用していない"; }
+out=$(run --apply --to latest --confirm-ref cpfhsxbmzoyrlkynveqd); echo "$out" | grep -q "適用するファイルはありません" || { echo "$out"; fail "--to latest の2回目に何かを適用した"; }
+echo "✓ --to latest：0016〜$last を番号順に適用し、2回目は何もしない（自動適用と同じ）"
 # 3. 状態が期待と違う DB（0007 の後に余分な表がある）：何も適用せずに止まる
 fresh; apply_until 0007; "${PSQL[@]}" -c "create table public.extra_table (id int)" >/dev/null
 before=$(fp); out=$(run --apply --to 0014 --confirm-ref cpfhsxbmzoyrlkynveqd || true)
