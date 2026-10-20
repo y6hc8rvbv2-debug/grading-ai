@@ -3,6 +3,8 @@
 //   node scripts/verify-db/apply.mjs --check
 //       読み取りだけ。接続先・現在の状態（どの番号まで適用済みか）・CLI の移行履歴を表示する
 //   node scripts/verify-db/apply.mjs --apply --to 0014 --confirm-ref cpfhsxbmzoyrlkynveqd
+//   node scripts/verify-db/apply.mjs --apply --to latest --confirm-ref cpfhsxbmzoyrlkynveqd --at 0019
+//       指紋だけでは「いまの番号」が決まらないとき（記録が無い DB）に、起点の番号を人が指定する（指紋と合わなければ止まる）
 //       次の番号から --to まで、番号順に1ファイルずつ適用する（--to latest は最後の番号まで。GitHub Actions の自動適用が使う）
 //
 // 接続（どちらか）
@@ -17,6 +19,9 @@
 //   - 各ファイルは中身をそのまま1回で送る（ファイルの begin;/commit; で1つのトランザクション）。エラーなら止まる
 //   - 適用の後、期待した状態と一致しなければ止まる。0014 の後は、Data API の権限が本番と同じか（acl-expected.txt）も確かめる
 //   - CLI の移行履歴（supabase_migrations.schema_migrations）は読むだけで、書き換えない（db push は使わない）
+//   - 適用した番号を、検証用 DB の verify_ledger.applied に記録する（public の外。アプリ・指紋には関係しない）。
+//     指紋は名前の一覧なので、名前を変えないマイグレーション（例 0020）は前の番号と同じ指紋になる。
+//     そのときは記録で決め、記録が無ければ止まる（手動で --at <いまの番号> を指定したときだけ、その番号を起点として記録して進む）
 import { readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
@@ -27,12 +32,6 @@ const ROOT = new URL("../../", import.meta.url).pathname;
 // 別のフォルダのマイグレーションは、手元のテスト（VERIFY_DB_TEST_URL）のときだけ使える（途中のエラーを再現するため）
 const MIG = process.env.VERIFY_DB_TEST_URL && process.env.VERIFY_DB_MIGRATIONS ? process.env.VERIFY_DB_MIGRATIONS.replace(/\/?$/, "/") : ROOT + "supabase/migrations/";
 const EXPECTED = JSON.parse(readFileSync(ROOT + "supabase/runbook/verify-expected.json", "utf8"));
-// 続く番号の指紋が同じだと、どこまで適用済みか見分けられない（あとの番号を適用済みと誤って飛ばす）。そのときは何もせずに止める
-{
-  const ks = Object.keys(EXPECTED).sort();
-  const same = ks.slice(1).filter((k, i) => JSON.stringify(EXPECTED[k]) === JSON.stringify(EXPECTED[ks[i]]));
-  if (same.length) { console.log(`✗ 停止：${same.join(", ")} の適用後の状態が直前の番号と同じで、適用済みかどうか見分けられません（fingerprint.sql で見分けられるようにしてください）`); process.exit(1); }
-}
 const ACL_EXPECTED = readFileSync(ROOT + "supabase/runbook/acl-expected.txt", "utf8").trim();
 const ACL_SQL = readFileSync(ROOT + "supabase/runbook/acl-snapshot.sql", "utf8");
 
@@ -89,11 +88,36 @@ function diff(actual, expected) {
   }
   return out;
 }
-/** 期待する指紋のうち、いまの DB と一致する最後の番号（無ければ null） */
+// ---------------------------------------------------------------- 適用の記録（verify_ledger.applied。検証用 DB だけ）
+const LEDGER_DDL = `create schema if not exists verify_ledger;
+revoke all on schema verify_ledger from public;
+create table if not exists verify_ledger.applied (version text primary key, applied_at timestamptz not null default now(), how text not null);`;
+async function ledgerMax() {
+  const has = await readJson(`to_json(to_regclass('verify_ledger.applied') is not null)`);
+  return has ? await readJson(`(select to_json(max(version)) from verify_ledger.applied)`) : null;
+}
+async function ledgerAdd(version, how) {
+  await runSql(`${LEDGER_DDL}\ninsert into verify_ledger.applied(version, how) values ('${version}', '${how}') on conflict (version) do nothing;`);
+}
+
+/** いまの番号：指紋が一致する番号のうち、記録（無ければ --at）で1つに決める。決まらなければ止める */
 async function currentStep() {
   const fp = await readJson(FINGERPRINT);
-  const hit = Object.keys(EXPECTED).filter((n) => diff(fp, EXPECTED[n]).length === 0).at(-1) ?? null;
-  return { fp, hit };
+  const cands = Object.keys(EXPECTED).filter((n) => diff(fp, EXPECTED[n]).length === 0);
+  if (!cands.length) return { fp, hit: null, cands };
+  const led = await ledgerMax();
+  if (led) {
+    if (!cands.includes(led)) stop(`適用の記録（${led}）と DB の状態（${cands.join("・")} の適用後と一致）が合いません`);
+    return { fp, hit: led, cands, how: "記録" };
+  }
+  const at = arg("--at");
+  if (at) {
+    if (!cands.includes(at)) stop(`--at ${at} は DB の状態と合いません（一致するのは ${cands.join("・")} の適用後）`);
+    return { fp, hit: at, cands, how: "--at", record: true };
+  }
+  if (cands.length > 1) stop(`DB の状態が ${cands.join("・")} の適用後と同じで、どこまで適用済みか決められません（適用の記録がありません）。` +
+    `いまの番号を確かめて --at <番号> を付けて実行してください（GitHub Actions：verify-db → Run workflow の at）`);
+  return { fp, hit: cands[0], cands, how: "指紋", record: true };
 }
 
 // ---------------------------------------------------------------- 本体
@@ -114,9 +138,11 @@ async function main() {
   const hist = hasHist ? await readJson(`(select coalesce(json_agg(version order by version), '[]') from supabase_migrations.schema_migrations)`) : null;
   console.log(`  CLI の移行履歴：${hist === null ? "表が無い（SQL Editor で適用したため。db push は使わない）" : JSON.stringify(hist)}（書き換えません）`);
 
-  let { fp, hit } = await currentStep();
+  let { fp, hit, how, record } = await currentStep();
   if (!hit) stop(`DB の状態が、どの番号の適用後とも一致しません。\n  直前と思われる 0007 との違い：${diff(fp, EXPECTED["0007"]).join(" / ") || "なし"}`);
-  console.log(`✓ 現在の状態：${hit} まで適用済みと一致（表 ${fp.tables.length}・ビュー ${fp.views.length}・関数 ${fp.functions.length}・RLS 無効の表 ${fp.rls_off.length}）`);
+  console.log(`✓ 現在の状態：${hit} まで適用済みと一致（決め方：${how}・表 ${fp.tables.length}・ビュー ${fp.views.length}・関数 ${fp.functions.length}・RLS 無効の表 ${fp.rls_off.length}）`);
+  // 起点を記録する（読み取りだけの --check では書かない）
+  if (APPLY && record && arg("--confirm-ref") === TARGET_REF) await ledgerAdd(hit, how);
 
   const files = readdirSync(MIG).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
   const todo = files.filter((f) => f.slice(0, 4) > hit && f.slice(0, 4) <= TO);
@@ -137,6 +163,7 @@ async function main() {
     if (!/^begin;$/m.test(sql) || !/^commit;$/m.test(sql)) stop(`${f} に begin;/commit; がありません（1つのトランザクションで送れない）`);
     console.log(`\n== ${f} を適用`);
     try { await runSql(sql); } catch (e) { stop(`${f} の実行でエラー（ファイルのトランザクションにより、このファイルの変更は残りません）：${hide(e.stderr ?? e.message).slice(0, 800)}`); }
+    await ledgerAdd(n, "適用");
     // 適用の後：期待した状態と一致すること
     const after = await readJson(FINGERPRINT);
     const d1 = diff(after, EXPECTED[n]);

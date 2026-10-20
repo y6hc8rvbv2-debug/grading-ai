@@ -15,6 +15,7 @@
 3. Vercel の Preview はブランチの固定 URL https://grading-ai-git-claude-test-sc-b3ad9f-y6hc8rvbv2-debugs-projects.vercel.app で確かめる（鍵はこの環境の Network secrets が自動で付ける。2026-10-20 確認済み。個別 URL には付かないことがある）。固定 URL 以外は GitHub の Deployments から読み、`npm run preview:check -- <URL> --shots <scratchpad>` で確かめる
    （`VERCEL_AUTOMATION_BYPASS_SECRET` で Deployment Protection を通る。`PREVIEW_TEACHER_EMAIL`・`PREVIEW_TEACHER_PASSWORD` があれば `--email "$PREVIEW_TEACHER_EMAIL" --password-env PREVIEW_TEACHER_PASSWORD` でログインと準備状況も）
 4. 「確認済みの URL」・確かめたこと・確かめられなかったことをユーザーに報告する
+- verify-db は適用した番号を検証用 DB の `verify_ledger.applied` に記録し、指紋（名前の一覧）が同じ番号（0019 と 0020 など）は記録で決める。記録が無く決められなければ止まるので、番号を確かめて workflow_dispatch の `at` で起点を指定する（2026-10-20：指紋が同じため 0020 が飛ばされた不具合の対策）
 - 新しいマイグレーションを足したら `bash supabase/tests/verify_db_test.sh --write-expected`（root では `su postgres -c`）で `supabase/runbook/verify-expected.json` を更新してから push（無いと verify-db は止まる）
 - 自動にしないもの：本番の DB・本番のサイト・本物の AI の大量呼び出し・本物の決済
 - ユーザーの1回だけの設定（GitHub Secret `SUPABASE_ACCESS_TOKEN`・Vercel の Preview 環境変数と Protection Bypass・この環境の `*.vercel.app` 許可）が済むまでは、2・3 の一部ができない。できなかったことはそのまま報告する

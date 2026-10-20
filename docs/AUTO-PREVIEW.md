@@ -96,6 +96,7 @@ Vercel → プロジェクト → **Settings → Environment Variables**。ど�
 |---|---|
 | Actions の verify-db が「Secret … が無いので省きました」 | 設定1が未完了 |
 | verify-db が「HTTP 401」 | Supabase の鍵の期限切れ → 設定1で作り直して Secret を更新 |
+| verify-db が「どこまで適用済みか決められません」 | 名前を変えないマイグレーション（例 0020）の前後は、DB の形だけでは区別できない。Claude が番号を確かめ、Actions → verify-db → Run workflow の **at** にいまの番号を入れて実行する（以後は検証用 DB 内の記録 verify_ledger で自動で決まる） |
 | verify-db が「どの番号の適用後とも一致しません」 | 検証用 DB が手で変えられている。Claude に、表示された違いを伝える（自動では直しません） |
 | Claude が「Vercel のログインで止められました」 | 設定2の Protection Bypass か、設定3の `VERCEL_AUTOMATION_BYPASS_SECRET` が未設定 |
 | Network secrets を設定したのに Vercel のログインに飛ぶ | 対象のドメインが Preview の URL に合っていない・値が Protection Bypass の値と違う・ヘッダー名が違う、のどれか。新しい会話で試す。だめなら環境変数 `VERCEL_AUTOMATION_BYPASS_SECRET` の方法にする |
