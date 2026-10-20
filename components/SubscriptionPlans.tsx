@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { useUI } from "@/components/ui-context";
 import { Badge, Btn, Card, Modal } from "@/components/ui";
 import { isNativeApp } from "@/lib/native";
-import { billingPlan } from "@/lib/billing/catalog";
+import { FREE_QUOTA, billingPlan } from "@/lib/billing/catalog";
 import { PAYMENT_METHODS, PREPAID_MONTHS, prepaidTotal, type PrepaidMonths } from "@/lib/billing/prepaid";
 import {
   coursesOf, currentPlanLabel, limitLabel, priceLabel, PERSONAL_FEATURES, PERSONAL_OPUS_SURCHARGE, SCHOOL_DESCRIPTIONS, SCHOOL_FEATURES,
@@ -160,9 +160,9 @@ export default function SubscriptionPlans() {
         <h3 style={{ marginTop: 0 }}>無料プラン</h3>
         <p style={{ color: T.textSub, fontSize: 13 }}>基本的なAI採点を、まずは少量の答案で体験。</p>
         <div style={{ fontSize: 24, fontWeight: 700 }}>月額0円</div>
-        <p style={{ fontWeight: 700 }}>月20回まで・3モデル併用で採点</p>
+        <p style={{ fontWeight: 700 }}>月{FREE_QUOTA}答案まで・3モデル併用で採点</p>
         {featureList(["答案の取り込みと採点結果の確認", "返却前に先生が判定・得点を確認"])}
-        <p style={{ fontSize: 12, color: T.textSub }}>1回の採点で1枠を使います（再採点も1回）。採点に失敗したときは枠を戻します。無料プランは3モデル併用だけです。</p>
+        <p style={{ fontSize: 12, color: T.textSub }}>1答案の採点で1枠を使います（再採点も1枠）。採点に失敗したときは枠を戻します。無料プランは3モデル併用だけです。</p>
       </article>
 
       <article style={{ ...panel, borderColor: T.accent }}>

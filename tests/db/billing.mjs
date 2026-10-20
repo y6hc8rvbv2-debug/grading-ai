@@ -25,6 +25,7 @@ try {
   const start=(req,mode='cascade',consent=false)=>`select billing_start_job('eeeeeeee-0000-0000-0000-000000000000','eeeeeeee-0000-0000-0000-000000000001','eeeeeeee-0000-0000-0000-000000000005','eeeeeeee-0000-0000-0000-${String(req).padStart(12,'0')}','${mode}',true,${consent})`;
   await db.exec(start(10));await db.exec(start(10));
   await ok('select count(*)::int as v from billing_usage',1);
+  await ok("select plan_id||'/'||status||'/'||quota as v from billing_accounts",'free/free/30'); // 0020：無料プランは月30答案
   await db.exec("update grading_jobs set status='failed'");
   await ok("select count(*)::int as v from billing_usage where status='reserved'",0);
   await deny(start(11,'opus',true)); // 無料のOpus拒否
@@ -60,7 +61,7 @@ try {
   await deny(start(16));
   await db.exec("update submissions set image_paths=array['answer.jpg']; update billing_accounts set status='payment_pending'");
   await deny(start(17));
-  await db.exec("update billing_accounts set status='free',quota=20,period_start=now()-interval '2 months',period_end=now()-interval '1 month'");
+  await db.exec("update billing_accounts set status='free',quota=30,period_start=now()-interval '2 months',period_end=now()-interval '1 month'");
   await db.exec(start(18));
   await ok("select (period_end>now()) as v from billing_accounts",true);
   // ---------------------------------------------------------------- ver6（0019）：前払い
@@ -88,7 +89,12 @@ try {
   await db.exec("update grading_jobs set status='failed' where status='running'");
   await db.exec("update billing_accounts set prepaid_until=now()-interval '1 day',period_start=now()-interval '31 days',period_end=now()-interval '1 day'");
   await db.exec(start(20));
-  await ok("select plan_id||'/'||status||'/'||quota||'/'||coalesce(prepaid_until::text,'-') as v from billing_accounts",'free/free/20/-');
+  await ok("select plan_id||'/'||status||'/'||quota||'/'||coalesce(prepaid_until::text,'-') as v from billing_accounts",'free/free/30/-');
+  // 0020：無料プランは学校（personal=false）でも Opus単独を断る（3モデル併用だけ）
+  await db.exec("update grading_jobs set status='failed' where status='running'; update billing_accounts set personal=false");
+  await deny(start(21,'opus',true));
+  await db.exec(start(21));
+  await db.exec("update grading_jobs set status='failed' where status='running'; update billing_accounts set personal=true");
   // 先生は前払いの注文を書き換えられない・反映の関数を呼べない
   await db.exec('set role authenticated');
   await db.exec("select set_config('request.jwt.claims','{\"sub\":\"eeeeeeee-0000-0000-0000-000000000001\",\"role\":\"authenticated\"}',false)");

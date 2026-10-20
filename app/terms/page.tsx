@@ -1,6 +1,7 @@
 // 利用規約（ログインなしで読める）
 import type { Metadata } from "next";
 import { APP_INFO } from "@/lib/app-info";
+import { FREE_QUOTA } from "@/lib/billing/catalog";
 import { H2, Missing, PublicPage } from "@/components/PublicPage";
 
 export const metadata: Metadata = { title: `利用規約｜${APP_INFO.name}` };
@@ -35,7 +36,7 @@ export default function TermsPage() {
       <p>生徒が自分の ChatGPT で復習する機能は、13歳以上の生徒だけが使えます。ChatGPT での会話には OpenAI の規約が適用され、本アプリは会話の内容を受け取りません。</p>
       <H2>第7条（料金）</H2>
       <ul>
-        <li>無料プランは、月20回まで採点できます。有料プランの料金・月の採点回数は、<a href="/tokushoho">特定商取引法に基づく表記</a>と申し込みの画面に示します。</li>
+        <li>無料プランは、月{FREE_QUOTA}答案まで、3モデル併用で採点できます。有料プランの料金・月の採点回数は、<a href="/tokushoho">特定商取引法に基づく表記</a>と申し込みの画面に示します。</li>
         <li>有料プランは、学校・塾の管理者が Web ブラウザから申し込み、決済サービス（Stripe）で支払います。ストア用のアプリの中では、購入・支払いはできません。</li>
         <li>月額料金は契約期間ごとに自動で更新され、更新のときに請求します。解約は「契約・支払い管理」からいつでもでき、その契約期間の終わりまで使えます。支払い済みの月額料金は、法令で必要な場合を除き、日割りで返金しません。</li>
         <li>1回の採点（再採点を含む）で1回分を使います。採点に失敗したときは回数を戻します。月の回数を使い切ると、次の契約期間まで新しい採点はできません（超過分を自動で請求することはありません）。</li>

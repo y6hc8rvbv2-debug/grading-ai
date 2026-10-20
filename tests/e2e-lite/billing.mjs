@@ -49,7 +49,7 @@ ok(text.includes("個人・塾プラン") && text.includes("学校プラン") &&
 for (const c of COURSES) ok(text.includes(priceLabel(c)) && text.includes(limitLabel(c)), `${c.key}：${priceLabel(c)}・${limitLabel(c)}`);
 ok(!/price_|txr_|cus_|利益|原価/.test(text), "料金ID・Stripe の内部ID・原価・利益を表示しない");
 ok(!text.includes("翌日結果") && text.includes("終わる時刻は答案の量や混み具合で変わり、お約束できません"), "夜間採点の納期を約束しない（既存の仕様の22時〜翌6時の処理だけを書く）");
-ok(text.includes("無料プラン") && text.includes("月20回まで"), "無料プランは以前の設定のまま（月20回）");
+ok(text.includes("無料プラン") && text.includes("月30答案まで・3モデル併用で採点"), "無料プランは月30答案まで・3モデル併用");
 
 // ---------------------------------------------------------------- 申し込めるか（サーバーが判定）
 const info = (await api("/api/billing")).json;
@@ -80,7 +80,7 @@ await page.goto(BASE + "/billing/return");
 await page.getByText("支払いの確認").waitFor();
 await page.goto(BASE + "/");
 let acc = (await api("/api/billing")).json.account;
-ok(acc.status === "free" && acc.quota === 20, "決済画面を開いた・戻っただけでは有料の枠を付けない");
+ok(acc.status === "free" && acc.quota === 30, "決済画面を開いた・戻っただけでは有料の枠を付けない");
 
 // ---------------------------------------------------------------- 署名つきの通知で契約を反映。重複しても二重に付けない
 const done = await (await fetch(`${MOCK}/__complete/${csId}`, { method: "POST" })).json();
@@ -117,7 +117,7 @@ ok((await api("/api/billing")).json.used === 100, "画面の今期の採点は 1
 await fetch(`${MOCK}/__cancel/${done.subscription}`, { method: "POST" });
 ok(await hook("customer.subscription.deleted", { id: done.subscription, object: "subscription" }) === 200, "解約の通知");
 acc = (await api("/api/billing")).json.account;
-ok(acc.plan_id === "free" && acc.status === "free" && acc.quota === 20, "解約で無料プラン（月20回）に戻る");
+ok(acc.plan_id === "free" && acc.status === "free" && acc.quota === 30, "解約で無料プラン（月30答案）に戻る");
 
 // ---------------------------------------------------------------- 学校（税別）：作成済みの税率（10%）を付けて引き渡す
 let r = await api("/api/billing", { planId: "school-mini" });
@@ -140,9 +140,9 @@ const read = async () => (await api("/api/billing")).json;
 const unknownSub = await subscribe("price_UnknownLite01");
 ok(await hook("customer.subscription.created", { id: unknownSub, object: "subscription" }) === 200, "対応の分からない料金の通知も受け付ける（記録して、再送の繰り返しにしない）");
 let b2 = await read();
-ok(b2.account.plan_id === "free" && b2.account.quota === 20 && b2.account.status === "free", "対応の分からない料金：有料の権限を付けない（無料・月20回のまま）");
+ok(b2.account.plan_id === "free" && b2.account.quota === 30 && b2.account.status === "free", "対応の分からない料金：有料の権限を付けない（無料・月30答案のまま）");
 ok(b2.review && /料金表・旧プランの対応表に無い/.test(b2.review.reason) && !JSON.stringify(b2).includes("price_UnknownLite01"), "管理者に確認待ちと理由を見せる（料金ID は返さない）");
-ok(await hook("customer.subscription.updated", { id: unknownSub, object: "subscription" }) === 200 && (await read()).account.quota === 20, "同じ契約の通知の再送でも権限は変わらない");
+ok(await hook("customer.subscription.updated", { id: unknownSub, object: "subscription" }) === 200 && (await read()).account.quota === 30, "同じ契約の通知の再送でも権限は変わらない");
 await page.goto(BASE + "/");
 await page.getByText("契約の内容を確認しています").waitFor();
 ok((await page.evaluate(() => document.body.innerText)).includes("いまの契約の状況・採点の回数は変えていません"), "画面：確認待ちの表示（いまの権限は変えていない）");
@@ -150,7 +150,7 @@ r = await api("/api/billing", { planId: "personal-mini" });
 ok(r.status === 400 && /確認待ち/.test(r.json.error), "確認待ちの間は新しい申し込みを受け付けない（二重の契約を防ぐ）");
 await page.getByRole("button", { name: "契約を再確認" }).click();
 await page.getByText("確認待ちのまま").waitFor();
-ok((await read()).account.quota === 20, "「契約を再確認」：対応表に無いままなら確認待ちのまま（権限は変えない）");
+ok((await read()).account.quota === 30, "「契約を再確認」：対応表に無いままなら確認待ちのまま（権限は変えない）");
 await fetch(`${MOCK}/__cancel/${unknownSub}`, { method: "POST" });
 ok(await hook("customer.subscription.deleted", { id: unknownSub, object: "subscription" }) === 200, "その契約の解約の通知");
 b2 = await read();

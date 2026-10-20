@@ -24,7 +24,7 @@ export default function TokushohoPage() {
           {row("お問い合わせ", APP_INFO.supportEmail ? <a href={`mailto:${APP_INFO.supportEmail}`}>{APP_INFO.supportEmail}</a> : <Missing what="問い合わせ先" />)}
           {row("サービス", `${APP_INFO.name}（答案の写真の AI 採点・赤ペン・返却の Web サービス）`)}
           {row("販売価格", <>
-            <div>無料プラン：0円（月{FREE_QUOTA}回まで）</div>
+            <div>無料プラン：0円（月{FREE_QUOTA}答案まで・3モデル併用で採点）</div>
             {(["personal", "school"] as const).map((aud) => (["通常採点", "夜間採点"] as const).map((kind, i) => (
               <div key={aud + kind} style={{ marginTop: 6 }}>
                 <div>{aud === "personal" ? "個人・塾プラン" : "学校プラン"}（{kind}）</div>

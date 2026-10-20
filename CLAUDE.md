@@ -60,6 +60,7 @@ DB は **0019_ver6.sql**（ai_settings・submission_links の列・link_uploads�
 夜間処理は日本時間22時〜翌6時の通常API呼出し。Batch割引は未実装。予約は採点履歴へ保存し、返却は教師確認後の既存操作。自動通知・自動返却はしない。
 **ストア用のアプリの中では料金の案内・申し込み・支払いを出さない**（`lib/native.ts`。capacitor.config.ts の appendUserAgent `TestSaitenApp/1` と Capacitor の橋渡しで判定。サーバーもアプリからの申し込み・支払いを 403）。契約は Web だけ。特定商取引法に基づく表記は `/tokushoho`。
 課金を有効にした環境では、1答案2ページ・20問まで・PDF の答案は採点できない（0017 の billing_reserve）。
+**無料プランは「月30答案まで・3モデル併用で採点」**（2026-10-20 ユーザーの指示。以前は月20回。**0020_free_quota_30.sql**：quota の既定 30・いまの無料の契約（quota=20）を 30 に・billing_reserve を置き換え＝前払いの期限切れで 30、無料の Opus単独を学校でも断る）。数え方は変えない（1答案の採点1回＝1枠）。表示は `FREE_QUOTA`（`lib/billing/catalog.ts`）
 **16コース（2026-10-13 確定）の一元表は `lib/subscription-plans.ts`（COURSES：key・対象・通常/夜間・月額・税区分・上限・テスト用の料金ID）**。画面・特商法の表記・決済・Webhook は同じ表を読む。
 料金ID の選択は `lib/billing/prices.ts`：サンドボックスのキー（sk_test_）はテスト用の料金ID、本番のキー（sk_live_）は `STRIPE_LIVE_PRICE_IDS_JSON` だけ（無ければ止める・テスト用の ID は使わない）。学校（税別）は作成済みの税率 `STRIPE_SCHOOL_TAX_RATE_ID` が無ければ止める。
 夜間コースの上限は通常と同じ（学校の夜間は 2026-10-13 ユーザー確定）。学校は税別に消費税10%を加算（確定）。
