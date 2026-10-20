@@ -9,7 +9,12 @@
 
 ## 作業の進め方（自動プレビュー。2026-10-20 ユーザーの決定＝B方式。`docs/AUTO-PREVIEW.md`）
 
-ユーザーの作業は「Preview の URL を見て手直しを頼む」だけにする。変更を push したら、毎回つぎを行ってから報告する。
+**必ず守る進め方（2026-10-20 ユーザーの指示）：「依頼 → Claude が作る → 自動でデプロイ → URL をお知らせ → ユーザーはプレビューを見て直しを頼むだけ」**
+- 新しい機能・手直しのどちらも、この流れで進める。ユーザーにコマンドの実行・設定の変更・動作確認を頼まない（鍵の登録など、本人にしかできない1回だけの設定を除く）
+- 報告は「確認済みの URL」から始め、何を変えたか・何を確かめたか・確かめられなかったことを短く書く。URL は Claude が開いて確かめたものだけを「確認済み」と書く
+- 確かめられなかったときは、代わりの古い URL の結果で済ませず、そのまま伝える
+
+変更を push したら、毎回つぎを行ってから報告する。
 1. 手元の自動テスト → push（ブランチ claude/**）
 2. GitHub Actions の `checks`（単体・DB）と `verify-db`（新しいマイグレーションを検証用 saiten-verify に自動適用。`scripts/verify-db/apply.mjs --to latest`）の結果を確かめる
 3. Vercel の Preview はブランチの固定 URL https://grading-ai-git-claude-test-sc-b3ad9f-y6hc8rvbv2-debugs-projects.vercel.app で確かめる（鍵はこの環境の Network secrets が自動で付ける。2026-10-20 確認済み。個別 URL には付かないことがある）。固定 URL 以外は GitHub の Deployments から読み、`npm run preview:check -- <URL> --shots <scratchpad>` で確かめる
