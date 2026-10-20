@@ -70,7 +70,7 @@ Vercel → プロジェクト → **Settings → Environment Variables**。ど�
    - 手順の公式説明：https://code.claude.com/docs/en/cloud-environments#network-access
 2. **Environment variables**（または Network secrets）に次を足す
    - `VERCEL_AUTOMATION_BYPASS_SECRET` = 設定2でコピーした値
-   - または **Network secrets** に、ヘッダー名 `x-vercel-protection-bypass`・値 = 設定2の値（接続のたびに自動で付く。Claude からは値が見えない）。**2026-10-20 時点では、この方法で最新の Preview を通れることは未確認**（ブランチの URL・最新の個別 URL とも Vercel のログインに飛んだ）
+   - または **Network secrets** に、ヘッダー名 `x-vercel-protection-bypass`・値 = 設定2の値（接続のたびに自動で付く。Claude からは値が見えない）。プレフィックスは空欄。**2026-10-20 にブランチの固定 URL（grading-ai-git-…）で通れることを確認済み**。Claude は固定 URL で確認する
    - （任意）検証用の教職員でのログインまで Claude に確かめさせる場合：`PREVIEW_TEACHER_EMAIL`・`PREVIEW_TEACHER_PASSWORD`（**検証用の学校のアカウントだけ**。本番のアカウントは入れない）
 3. 新しい会話（セッション）から有効になります
 
