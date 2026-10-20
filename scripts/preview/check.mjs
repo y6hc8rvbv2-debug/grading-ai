@@ -59,7 +59,8 @@ try {
     const ctx = await browser.newContext({ viewport, extraHTTPHeaders: headers, ignoreHTTPSErrors: false, locale: "ja-JP" });
     const page = await ctx.newPage();
     const errors = [];
-    page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+    // vercel.live は Vercel が Preview にだけ差し込むツールバー（アプリの外）。届かなくてもアプリの不具合ではないので数えない
+    page.on("console", (m) => { if (m.type() === "error" && !/^https:\/\/vercel\.live\//.test(m.location().url ?? "")) errors.push(m.text()); });
     page.on("pageerror", (e) => errors.push(String(e)));
     for (const p of ["/start", "/login"]) {
       await page.goto(BASE + p, { waitUntil: "networkidle", timeout: 60_000 });

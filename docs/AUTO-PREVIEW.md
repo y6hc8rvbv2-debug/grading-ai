@@ -70,6 +70,7 @@ Vercel → プロジェクト → **Settings → Environment Variables**。ど�
    - 手順の公式説明：https://code.claude.com/docs/en/cloud-environments#network-access
 2. **Environment variables**（または Network secrets）に次を足す
    - `VERCEL_AUTOMATION_BYPASS_SECRET` = 設定2でコピーした値
+   - または **Network secrets** に、ヘッダー名 `x-vercel-protection-bypass`・値 = 設定2の値（接続のたびに自動で付く。Claude からは値が見えないので、こちらがより安全）
    - （任意）検証用の教職員でのログインまで Claude に確かめさせる場合：`PREVIEW_TEACHER_EMAIL`・`PREVIEW_TEACHER_PASSWORD`（**検証用の学校のアカウントだけ**。本番のアカウントは入れない）
 3. 新しい会話（セッション）から有効になります
 
@@ -97,4 +98,6 @@ Vercel → プロジェクト → **Settings → Environment Variables**。ど�
 | verify-db が「HTTP 401」 | Supabase の鍵の期限切れ → 設定1で作り直して Secret を更新 |
 | verify-db が「どの番号の適用後とも一致しません」 | 検証用 DB が手で変えられている。Claude に、表示された違いを伝える（自動では直しません） |
 | Claude が「Vercel のログインで止められました」 | 設定2の Protection Bypass か、設定3の `VERCEL_AUTOMATION_BYPASS_SECRET` が未設定 |
+| 個別の URL（grading-xxxx-…）は開けるのに、ブランチの URL（grading-ai-git-…）だけ Vercel のログインに飛ぶ | Network secrets の対象のドメインが、ブランチの URL に合っていない可能性。対象を `*.vercel.app` にする |
+| 画面のエラーに `vercel.live` | Vercel が Preview にだけ差し込むツールバー。アプリの不具合ではない（確認スクリプトは数えない） |
 | Claude が「Preview に届かない」 | 設定3の `*.vercel.app` が未設定、または新しい会話になっていない |
