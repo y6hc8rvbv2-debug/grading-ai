@@ -1,0 +1,36 @@
+# Stripe のサンドボックス（テスト）の商品名「テスト採点ver5」を「テスト採点ver6」に変える（本番のキーは断る）。
+#   手動だけ（Actions → stripe-rename → Run workflow）。apply が no なら読み取りだけ
+#   必要な Secret：STRIPE_SANDBOX_KEY（テストの制限付きキー rk_test_…：Prices の Read・Products の Write。docs/AUTO-PREVIEW.md）
+name: stripe-rename
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "実際に名前を変える（no なら読み取りだけ）"
+        required: true
+        default: "no"
+        type: choice
+        options: ["no", "yes"]
+
+permissions:
+  contents: read
+
+jobs:
+  rename:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 商品名を変える
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SANDBOX_KEY }}
+          APPLY: ${{ github.event.inputs.apply }}
+        run: |
+          if [ -z "$STRIPE_SECRET_KEY" ]; then echo "::error::Secret STRIPE_SANDBOX_KEY がありません（docs/AUTO-PREVIEW.md）"; exit 1; fi
+          if [ "$APPLY" = "yes" ]; then npm run -s billing:rename-products -- --apply; else npm run -s billing:rename-products; fi

@@ -74,6 +74,21 @@ Vercel → プロジェクト → **Settings → Environment Variables**。ど�
    - （任意）検証用の教職員でのログインまで Claude に確かめさせる場合：`PREVIEW_TEACHER_EMAIL`・`PREVIEW_TEACHER_PASSWORD`（**検証用の学校のアカウントだけ**。本番のアカウントは入れない）
 3. 新しい会話（セッション）から有効になります
 
+### 設定4（任意）．Stripe のサンドボックスの商品名を Claude が変えられるようにする（約5分）
+
+Stripe の決済・契約画面に出る商品名（例「テスト採点ver5 個人・塾 ミニ」）を、Claude が GitHub から変えるための鍵です。
+
+1. Stripe →（右上が **サンドボックス** になっていることを確かめる）→ **開発者 → API キー → 制限付きのキーを作成**
+   - 名前：`github-stripe-rename`
+   - 権限：**Products を「書き込み」**、**Prices を「読み取り」**。ほかは「なし」のまま
+   - 作成されたキー（`rk_test_…`）をコピー
+2. GitHub のリポジトリ → **Settings → Secrets and variables → Actions → New repository secret**
+   - Name：`STRIPE_SANDBOX_KEY`、Secret：さきほどの値
+3. 以後は Claude が Actions の **stripe-rename** を実行します（本番のキー `sk_live_`/`rk_live_` は仕組みの側で断ります）
+
+> 決済画面の左上の名前（例「テスト採点ver5 検証用」）は、Stripe のアカウントの**公開ビジネス名**で、この鍵では変えられません。
+> Stripe →（サンドボックス）→ **設定 → ビジネス → 公開情報** の「公開ビジネス名」を書き換えます。
+
 ---
 
 ## 設定のあと、Claude が毎回すること（CLAUDE.md の決まり）
