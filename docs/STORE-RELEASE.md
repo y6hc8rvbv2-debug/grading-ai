@@ -173,5 +173,4 @@ STORE_SHOT_DIR=$PWD/store/screenshots npm run test:e2e:lite                     
 
 - **Apple 4.2（最低限の機能）**：Web サイトをそのまま包んだだけのアプリは断られることがある。このアプリは、カメラでの撮影・通信できないときの画面・アプリ内のアカウント削除などを備えるが、
   断られた場合は、指摘の内容に合わせてネイティブの機能（例：撮影の補助・通知）を足すか、Web アプリ（ホーム画面に追加）で提供する
-- **Next.js の脆弱性の警告**：`npm audit` が Next.js 14 系に重大な警告を出す（画像最適化の remotePatterns・rewrites・RSC のキャッシュ。修正は Next.js 16 への更新）。
-  このアプリは next/image の外部の画像・rewrites を使っていないが、公開後の早いうちに Next.js 16 へ更新する
+- **（解決）Next.js の脆弱性の警告**：Next.js 16 へ更新し、アプリに含まれる部品の `npm audit` の警告は0件になった（2026-10-21）

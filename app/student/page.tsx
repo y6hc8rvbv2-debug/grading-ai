@@ -347,7 +347,10 @@ export default function StudentPage() {
             </span>
           </label>
           <p style={{ fontSize: 12.5, color: "#555" }}>
-            <a href="/support">困ったとき・お問い合わせ</a>　<a href="/account-deletion">アカウントの削除について</a>　<a href="/">先生の方はこちら</a>
+            <a href="/support">困ったとき・お問い合わせ</a>　<a href="/account-deletion">アカウントの削除について</a>　
+            {/* 生徒の画面の状態を残さないよう、先生の画面へはページごと読み直して移る */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a href="/">先生の方はこちら</a>
           </p>
         </form>
       ) : (

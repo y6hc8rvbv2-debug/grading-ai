@@ -6,7 +6,7 @@
 //   3. 「提出する」 → 先生の「採点中」の画面に AI採点待ちとして届く
 // 写真はこの端末で縮小し（長辺2400px）、iPhone の HEIC は JPEG に変換してから送る。
 // ============================================================================
-import React, { useEffect, useRef, useState } from "react";
+import React, { use, useEffect, useRef, useState } from "react";
 import { prepareImage } from "@/lib/image";
 
 type Info = {
@@ -20,7 +20,9 @@ const btn = (bg: string, fg = "#fff"): React.CSSProperties => ({
   background: bg, color: fg, border: "none", borderRadius: 14, padding: "14px 18px", fontSize: 17, fontWeight: 700, cursor: "pointer", width: "100%",
 });
 
-export default function SubmitPage({ params }: { params: { token: string } }) {
+// Next.js 15 から params は Promise で届く
+export default function SubmitPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = use(params);
   const [info, setInfo] = useState<Info | null>(null);
   const [error, setError] = useState("");
   const [student, setStudent] = useState("");
@@ -32,10 +34,10 @@ export default function SubmitPage({ params }: { params: { token: string } }) {
   const picker = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetch(`/api/submit/${encodeURIComponent(params.token)}`, { cache: "no-store" })
+    fetch(`/api/submit/${encodeURIComponent(token)}`, { cache: "no-store" })
       .then(async (r) => { const j = await r.json(); if (!r.ok) throw new Error(j.error); setInfo(j); if (j.me) setStudent(j.me); })
       .catch((e) => setError(e instanceof Error ? e.message : "提出リンクを開けませんでした。"));
-  }, [params.token]);
+  }, [token]);
   useEffect(() => () => shots.forEach((s) => URL.revokeObjectURL(s.url)), [shots]);
 
   const add = async (list: FileList | null) => {
@@ -63,7 +65,7 @@ export default function SubmitPage({ params }: { params: { token: string } }) {
     // 送信の進み具合を出すため XMLHttpRequest を使う（fetch では送信量が分からない）
     const res = await new Promise<{ ok: boolean; json: { error?: string; pages?: number } }>((resolve) => {
       const x = new XMLHttpRequest();
-      x.open("POST", `/api/submit/${encodeURIComponent(params.token)}`);
+      x.open("POST", `/api/submit/${encodeURIComponent(token)}`);
       x.upload.onprogress = (e) => { if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100)); };
       x.onload = () => { let j = {}; try { j = JSON.parse(x.responseText); } catch { /* 空 */ } resolve({ ok: x.status >= 200 && x.status < 300, json: j }); };
       x.onerror = () => resolve({ ok: false, json: { error: "通信できませんでした。電波のよい場所で、もう一度送ってください。" } });

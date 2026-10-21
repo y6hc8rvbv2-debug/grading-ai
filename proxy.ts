@@ -1,8 +1,8 @@
-// ログインセッションを維持するための middleware（Next.js 14 App Router）
+// ログインセッションを維持するための proxy（Next.js 16 で middleware から名前が変わった）
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   // Supabase が未設定ならデモモード。ログイン確認をしない。

@@ -19,7 +19,7 @@ export async function createClient() {
               cookieStore.set(name, value, options)
             );
           } catch {
-            // Server Component からの呼び出しでは書き込めない。middleware 側で更新する。
+            // Server Component からの呼び出しでは書き込めない。proxy.ts 側で更新する。
           }
         },
       },

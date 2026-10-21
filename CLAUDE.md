@@ -58,6 +58,16 @@ DB は **0019_ver6.sql**（ai_settings・submission_links の列・link_uploads�
 - 未確認：本物の Claude・本物のスマホ・本物の Stripe（コンビニ/PayPay の入金）・本物の暗号資産の決済代行・Vercel（HTTP/2）での同時数（手元は HTTP/1.1 で6件まで）
 
 
+### Next.js 16 への更新（2026-10-21。ブランチ claude/nextjs-16-upgrade）
+
+`npm audit` の重大な警告（Next.js 14 系・postcss）を解消するため、Next.js 14.2 → **16.4**・React 18 → **19** に更新した。アプリに含まれる部品の警告は0件。
+- `params` は Promise で届く（`app/submit/[token]/page.tsx`・`app/(dashboard)/history/[id]/page.tsx` は `use(params)`、`app/api/submit/[token]/route.ts` は `await ctx.params`）
+- `middleware.ts` → **`proxy.ts`**（関数名も `proxy`。中身は同じ）。`next.config.mjs` の `experimental.serverComponentsExternalPackages` → `serverExternalPackages`
+- `next lint` が無くなったので `npm run lint` は ESLint を直接使う（`eslint.config.mjs`。対象は以前と同じ app・components・lib・types・proxy.ts）。
+  eslint-config-next 16 で増えた React Compiler 向けの規則（react-hooks/refs など）は、以前の検査に無かったので切ってある
+- ビルドは Turbopack（約25秒。以前は約53秒）。ページの静的/動的の区分は以前と同じ
+- 検証：ビルド・lint・単体（124 合格・2 スキップ）・DB・料金 DB・画面テスト（e2e-lite）。Vercel の Preview・実機は push 後に確かめる
+
 ### 料金・決済・採点枠・夜間予約（PR #2 をこのブランチに取り込み。2026-10-11）
 
 承認済みの個人・塾・学校料金、Stripe Checkout / Webhook、採点枠の原子的確保、個人・塾のOpus追加55円の支払いと失敗時返金、夜間キュー。マイグレーションは **0017_billing_night.sql**（PR では 0016 だったがアカウントの削除と重なるため改番）。導入と停止は docs/BILLING-NIGHT.md。
@@ -297,8 +307,8 @@ DB は **0019_ver6.sql**（ai_settings・submission_links の列・link_uploads�
 ## アーキテクチャ
 
 ```
-Next.js 14 (App Router, TypeScript)
-  ├── middleware.ts              セッション維持 + 未ログインを /login へ（Supabase 未設定なら素通し＝デモモード）
+Next.js 16 (App Router, TypeScript, React 19)
+  ├── proxy.ts                   セッション維持 + 未ログインを /login へ（Supabase 未設定なら素通し＝デモモード）
   ├── app/
   │   ├── login/                 教職員ログイン（生徒は /student から自分のアカウントでログイン）
   │   ├── start/ privacy/ terms/ support/ account-deletion/   ログインなしの公開ページ（ストアの起動画面・ポリシー）
@@ -437,7 +447,7 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
 2. **0004〜0016 が本番 Supabase に未適用**（「次にやること」1。先に検証環境で行う。検証環境は 0015 まで適用済み）
 21. **ストアの申請は、iOS・Android のビルド・実機・審査を未実施**（開発環境に Xcode・Android SDK が無い。dl.google.com へも届かない）。
    本物の Supabase でのアカウントの削除（Auth の管理 API）・Vercel Cron の保存期間の削除も未確認。Apple 4.2（Web を包んだだけのアプリ）で断られる可能性がある。
-   `npm audit` が Next.js 14 系に重大な警告（修正は Next.js 16 への更新。next/image の外部画像・rewrites は使っていない）
+   （解決）`npm audit` の Next.js 14 系の重大な警告は、Next.js 16 への更新で解消（2026-10-21。アプリに含まれる部品の警告は0件。残りは開発用の道具 eslint-config-next・@capacitor/cli の中だけ）
 20. **B方式（本人の ChatGPT で復習）は Docker なしの画面テストでのみ検証** — 本物の Supabase（クラウド）・Vercel の Preview・実機（iPhone/iPad Safari・Android Chrome でのコピーと ChatGPT アプリへの受け渡し）は未確認。
    ChatGPT の利用条件（年齢・保護者の同意）も未確認。先生のコメントに名前を書くとコピー内容に入る（画面で「送る前に消す」と案内）。Docker の E2E（`npm run test:e2e`）は今回の変更後に実行できていない（containerd が起動しない環境）
 16. **模範解答からの自動入力は代役 API でのみ検証** — 本物の模範解答での読み取り精度（特に配点表・作図・PDF の bbox）は Preview で確かめる。PDF の資料は該当箇所の枠を表示できない（ページを開くだけ）。作図の模範図は採点AIには送っていない（採点条件の文章だけ）
