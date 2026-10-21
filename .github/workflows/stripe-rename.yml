@@ -1,9 +1,13 @@
 # Stripe のサンドボックス（テスト）の商品名「テスト採点ver5」を「テスト採点ver6」に変える（本番のキーは断る）。
-#   手動だけ（Actions → stripe-rename → Run workflow）。apply が no なら読み取りだけ
+#   手動（Actions → stripe-rename → Run workflow）。apply が no なら読み取りだけ
+#   このファイル・スクリプトを push したときも読み取りだけで動く（手動の実行ボタンを GitHub に登録するため。Secret が無ければ何もしない）
 #   必要な Secret：STRIPE_SANDBOX_KEY（テストの制限付きキー rk_test_…：Prices の Read・Products の Write。docs/AUTO-PREVIEW.md）
 name: stripe-rename
 
 on:
+  push:
+    branches: ["claude/**"]
+    paths: [".github/workflows/stripe-rename.yml", "scripts/billing/rename-products.mjs"]
   workflow_dispatch:
     inputs:
       apply:
@@ -32,5 +36,8 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SANDBOX_KEY }}
           APPLY: ${{ github.event.inputs.apply }}
         run: |
-          if [ -z "$STRIPE_SECRET_KEY" ]; then echo "::error::Secret STRIPE_SANDBOX_KEY がありません（docs/AUTO-PREVIEW.md）"; exit 1; fi
+          if [ -z "$STRIPE_SECRET_KEY" ]; then
+            if [ "${{ github.event_name }}" = "push" ]; then echo "::notice::Secret STRIPE_SANDBOX_KEY が無いので省きました（docs/AUTO-PREVIEW.md 設定4）"; exit 0; fi
+            echo "::error::Secret STRIPE_SANDBOX_KEY がありません（docs/AUTO-PREVIEW.md 設定4）"; exit 1
+          fi
           if [ "$APPLY" = "yes" ]; then npm run -s billing:rename-products -- --apply; else npm run -s billing:rename-products; fi
