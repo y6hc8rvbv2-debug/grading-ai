@@ -10,6 +10,8 @@
 // 接続（どちらか）
 //   既定：Supabase Management API（HTTPS）。SQL Editor と同じ経路でファイルの中身をそのまま送る
 //     環境変数 SUPABASE_ACCESS_TOKEN（個人のアクセストークン。画面・ログには出さない）
+//   おすすめ：VERIFY_DB_URL（検証用 DB だけの接続文字列。psql で実行する。2026-10-22）
+//     アカウント全体を操作できるアクセストークンと違い、漏れても検証用 DB にしか届かない。接続先に saiten-verify の ref が入っていないと断る
 //   テスト用：VERIFY_DB_TEST_URL（手元の PostgreSQL。psql で実行する。開発者の検証用）
 //
 // 安全のための決まり（docs/DB-RUNBOOK.md 第1部）
@@ -41,10 +43,13 @@ const APPLY = args.includes("--apply");
 const TO_ARG = arg("--to") ?? "0014";
 const TO = TO_ARG === "latest" ? readdirSync(MIG).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort().at(-1).slice(0, 4) : TO_ARG;
 const TEST_URL = process.env.VERIFY_DB_TEST_URL ?? "";
+const DB_URL = TEST_URL ? "" : (process.env.VERIFY_DB_URL ?? "");
+// psql で実行するか（手元のテスト・検証用 DB の接続文字列）。どちらも無ければ Management API
+const PSQL_URL = TEST_URL || DB_URL;
 const TOKEN = process.env.SUPABASE_ACCESS_TOKEN ?? "";
 
 const stop = (msg) => { console.log(`✗ 停止：${msg}`); process.exit(1); };
-const hide = (s) => String(s).replaceAll(TOKEN || "\u0000", "***").replace(/sbp_[A-Za-z0-9]+/g, "sbp_***");
+const hide = (s) => String(s).replaceAll(TOKEN || "\u0000", "***").replaceAll(DB_URL || "\u0000", "postgresql://***").replace(/sbp_[A-Za-z0-9]+/g, "sbp_***").replace(/(postgres(?:ql)?:\/\/[^:\s]+:)[^@\s]+@/g, "$1***@");
 
 // ---------------------------------------------------------------- 接続
 async function api(path, init = {}) {
@@ -57,15 +62,15 @@ async function api(path, init = {}) {
 }
 /** SQL を1回で送る（ファイルの中身もそのまま）。最後の文の結果の行を返す */
 async function runSql(sql) {
-  if (TEST_URL) {
-    const out = execFileSync("psql", [TEST_URL, "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-f", "-"], { input: sql, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+  if (PSQL_URL) {
+    const out = execFileSync("psql", [PSQL_URL, "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-f", "-"], { input: sql, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
     return out.trim().split("\n").filter(Boolean);
   }
   return api(`/projects/${TARGET_REF}/database/query`, { method: "POST", body: JSON.stringify({ query: sql }) });
 }
 /** 1行1列の JSON を返す読み取り */
 async function readJson(sql) {
-  if (TEST_URL) {
+  if (PSQL_URL) {
     const lines = await runSql(`select (${sql})::text`);
     return JSON.parse(lines.at(-1));
   }
@@ -124,7 +129,13 @@ async function currentStep() {
 // ---------------------------------------------------------------- 本体
 async function main() {
   console.log("検証用 DB への適用（本番には使えません）");
-  if (!TEST_URL) {
+  if (DB_URL) {
+    // 検証用 DB だけの接続文字列：saiten-verify の ref（と東京のリージョン）を含むものだけを使う
+    let u; try { u = new URL(DB_URL); } catch { stop("VERIFY_DB_URL の形が正しくありません（postgresql://… の接続文字列）"); }
+    if (!`${u.username}@${u.hostname}`.includes(TARGET_REF)) stop("VERIFY_DB_URL が検証用（saiten-verify）の DB ではありません");
+    if (u.hostname.includes("pooler.supabase.com") && !u.hostname.includes(TARGET_REGION)) stop(`VERIFY_DB_URL のリージョンが ${TARGET_REGION} ではありません`);
+    console.log(`✓ 接続先：検証用 DB の接続文字列（ref ${TARGET_REF}）。アカウント全体のアクセストークンは使いません`);
+  } else if (!TEST_URL) {
     if (!TOKEN) stop("環境変数 SUPABASE_ACCESS_TOKEN がありません（docs/DB-RUNBOOK.md の 1-2b）");
     const p = await api(`/projects/${TARGET_REF}`);
     if (p.id !== TARGET_REF && p.ref !== TARGET_REF) stop("プロジェクトの ref が一致しません");
@@ -171,7 +182,7 @@ async function main() {
     if (d1.length) stop(`${f} の適用後の状態が期待と違います：${d1.join(" / ")}`);
     console.log(`✓ ${f}：適用後の状態が期待と一致（表 ${after.tables.length}・ビュー ${after.views.length}・関数 ${after.functions.length}・ポリシー ${after.policies_public}・トリガー ${after.triggers.length}）`);
     if (n === "0014") {
-      const acl = (TEST_URL ? (await runSql(ACL_SQL.replace(/;\s*$/, "")))
+      const acl = (PSQL_URL ? (await runSql(ACL_SQL.replace(/;\s*$/, "")))
         : (await runSql(ACL_SQL)).map((r) => `${r.kind} ${r.name} ${r.grantee} ${r.privilege_type}`))
         .map((l) => l.replaceAll("|", " ").trim()).filter(Boolean).sort().join("\n");
       // 並び順は照合順序で変わるので、並べ替えてから比べる

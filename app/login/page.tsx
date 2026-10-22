@@ -19,8 +19,42 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [deleted, setDeleted] = useState(false);
+  // 二段階認証（0022）：パスワードのあと、設定済みの人だけ6桁のコードを聞く
+  const [mfa, setMfa] = useState<{ factorId: string } | null>(null);
+  const [code, setCode] = useState("");
   // アカウントを削除した直後（/login?deleted=1）
-  useEffect(() => { setDeleted(new URLSearchParams(window.location.search).get("deleted") === "1"); }, []);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    setDeleted(q.get("deleted") === "1");
+    // 1段階目だけ済んだ状態で戻された（middleware）とき：そのまま2段階目を聞く
+    if (q.get("mfa") === "1" && isSupabaseConfigured()) needSecondStep().catch(() => undefined);
+  }, []);
+
+  /** 二段階認証が設定済みで、まだ2段階目が済んでいなければ、コードの入力に切り替える */
+  const needSecondStep = async () => {
+    const sb = createClient();
+    const { data } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (data?.nextLevel !== "aal2" || data.currentLevel === "aal2") return false;
+    const { data: f } = await sb.auth.mfa.listFactors();
+    const factor = (f?.totp ?? []).find((x) => x.status === "verified");
+    if (!factor) return false;
+    setMfa({ factorId: factor.id });
+    return true;
+  };
+  const verify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mfa || !/^\d{6}$/.test(code)) { setError("認証アプリに表示された6桁の数字を入力してください。"); return; }
+    setBusy(true); setError("");
+    try {
+      const { error: err } = await createClient().auth.mfa.challengeAndVerify({ factorId: mfa.factorId, code });
+      if (err) throw err;
+      router.replace("/");
+      router.refresh();
+    } catch (err) {
+      setError(friendlyError(err, "コードの確認"));
+      setBusy(false);
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,6 +63,7 @@ export default function LoginPage() {
     try {
       const { error: err } = await createClient().auth.signInWithPassword({ email, password });
       if (err) throw err;
+      if (await needSecondStep()) { setBusy(false); return; }
       router.replace("/");
       router.refresh();
     } catch (err) {
@@ -78,6 +113,20 @@ export default function LoginPage() {
               background: T.accent, color: "#fff", font: `700 14px ${FONT_UI}`, cursor: "pointer",
             }}>デモを開く</button>
           </div>
+        ) : mfa ? (
+          <form onSubmit={verify} noValidate>
+            <div style={{ fontSize: 13, lineHeight: 1.8, marginBottom: 10 }}>二段階認証：スマホの認証アプリに表示された6桁の数字を入力してください。</div>
+            <input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} autoFocus
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} aria-label="6桁のコード" placeholder="123456"
+              style={{ ...input, fontSize: 20, letterSpacing: 6, textAlign: "center", marginBottom: 12 }} />
+            {error && <div role="alert" style={{ background: T.ngSoft, color: T.ng, border: `1px solid ${T.ng}`, borderRadius: 9, padding: "9px 11px", fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
+            <button type="submit" disabled={busy} style={{
+              width: "100%", padding: "11px 0", borderRadius: 9, border: "none", background: T.accent, color: "#fff",
+              font: `700 14px ${FONT_UI}`, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.7 : 1,
+            }}>{busy ? "確認しています…" : "確認してログイン"}</button>
+            <button type="button" onClick={async () => { await createClient().auth.signOut(); setMfa(null); setCode(""); }}
+              style={{ marginTop: 10, background: "none", border: "none", color: T.textSub, cursor: "pointer", fontSize: 12.5 }}>別のアカウントでログインする</button>
+          </form>
         ) : (
           <form onSubmit={submit} noValidate>
             <label style={{ display: "block", marginBottom: 12 }}>

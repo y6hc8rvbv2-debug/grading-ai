@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { isNativeUserAgent } from "@/lib/native";
 import { createAdminClient } from "@/lib/supabase/server";
+import { REAUTH_ERROR, verifyPassword } from "@/lib/security";
 import { appUrl, billingEnabled, billingUser, planAvailability, sameOrigin, stripeClient, verifiedSchoolTaxRate } from "@/lib/billing/server";
 import { billingPlan } from "@/lib/billing/catalog";
 import { isPrepaidMonths, prepaidTotal } from "@/lib/billing/prepaid";
@@ -32,6 +33,8 @@ export async function POST(req: Request) {
     if (!billingEnabled()) throw Error("決済の設定が完了していません。");
     const { user, schoolId } = await billingUser(true);
     const body = await req.json().catch(() => ({}));
+    // 再認証（2026-10-22）：前払いの申し込みの前に管理者のパスワードを確かめる
+    if (!(await verifyPassword(user.email, body?.password))) return NextResponse.json({ error: REAUTH_ERROR, code: "reauth" }, { status: 401 });
     const plan = billingPlan(body?.planId);
     const course = plan ? courseByKey(plan.id) : undefined;
     if (!plan || !course) throw Error("このプランは現在申し込めません。");

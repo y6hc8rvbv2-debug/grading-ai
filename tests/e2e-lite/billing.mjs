@@ -31,7 +31,11 @@ const browser = await chromium.launch({ ...(process.env.CHROMIUM_PATH ? { execut
 const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
 page.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });
 page.on("pageerror", (e) => errors.push(e.message));
-const api = (path, body) => page.evaluate(async ([p, b]) => {
+// 申し込み・前払い・契約の管理はパスワードの聞き直しが要る（再認証）。テストでは、指定が無ければ正しいパスワードを付ける
+const withPassword = (path, body) => body && typeof body === "object" && !("password" in body) && (path === "/api/billing/prepaid" || (path === "/api/billing" && body.action !== "resync"))
+  ? { ...body, password: "pass-lite-123" } : body;
+const api = (path, body) => rawApi(path, withPassword(path, body));
+const rawApi = (path, body) => page.evaluate(async ([p, b]) => {
   const r = await fetch(p, b === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
   return { status: r.status, json: await r.json().catch(() => null) };
 }, [path, body]);
@@ -67,7 +71,18 @@ for (const bad of [{ planId: "price_1UPkN679SNi0pstBtGaeLtlf" }, { planId: "pers
 ok((await mockLog()).filter((x) => x.path === "/v1/checkout/sessions").length === before, "断った申し込みでは決済画面を作らない");
 
 // ---------------------------------------------------------------- 決済画面への引き渡し（個人・塾 ミニ）
+// 再認証：パスワードが無い・違う申し込みは断り、決済画面を作らない
+{
+  const n0 = (await mockLog()).filter((x) => x.path === "/v1/checkout/sessions").length;
+  const r1 = await rawApi("/api/billing", { planId: "personal-mini" });
+  const r2 = await rawApi("/api/billing", { planId: "personal-mini", password: "wrong-password" });
+  const r3 = await rawApi("/api/billing/prepaid", { planId: "personal-light", months: 3, method: "stripe", password: "wrong-password" });
+  ok([r1, r2, r3].every((r) => r.status === 401 && r.json?.code === "reauth"), "パスワードが無い・違う申し込み・前払いは断る（再認証）");
+  ok((await mockLog()).filter((x) => x.path === "/v1/checkout/sessions").length === n0, "再認証に失敗したら決済画面を作らない");
+}
 await page.getByRole("button", { name: "選んだコースを月額で申し込む" }).first().click();
+await page.getByLabel("本人確認のパスワード").fill("pass-lite-123");
+await page.getByRole("button", { name: "続ける" }).click();
 await page.waitForURL(/\/pay\/cs_test_/);
 const created = (await mockLog()).filter((x) => x.path === "/v1/checkout/sessions").at(-1).form;
 ok(created.mode === "subscription" && created["line_items[0][price]"] === "price_1UPkN679SNi0pstBtGaeLtlf" && created["line_items[0][quantity]"] === "1", "決済画面には、サーバーが選んだテスト用の料金ID（個人・塾ミニ）を1つだけ渡す");

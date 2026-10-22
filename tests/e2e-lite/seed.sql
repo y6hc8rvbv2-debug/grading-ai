@@ -37,6 +37,12 @@ set role authenticated;
 select pg_temp.login('eeeeeeee-0000-0000-0000-000000000001');
 select public.bind_student_account('eeeeeeee-0000-0000-0000-000000000021', 'stu-a@lite.example');
 select public.bind_student_account('eeeeeeee-0000-0000-0000-000000000022', 'stu-b@lite.example');
+-- 0022：生徒が自分の画面で招待を承認して結び付く
+select pg_temp.login('eeeeeeee-0000-0000-0000-000000000002');
+select public.accept_student_invite(id) from public.my_student_invites();
+select pg_temp.login('eeeeeeee-0000-0000-0000-000000000003');
+select public.accept_student_invite(id) from public.my_student_invites();
+select pg_temp.login('eeeeeeee-0000-0000-0000-000000000001');
 select public.mark_submission_reviewed(id) from public.submissions where school_id = 'eeeeeeee-0000-0000-0000-000000000000' order by id;
 select public.publish_submission_result(id) from public.submissions where school_id = 'eeeeeeee-0000-0000-0000-000000000000' order by id;
 reset role;

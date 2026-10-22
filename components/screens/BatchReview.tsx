@@ -184,11 +184,11 @@ export default function BatchReview() {
                   );
                   if (error) throw error;
                   setEmail("");
-                  toast("配信先を登録しました");
+                  toast("招待しました。生徒が自分の画面で「承認する」を押すと、配信先になります");
                 })
               }
             >
-              本人対応を確認して登録
+              招待する（生徒の承認で登録）
             </Btn>
           </details>
         )}

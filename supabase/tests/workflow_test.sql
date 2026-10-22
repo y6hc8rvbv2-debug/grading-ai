@@ -19,6 +19,15 @@ insert into storage.objects(bucket_id,name) values('answer-sheets','cccccccc-000
 set role authenticated;
 select pg_temp.login('cccccccc-0000-0000-0000-000000000001');
 select public.bind_student_account('cccccccc-0000-0000-0000-000000000021','wfstudent@example.test');
+-- 0022：配信先の登録は招待になり、生徒が承認すると結び付く
+select pg_temp.login('cccccccc-0000-0000-0000-000000000002');
+do $$ declare v uuid; begin
+ select id into v from public.my_student_invites();
+ assert v is not null,'生徒に招待が届く';
+ perform public.accept_student_invite(v);
+ assert (select count(*) from public.my_student_invites())=0,'承認した招待は消える';
+end $$;
+select pg_temp.login('cccccccc-0000-0000-0000-000000000001');
 do $$ begin
  begin
  perform public.publish_class_results('cccccccc-0000-0000-0000-000000000031','cccccccc-0000-0000-0000-000000000011');

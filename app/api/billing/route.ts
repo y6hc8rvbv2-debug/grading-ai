@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isNativeUserAgent } from "@/lib/native";
 import { randomBytes } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/server";
+import { REAUTH_ERROR, verifyPassword } from "@/lib/security";
 import { CLEAR_CHECKOUT, appUrl, contractLabel, billingEnabled, billingUser, nightEnabled, planAvailability, stripeMode, planPriceId, sameOrigin, stripeClient, syncSubscription, verifiedSchoolTaxRate } from "@/lib/billing/server";
 import { BILLING_PLANS, billingPlan } from "@/lib/billing/catalog";
 
@@ -37,6 +38,9 @@ export async function POST(req: Request) {
     if (!billingEnabled()) throw Error("決済の設定が完了していません。");
     const { user, schoolId } = await billingUser(true);
     const body = await req.json();
+    // 再認証（2026-10-22）：申し込み・契約の管理の前に管理者のパスワードを確かめる（「契約を再確認」は読むだけなので不要）
+    if (body?.action !== "resync" && !(await verifyPassword(user.email, body?.password)))
+      return NextResponse.json({ error: REAUTH_ERROR, code: "reauth" }, { status: 401 });
     const db = createAdminClient();
     let { data: account } = await db.from("billing_accounts").select("*").eq("school_id", schoolId).maybeSingle();
     if (!account) {

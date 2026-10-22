@@ -63,4 +63,64 @@ do $$ declare ok boolean; begin
   assert (select pages from public.submissions where student_id = 'aaaaaaaa-0000-0000-0000-0000000001d8') = 2, '本人はログインして出し直せる';
 end $$;
 reset role;
-\echo ' OK: security_test（閲覧専用の役割は書き換えられない・先生は今までどおり・本人確認済みの答案は上書きされない）'
+-- ---------------------------------------------------------------- 3. 二段階認証（0022）
+insert into auth.mfa_factors (user_id, status) values ('aaaaaaaa-0000-0000-0000-00000000000b', 'verified');
+set role authenticated;
+select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-0000-0000-0000-00000000000b","role":"authenticated","aal":"aal1"}', false);
+do $$ begin
+  assert public.current_school_id() is null, 'FAIL: 二段階認証を設定した先生が、1段階目だけで学校のデータに入れた';
+  assert (select count(*) from public.submission_items) = 0, 'FAIL: 1段階目だけで成績が見えた';
+end $$;
+select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-0000-0000-0000-00000000000b","role":"authenticated","aal":"aal2"}', false);
+do $$ begin
+  assert public.current_school_id() = 'aaaaaaaa-0000-0000-0000-000000000000', '2段階目まで済めば今までどおり';
+  assert (select count(*) from public.submission_items) > 0, '2段階目まで済めば成績が見える';
+end $$;
+select pg_temp.login('aaaaaaaa-0000-0000-0000-00000000000a');   -- 二段階認証を設定していない管理者は今までどおり
+do $$ begin assert public.current_role_is('admin'), '設定していない人は今までどおり'; end $$;
+reset role;
+delete from auth.mfa_factors;
+
+-- ---------------------------------------------------------------- 4. 生徒アカウントの招待（0022）
+insert into auth.users (id, email, email_confirmed_at) values
+  ('aaaaaaaa-0000-0000-0000-0000000000f1', 'invited@example.com', now()),
+  ('aaaaaaaa-0000-0000-0000-0000000000f2', 'someone@example.com', now());
+set role authenticated;
+select pg_temp.login('aaaaaaaa-0000-0000-0000-00000000000a');
+-- 登録されていないメールアドレスでもエラーにしない（アカウントの有無を探れない）
+select public.bind_student_account('aaaaaaaa-0000-0000-0000-0000000001d8', 'nobody-registered@example.com');
+select public.bind_student_account('aaaaaaaa-0000-0000-0000-0000000001d8', 'Invited@Example.com');
+do $$ begin
+  assert (select count(*) from public.student_account_invites where student_id = 'aaaaaaaa-0000-0000-0000-0000000001d8') = 2, '招待が2件';
+  assert not exists (select 1 from public.student_accounts where student_id = 'aaaaaaaa-0000-0000-0000-0000000001d8'), 'FAIL: 生徒の承認の前に結び付いた';
+end $$;
+select pg_temp.login('aaaaaaaa-0000-0000-0000-0000000000f2');   -- 別の人には見えない・承認できない
+do $$ declare v uuid; ok boolean := false; begin
+  assert (select count(*) from public.my_student_invites()) = 0, 'FAIL: 別の人に招待が見えた';
+  select id into v from public.student_account_invites;   -- RLS で読めない
+  assert v is null, 'FAIL: 生徒が招待の表を読めた';
+end $$;
+reset role;
+do $$ declare v uuid; ok boolean := false; begin
+  select id into v from public.student_account_invites where email = 'invited@example.com';
+  perform set_config('request.jwt.claims', '{"sub":"aaaaaaaa-0000-0000-0000-0000000000f2","role":"authenticated"}', false);
+  set local role authenticated;
+  begin perform public.accept_student_invite(v); exception when others then ok := true; end;
+  assert ok, 'FAIL: 別の人が招待を承認できた';
+  reset role;
+end $$;
+set role authenticated;
+select pg_temp.login('aaaaaaaa-0000-0000-0000-0000000000f1');
+select public.accept_student_invite(id) from public.my_student_invites();
+do $$ begin
+  assert exists (select 1 from public.student_accounts where student_id = 'aaaaaaaa-0000-0000-0000-0000000001d8' and user_id = 'aaaaaaaa-0000-0000-0000-0000000000f1'), '本人が承認すると結び付く';
+end $$;
+reset role;
+
+-- ---------------------------------------------------------------- 5. app_metadata の変更を profiles に反映（0022）
+update auth.users set raw_app_meta_data = '{"school_id":"aaaaaaaa-0000-0000-0000-000000000000","role":"admin"}' where id = 'aaaaaaaa-0000-0000-0000-00000000000e';
+do $$ begin assert (select role from public.profiles where id = 'aaaaaaaa-0000-0000-0000-00000000000e') = 'admin', '役割の変更が反映される'; end $$;
+update auth.users set raw_app_meta_data = '{}' where id = 'aaaaaaaa-0000-0000-0000-00000000000e';
+do $$ begin assert (select role from public.profiles where id = 'aaaaaaaa-0000-0000-0000-00000000000e') = 'viewer', 'FAIL: 所属を外しても管理者のまま'; end $$;
+
+\echo ' OK: security_test（閲覧専用の役割は書き換えられない・先生は今までどおり・本人確認済みの答案は上書きされない・二段階認証・生徒の承認・役割の反映）'

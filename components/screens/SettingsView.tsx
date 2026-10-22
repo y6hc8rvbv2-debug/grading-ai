@@ -3,6 +3,7 @@
 // 表示の設定は端末に、保存期間は学校（schools.retention）に保存する。
 import { ReviewCopyCard, TutorAdminCard } from "@/components/tutor/TeacherTutor";
 import { AccountDeletion } from "@/components/AccountDeletion";
+import { MfaSettings } from "@/components/MfaSettings";
 import { AiEngineCard } from "@/components/AiEngineCard";
 import { hasAiConsent, setAiConsent } from "@/lib/ai-consent";
 import React, { useEffect, useState } from "react";
@@ -159,6 +160,7 @@ export default function SettingsView() {
             <a href="/privacy">プライバシーポリシー</a>　<a href="/terms">利用規約</a>　<a href="/support">お問い合わせ</a>
           </div>
           <AccountDeletion kind="staff" onDeleted={() => { window.location.href = "/login?deleted=1"; }} />
+          <MfaSettings isAdmin={isAdmin} />
         </Card>
       )}
 

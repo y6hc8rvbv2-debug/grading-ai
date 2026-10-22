@@ -39,7 +39,9 @@
 - **0021_security_hardening.sql**：viewer・board の書き込みを止める（restrictive ポリシー）・本人確認済みの提出を未ログインで上書きしない・提出は1リンク1分120件まで・intake_scans.created_at
 - `next.config.mjs` のセキュリティのヘッダー・`lib/security.ts`（crossSite・bearerMatches・AI の1日の上限）・CSV の式の無効化（`lib/util.ts`）・答案の AI への指示らしい文を要確認（`suspicious_text`）
 - 検証：`supabase/tests/security_test.sql`（run.sh・pglite）・`tests/unit/handy.test.ts`・`npm run preview:check` がヘッダーを確かめる
-- 未対応（ユーザーの判断）：Supabase のアクセストークンの範囲・管理者の MFA・再認証・生徒アカウントの結び付けの承認
+- 2回目（同日。ユーザーの指示でおすすめをすべて実装）：**0022_account_security.sql**（二段階認証を設定した人は aal2 でないと current_school_id/current_role_is が空・生徒アカウントは招待→生徒の承認（student_account_invites・my_student_invites・accept/decline_student_invite。bind_student_account は招待を作るだけでアカウントの有無を答えない）・app_metadata の変更を profiles に反映）。
+  二段階認証の画面 `components/MfaSettings.tsx`・ログインの2段階目（`app/login`）・middleware の aal2 への誘導。再認証 `verifyPassword`（アカウント削除・/api/billing・/api/billing/prepaid。`password` が要る）。
+  verify-db は `VERIFY_DB_URL`（検証用 DB だけの接続文字列。ref・リージョンを照合）を優先（ユーザーが Secret を入れ替えるまでは SUPABASE_ACCESS_TOKEN で動く）。二段階認証は必須にしていない（未設定の管理者が締め出されるため）
 
 ### ver6（2026-10-19。ブランチ claude/test-scoring-v6-app-ii46ie）
 

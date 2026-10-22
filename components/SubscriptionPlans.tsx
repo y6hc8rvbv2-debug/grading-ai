@@ -46,7 +46,14 @@ export default function SubscriptionPlans() {
     if (session.profile) fetch("/api/billing").then((r) => r.json()).then(setBilling).catch(() => setMessage("契約情報を読み込めませんでした。"));
   }, [session.profile]);
 
-  const post = async (url: string, body: unknown) => {
+  // 申し込み・前払い・契約の管理の前に、管理者のパスワードを聞き直す（再認証。2026-10-22。Opus の追加料金の再開は聞かない）
+  const [reauth, setReauth] = useState<{ url: string; body: Record<string, unknown> } | null>(null);
+  const [password, setPassword] = useState("");
+  const post = (url: string, body: Record<string, unknown>) => {
+    if (url === "/api/billing/opus") return send(url, body);
+    setPassword(""); setReauth({ url, body });
+  };
+  const send = async (url: string, body: Record<string, unknown>) => {
     setBusy(true); setMessage("");
     try {
       const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -200,6 +207,17 @@ export default function SubscriptionPlans() {
     </p>
     <p style={{ fontSize: 13, color: T.textSub, lineHeight: 1.8, marginBottom: 0 }}>生徒の復習は、生徒本人の ChatGPT で行います（「ChatGPT で復習」）。ChatGPT の契約・利用料はこのアプリの料金に含まれず、生徒本人または保護者が負担します。アプリの中で AI と会話する機能は含みません。</p>
     <p style={{ fontSize: 12, color: T.textSub, marginBottom: 0 }}><a href="/tokushoho">特定商取引法に基づく表記</a>・<a href="/terms">利用規約</a></p>
+    <Modal open={!!reauth} onClose={() => setReauth(null)} title="本人確認" width={420}
+      footer={<>
+        <Btn variant="ghost" onClick={() => setReauth(null)}>やめる</Btn>
+        <Btn variant="primary" disabled={!password || busy} onClick={() => { const r = reauth!; setReauth(null); send(r.url, { ...r.body, password }); }}>続ける</Btn>
+      </>}>
+      <p style={{ marginTop: 0, fontSize: 13.5, lineHeight: 1.8 }}>お申し込み・お支払い・契約の変更の前に、ログインのパスワードを入力してください（なりすましの防止）。</p>
+      <input type="password" autoComplete="current-password" aria-label="本人確認のパスワード" value={password} autoFocus
+        onChange={(e) => setPassword(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && password && reauth) { const r = reauth; setReauth(null); send(r.url, { ...r.body, password }); } }}
+        style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 8, border: "1px solid #bbb", fontSize: 15 }} />
+    </Modal>
     <Modal open={notes} onClose={() => setNotes(false)} title="契約前の確認事項" footer={<Btn onClick={() => setNotes(false)}>閉じる</Btn>}>
       <ul style={{ paddingInlineStart: 20, lineHeight: 1.9 }}>
         <li>契約は決済画面（Stripe）で金額を確かめて行います。お支払いが確認できてから、有料の回数が使えるようになります。</li>

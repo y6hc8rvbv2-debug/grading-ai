@@ -66,6 +66,12 @@ out=$(run --apply --to latest --confirm-ref cpfhsxbmzoyrlkynveqd --at 0019) || {
 echo "$out" | grep -q "完了：0020" || { echo "$out"; fail "--at 0019 で 0020 を適用していない"; }
 out=$(run --apply --to latest --confirm-ref cpfhsxbmzoyrlkynveqd); echo "$out" | grep -q "決め方：記録" && echo "$out" | grep -q "適用するファイルはありません" || { echo "$out"; fail "記録で 0020 済みと判定しない"; }
 echo "✓ 指紋が同じ番号（0019・0020）は記録で決める。記録が無ければ止まり、--at（状態と合うものだけ）で起点を指定して進む"
+# 2e. 検証用 DB だけの接続文字列（VERIFY_DB_URL）：saiten-verify の ref が無い接続先は、つながずに断る（パスワードは表示しない）
+out=$(VERIFY_DB_URL="postgresql://postgres.otherproject:secretpw@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres" node scripts/verify-db/apply.mjs --check 2>&1 || true)
+echo "$out" | grep -q "検証用（saiten-verify）の DB ではありません" && ! echo "$out" | grep -q "secretpw" || { echo "$out"; fail "別の DB の接続文字列を断らなかった"; }
+out=$(VERIFY_DB_URL="postgresql://postgres.cpfhsxbmzoyrlkynveqd:secretpw@aws-0-us-east-1.pooler.supabase.com:5432/postgres" node scripts/verify-db/apply.mjs --check 2>&1 || true)
+echo "$out" | grep -q "リージョンが ap-northeast-1 ではありません" && ! echo "$out" | grep -q "secretpw" || { echo "$out"; fail "別のリージョンの接続文字列を断らなかった"; }
+echo "✓ VERIFY_DB_URL：検証用でない接続先（ref・リージョン）は断り、パスワードを表示しない"
 # 3. 状態が期待と違う DB（0007 の後に余分な表がある）：何も適用せずに止まる
 fresh; apply_until 0007; "${PSQL[@]}" -c "create table public.extra_table (id int)" >/dev/null
 before=$(fp); out=$(run --apply --to 0014 --confirm-ref cpfhsxbmzoyrlkynveqd || true)
