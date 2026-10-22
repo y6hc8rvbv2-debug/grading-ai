@@ -12,6 +12,7 @@
 // - 失敗しても再試行しない。結果（成功・失敗）は比較試験の表にだけ保存する
 // ============================================================================
 import { createHash } from "node:crypto";
+import { crossSite } from "@/lib/security";
 import { NextResponse } from "next/server";
 import {
   buildCompareInput, callCompareModel, compareAvailability, compareClient, judgeCompare,
@@ -26,6 +27,7 @@ export const maxDuration = 300;
 const MEDIA = /^image\/(jpeg|png|webp|gif)$/;
 
 export async function POST(request: Request) {
+  if (crossSite(request)) return NextResponse.json({ error: "別のサイトからの操作を拒否しました。ページを開き直してください。" }, { status: 403 });
   const g = await compareGate();
   if ("error" in g) return g.error;
   const { supabase } = g;

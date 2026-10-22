@@ -55,6 +55,7 @@ export const FLAG_MESSAGE: Record<ReviewFlag | "unusable", string> = {
   blank_mismatch: "無記入と判定したのに文字を読み取っている",
   key_contradiction: "正答との照合と判定が矛盾",
   model_disagreement: "前のモデルと判定が分かれた",
+  suspicious_text: "答案に AI への指示らしい文がある（点数は先生が確認）",
   unusable: "AIの応答を採点結果として使えない",
 };
 

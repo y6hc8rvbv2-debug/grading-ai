@@ -7,6 +7,7 @@
 // 写真はこの端末で縮小し（長辺2400px）、iPhone の HEIC は JPEG に変換してから送る。
 // ============================================================================
 import React, { useEffect, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import { prepareImage } from "@/lib/image";
 
 type Info = {
@@ -20,7 +21,9 @@ const btn = (bg: string, fg = "#fff"): React.CSSProperties => ({
   background: bg, color: fg, border: "none", borderRadius: 14, padding: "14px 18px", fontSize: 17, fontWeight: 700, cursor: "pointer", width: "100%",
 });
 
-export default function SubmitPage({ params }: { params: { token: string } }) {
+export default function SubmitPage() {
+  // Next.js 15 では params が Promise になったため、useParams で読む
+  const params = useParams<{ token: string }>();
   const [info, setInfo] = useState<Info | null>(null);
   const [error, setError] = useState("");
   const [student, setStudent] = useState("");

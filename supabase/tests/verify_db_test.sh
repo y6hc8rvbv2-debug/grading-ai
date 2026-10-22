@@ -63,7 +63,7 @@ out=$(run --apply --to latest --confirm-ref cpfhsxbmzoyrlkynveqd || true)
 echo "$out" | grep -q "決められません" && ! echo "$out" | grep -q "完了" || { echo "$out"; fail "記録の無い 0019 の DB で止まらなかった"; }
 out=$(run --apply --to latest --confirm-ref cpfhsxbmzoyrlkynveqd --at 0015 || true); echo "$out" | grep -q "DB の状態と合いません" || { echo "$out"; fail "状態と合わない --at を受け付けた"; }
 out=$(run --apply --to latest --confirm-ref cpfhsxbmzoyrlkynveqd --at 0019) || { echo "$out"; fail "--at 0019 で 0020 を適用できない"; }
-echo "$out" | grep -q "完了：0020 を適用" || { echo "$out"; fail "--at 0019 で 0020 を適用していない"; }
+echo "$out" | grep -q "完了：0020" || { echo "$out"; fail "--at 0019 で 0020 を適用していない"; }
 out=$(run --apply --to latest --confirm-ref cpfhsxbmzoyrlkynveqd); echo "$out" | grep -q "決め方：記録" && echo "$out" | grep -q "適用するファイルはありません" || { echo "$out"; fail "記録で 0020 済みと判定しない"; }
 echo "✓ 指紋が同じ番号（0019・0020）は記録で決める。記録が無ければ止まり、--at（状態と合うものだけ）で起点を指定して進む"
 # 3. 状態が期待と違う DB（0007 の後に余分な表がある）：何も適用せずに止まる

@@ -25,6 +25,7 @@ done
 echo "== supabase/tests/rls_test.sql"
 "${PSQL_APP[@]}" -f supabase/tests/rls_test.sql
 "${PSQL_APP[@]}" -f supabase/tests/ver6_test.sql
+"${PSQL_APP[@]}" -f supabase/tests/security_test.sql
 "${PSQL_APP[@]}" -f supabase/tests/workflow_test.sql
 echo "== supabase/tests/tutor_test.sql"
 "${PSQL_APP[@]}" -f supabase/tests/tutor_test.sql

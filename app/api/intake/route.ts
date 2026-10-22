@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { DAILY_LIMIT, crossSite, dayAgo } from "@/lib/security";
 import { createHash } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
@@ -9,6 +10,7 @@ import { loadSchoolAi } from "@/lib/ai/settings";
 import { traitsOf } from "@/lib/grading/models";
 export const maxDuration = 120;
 export async function POST(req: Request) {
+  if (crossSite(req)) return NextResponse.json({ error: "別のサイトからの操作を拒否しました。ページを開き直してください。" }, { status: 403 });
   const db = await createClient();
   const {
     data: { user },
@@ -55,6 +57,11 @@ export async function POST(req: Request) {
       { error: "この画像はいま読み取り中です。少し待ってから、もう一度お試しください" },
       { status: 409 },
     );
+  // 1人が24時間に自動振り分けできる枚数の上限（lib/security.ts）。created_at は 0021 で追加（無い DB では数えずに進める）
+  const { count: today, error: countError } = await db.from("intake_scans").select("id", { head: true, count: "exact" })
+    .eq("created_by", user.id).gte("created_at", dayAgo());
+  if (!countError && (today ?? 0) >= DAILY_LIMIT.intake)
+    return NextResponse.json({ error: `自動振り分けは1日 ${DAILY_LIMIT.intake} 枚までです。明日もう一度お試しください。` }, { status: 429 });
   // 前回失敗した画像は、同じ記録を使ってもう一度読み取る（ver5 は二度と読み取れなかった）
   let job: { id: string } | null = null;
   if (old?.status === "failed") {

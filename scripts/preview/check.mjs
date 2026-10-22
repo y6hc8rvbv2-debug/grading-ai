@@ -38,6 +38,13 @@ for (const p of ["/start", "/login", "/privacy", "/terms", "/support"]) {
   const r = p === "/start" ? first : await get(p);
   r.status === 200 ? ok(`${p} が開ける`) : ng(`${p} が ${r.status}`);
 }
+// セキュリティのヘッダー（next.config.mjs。2026-10-22）
+{
+  const res = await fetch(BASE + "/login", { headers, redirect: "manual" });
+  const need = { "x-frame-options": /SAMEORIGIN|DENY/i, "x-content-type-options": /nosniff/i, "content-security-policy": /frame-ancestors/i, "strict-transport-security": /max-age/i, "permissions-policy": /camera/i };
+  const missing = Object.entries(need).filter(([k, re]) => !re.test(res.headers.get(k) ?? "")).map(([k]) => k);
+  missing.length ? ng(`セキュリティのヘッダーが足りません：${missing.join(", ")}`) : ok("セキュリティのヘッダー（枠への埋め込み禁止・HTTPS だけ・種類の推測禁止・カメラ/マイクの範囲）が付いている");
+}
 {
   const r = await get("/api/submit/not-a-real-token");
   if (r.status === 503) console.log("△ 生徒の端末からの提出は未設定（サーバーに SUPABASE_SERVICE_ROLE_KEY が無い）");

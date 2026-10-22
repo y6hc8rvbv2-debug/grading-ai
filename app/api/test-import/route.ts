@@ -17,6 +17,7 @@
 // ANTHROPIC_API_KEY はサーバーの中だけで使い、応答・ログには出さない。
 // ============================================================================
 import { createHash } from "node:crypto";
+import { DAILY_LIMIT, crossSite, dayAgo } from "@/lib/security";
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
@@ -52,6 +53,7 @@ const fail = (message: string, status: number, extra: Record<string, unknown> = 
 type FileIn = { path: string; kind: SourceKind; name: string };
 
 export async function POST(request: Request) {
+  if (crossSite(request)) return NextResponse.json({ error: "別のサイトからの操作を拒否しました。ページを開き直してください。" }, { status: 403 });
   const startedAt = Date.now();
   const body = await request.json().catch(() => null) as { requestId?: unknown; files?: unknown; force?: unknown; generate?: unknown } | null;
   const requestId = typeof body?.requestId === "string" ? body.requestId : "";
@@ -122,6 +124,10 @@ export async function POST(request: Request) {
       .eq("input_sha", inputSha).eq("status", "done").order("created_at", { ascending: false }).limit(1);
     if (prev?.length) return NextResponse.json({ ok: true, importId: prev[0].id, result: prev[0].result, cached: true });
   }
+  // 1人が24時間に AI で読み取れる回数の上限（盗まれたアカウント・繰り返しで費用が膨らむのを止める。lib/security.ts）
+  const { count: today } = await supabase.from("test_imports").select("id", { head: true, count: "exact" })
+    .eq("created_by", user.id).gte("created_at", dayAgo());
+  if ((today ?? 0) >= DAILY_LIMIT.testImport) return fail(`AI による読み取りは1日 ${DAILY_LIMIT.testImport} 回までです。明日もう一度お試しください。`, 429);
   // 強制終了で running のまま残った同じ資料の読み取りを片付ける（残っていると、同じ資料を二度と読み取れない）
   await supabase.from("test_imports").update({ status: "failed", error: STALE_MESSAGE, finished_at: new Date().toISOString() })
     .eq("school_id", schoolId).eq("input_sha", inputSha).eq("status", "running").lt("created_at", staleBefore);

@@ -14,6 +14,10 @@
 - 報告は「確認済みの URL」から始め、何を変えたか・何を確かめたか・確かめられなかったことを短く書く。URL は Claude が開いて確かめたものだけを「確認済み」と書く
 - 確かめられなかったときは、代わりの古い URL の結果で済ませず、そのまま伝える
 
+**セキュリティの点検も必ず行う（2026-10-22 ユーザーの指示。`docs/SECURITY-REVIEW.md`）**：アプリを作るとき・大きな変更のときは、第三者の不正侵入・書き換え・乗っ取り・個人情報の漏洩を許す脆弱性が無いか、
+不正アクセスの4経路で調べる ― ①正規のアプリ・API を装った侵入（認証・学校の分離・CSRF・回数の制限）②脆弱性（`npm audit`・XSS・CSV・AI への指示の書き込み・ヘッダー）
+③管理者のなりすまし（役割・RLS・関数の権限・MFA）④委託先・クラウド（依存関係・GitHub Actions・鍵）。見つけたらユーザーに報告し、既存の機能を壊さずに防ぐ仕組みを実装する（直せないものは理由とおすすめを書く）
+
 変更を push したら、毎回つぎを行ってから報告する。
 1. 手元の自動テスト → push（ブランチ claude/**）
 2. GitHub Actions の `checks`（単体・DB）と `verify-db`（新しいマイグレーションを検証用 saiten-verify に自動適用。`scripts/verify-db/apply.mjs --to latest`）の結果を確かめる
@@ -28,6 +32,14 @@
 ---
 
 ## 現在地
+
+### セキュリティの点検（2026-10-22。`docs/SECURITY-REVIEW.md`）
+
+- **Next.js を 14.2.35 → 15.5.28 に更新**（遠隔からのコード実行などの公開済みの脆弱性の修正。params は Promise → クライアントは `useParams`、route は `await ctx.params`。`serverExternalPackages`）。postcss は overrides で最新。`npm audit --omit=dev` は 0 件
+- **0021_security_hardening.sql**：viewer・board の書き込みを止める（restrictive ポリシー）・本人確認済みの提出を未ログインで上書きしない・提出は1リンク1分120件まで・intake_scans.created_at
+- `next.config.mjs` のセキュリティのヘッダー・`lib/security.ts`（crossSite・bearerMatches・AI の1日の上限）・CSV の式の無効化（`lib/util.ts`）・答案の AI への指示らしい文を要確認（`suspicious_text`）
+- 検証：`supabase/tests/security_test.sql`（run.sh・pglite）・`tests/unit/handy.test.ts`・`npm run preview:check` がヘッダーを確かめる
+- 未対応（ユーザーの判断）：Supabase のアクセストークンの範囲・管理者の MFA・再認証・生徒アカウントの結び付けの承認
 
 ### ver6（2026-10-19。ブランチ claude/test-scoring-v6-app-ii46ie）
 
@@ -437,7 +449,7 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
 2. **0004〜0016 が本番 Supabase に未適用**（「次にやること」1。先に検証環境で行う。検証環境は 0015 まで適用済み）
 21. **ストアの申請は、iOS・Android のビルド・実機・審査を未実施**（開発環境に Xcode・Android SDK が無い。dl.google.com へも届かない）。
    本物の Supabase でのアカウントの削除（Auth の管理 API）・Vercel Cron の保存期間の削除も未確認。Apple 4.2（Web を包んだだけのアプリ）で断られる可能性がある。
-   `npm audit` が Next.js 14 系に重大な警告（修正は Next.js 16 への更新。next/image の外部画像・rewrites は使っていない）
+   （解決 2026-10-22）`npm audit` の Next.js 14 系の重大な警告 → Next.js 15.5.28 に更新して 0 件
 20. **B方式（本人の ChatGPT で復習）は Docker なしの画面テストでのみ検証** — 本物の Supabase（クラウド）・Vercel の Preview・実機（iPhone/iPad Safari・Android Chrome でのコピーと ChatGPT アプリへの受け渡し）は未確認。
    ChatGPT の利用条件（年齢・保護者の同意）も未確認。先生のコメントに名前を書くとコピー内容に入る（画面で「送る前に消す」と案内）。Docker の E2E（`npm run test:e2e`）は今回の変更後に実行できていない（containerd が起動しない環境）
 16. **模範解答からの自動入力は代役 API でのみ検証** — 本物の模範解答での読み取り精度（特に配点表・作図・PDF の bbox）は Preview で確かめる。PDF の資料は該当箇所の枠を表示できない（ページを開くだけ）。作図の模範図は採点AIには送っていない（採点条件の文章だけ）

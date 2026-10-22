@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { purgeExpired } from "@/lib/retention";
+import { bearerMatches } from "@/lib/security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export const maxDuration = 300;
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret || !process.env.SUPABASE_SERVICE_ROLE_KEY) return NextResponse.json({ error: "CRON_SECRET・SUPABASE_SERVICE_ROLE_KEY が設定されていません" }, { status: 503 });
-  if (req.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ error: "認証できません" }, { status: 401 });
+  if (!bearerMatches(req, secret)) return NextResponse.json({ error: "認証できません" }, { status: 401 });
   const sb = createAdminClient();
   const fail = (what: string, e: { message: string } | null) => { if (e) throw new Error(`${what}：${e.message}`); };
   try {
