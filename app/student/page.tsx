@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/data/source";
 import { analyzePage, displayableUrl } from "@/lib/redpen/analyze";
@@ -347,7 +348,7 @@ export default function StudentPage() {
             </span>
           </label>
           <p style={{ fontSize: 12.5, color: "#555" }}>
-            <a href="/support">困ったとき・お問い合わせ</a>　<a href="/account-deletion">アカウントの削除について</a>　<a href="/">先生の方はこちら</a>
+            <a href="/support">困ったとき・お問い合わせ</a>　<a href="/account-deletion">アカウントの削除について</a>　<Link href="/">先生の方はこちら</Link>
           </p>
         </form>
       ) : (

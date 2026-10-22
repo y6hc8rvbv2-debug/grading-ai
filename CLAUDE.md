@@ -19,7 +19,7 @@
 ③管理者のなりすまし（役割・RLS・関数の権限・MFA）④委託先・クラウド（依存関係・GitHub Actions・鍵）。見つけたらユーザーに報告し、既存の機能を壊さずに防ぐ仕組みを実装する（直せないものは理由とおすすめを書く）
 
 変更を push したら、毎回つぎを行ってから報告する。
-1. 手元の自動テスト → push（ブランチ claude/**）
+1. 手元の自動テスト → push（ブランチ claude/**）。ビルドは `.next` を消してから（lint の結果の使い回しで、Vercel だけが失敗することがある。2026-10-22）
 2. GitHub Actions の `checks`（単体・DB）と `verify-db`（新しいマイグレーションを検証用 saiten-verify に自動適用。`scripts/verify-db/apply.mjs --to latest`）の結果を確かめる
 3. Vercel の Preview はブランチの固定 URL https://grading-ai-git-claude-test-sc-b3ad9f-y6hc8rvbv2-debugs-projects.vercel.app で確かめる（鍵はこの環境の Network secrets が自動で付ける。2026-10-20 確認済み。個別 URL には付かないことがある）。固定 URL 以外は GitHub の Deployments から読み、`npm run preview:check -- <URL> --shots <scratchpad>` で確かめる
    （`VERCEL_AUTOMATION_BYPASS_SECRET` で Deployment Protection を通る。`PREVIEW_TEACHER_EMAIL`・`PREVIEW_TEACHER_PASSWORD` があれば `--email "$PREVIEW_TEACHER_EMAIL" --password-env PREVIEW_TEACHER_PASSWORD` でログインと準備状況も）

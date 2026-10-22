@@ -94,7 +94,8 @@ revoke all on schema verify_ledger from public;
 create table if not exists verify_ledger.applied (version text primary key, applied_at timestamptz not null default now(), how text not null);`;
 async function ledgerMax() {
   const has = await readJson(`to_json(to_regclass('verify_ledger.applied') is not null)`);
-  return has ? await readJson(`(select to_json(max(version)) from verify_ledger.applied)`) : null;
+  // 文字列を直接返すと、API（解析済みの値を返す）と psql（JSON の文字列を返す）で読み方が変わるので、オブジェクトに包む
+  return has ? ((await readJson(`(select json_build_object('v', max(version)) from verify_ledger.applied)`))?.v ?? null) : null;
 }
 async function ledgerAdd(version, how) {
   await runSql(`${LEDGER_DDL}\ninsert into verify_ledger.applied(version, how) values ('${version}', '${how}') on conflict (version) do nothing;`);
