@@ -40,7 +40,7 @@
 - `next.config.mjs` のセキュリティのヘッダー・`lib/security.ts`（crossSite・bearerMatches・AI の1日の上限）・CSV の式の無効化（`lib/util.ts`）・答案の AI への指示らしい文を要確認（`suspicious_text`）
 - 検証：`supabase/tests/security_test.sql`（run.sh・pglite）・`tests/unit/handy.test.ts`・`npm run preview:check` がヘッダーを確かめる
 - 2回目（同日。ユーザーの指示でおすすめをすべて実装）：**0022_account_security.sql**（二段階認証を設定した人は aal2 でないと current_school_id/current_role_is が空・生徒アカウントは招待→生徒の承認（student_account_invites・my_student_invites・accept/decline_student_invite。bind_student_account は招待を作るだけでアカウントの有無を答えない）・app_metadata の変更を profiles に反映）。
-  二段階認証の画面 `components/MfaSettings.tsx`・ログインの2段階目（`app/login`）・middleware の aal2 への誘導。再認証 `verifyPassword`（アカウント削除・/api/billing・/api/billing/prepaid。`password` が要る）。
+  二段階認証の画面 `components/MfaSettings.tsx`・ログインの2段階目（`app/login`）・proxy.ts（旧 middleware.ts）の aal2 への誘導。再認証 `verifyPassword`（アカウント削除・/api/billing・/api/billing/prepaid。`password` が要る）。
   verify-db は `VERIFY_DB_URL`（検証用 DB だけの接続文字列。ref・リージョンを照合）を優先（ユーザーが Secret を入れ替えるまでは SUPABASE_ACCESS_TOKEN で動く）。二段階認証は必須にしていない（未設定の管理者が締め出されるため）
 
 ### ver6（2026-10-19。ブランチ claude/test-scoring-v6-app-ii46ie）
@@ -71,6 +71,16 @@ DB は **0019_ver6.sql**（ai_settings・submission_links の列・link_uploads�
   （振り分けは PNG の tEXt の印を読む・検算/判定・同時数 /__stats）。Supabase の入り口の代役はアップロードを保存する
 - 未確認：本物の Claude・本物のスマホ・本物の Stripe（コンビニ/PayPay の入金）・本物の暗号資産の決済代行・Vercel（HTTP/2）での同時数（手元は HTTP/1.1 で6件まで）
 
+
+### Next.js 16 への更新（2026-10-23。ブランチ claude/nextjs-16-upgrade → claude/test-scoring-v6-app-ii46ie の PR）
+
+ver6 のブランチで Next.js 15.5 に更新済み（2026-10-22）だったものを、さらに Next.js **16.4**・React 18 → **19** に更新した。
+- `params` は ver6 で `useParams`（クライアント）・`await ctx.params`（API）に直してあり、そのまま使える
+- `middleware.ts` → **`proxy.ts`**（関数名も `proxy`。中身は同じ）
+- `next lint` が無くなったので `npm run lint` は ESLint を直接使う（`eslint.config.mjs`。対象は以前と同じ app・components・lib・types・proxy.ts）。
+  eslint-config-next 16 で増えた React Compiler 向けの規則（react-hooks/refs など）は、以前の検査に無かったので切ってある
+- ビルドは Turbopack。ページの静的/動的の区分は以前と同じ
+- 検証は PR の説明に記録（ビルド・lint・単体・DB・料金 DB・画面テスト）。Vercel の Preview は、この環境から *.vercel.app に届かず未確認
 
 ### 料金・決済・採点枠・夜間予約（PR #2 をこのブランチに取り込み。2026-10-11）
 
@@ -311,8 +321,8 @@ DB は **0019_ver6.sql**（ai_settings・submission_links の列・link_uploads�
 ## アーキテクチャ
 
 ```
-Next.js 14 (App Router, TypeScript)
-  ├── middleware.ts              セッション維持 + 未ログインを /login へ（Supabase 未設定なら素通し＝デモモード）
+Next.js 16 (App Router, TypeScript, React 19)
+  ├── proxy.ts                   セッション維持 + 未ログインを /login へ（Supabase 未設定なら素通し＝デモモード）
   ├── app/
   │   ├── login/                 教職員ログイン（生徒は /student から自分のアカウントでログイン）
   │   ├── start/ privacy/ terms/ support/ account-deletion/   ログインなしの公開ページ（ストアの起動画面・ポリシー）
@@ -451,7 +461,7 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
 2. **0004〜0016 が本番 Supabase に未適用**（「次にやること」1。先に検証環境で行う。検証環境は 0015 まで適用済み）
 21. **ストアの申請は、iOS・Android のビルド・実機・審査を未実施**（開発環境に Xcode・Android SDK が無い。dl.google.com へも届かない）。
    本物の Supabase でのアカウントの削除（Auth の管理 API）・Vercel Cron の保存期間の削除も未確認。Apple 4.2（Web を包んだだけのアプリ）で断られる可能性がある。
-   （解決 2026-10-22）`npm audit` の Next.js 14 系の重大な警告 → Next.js 15.5.28 に更新して 0 件
+   （解決 2026-10-22）`npm audit` の Next.js 14 系の重大な警告 → Next.js 15.5.28 に更新して 0 件。その後 Next.js 16.4・React 19 へ更新（ブランチ claude/nextjs-16-upgrade）
 20. **B方式（本人の ChatGPT で復習）は Docker なしの画面テストでのみ検証** — 本物の Supabase（クラウド）・Vercel の Preview・実機（iPhone/iPad Safari・Android Chrome でのコピーと ChatGPT アプリへの受け渡し）は未確認。
    ChatGPT の利用条件（年齢・保護者の同意）も未確認。先生のコメントに名前を書くとコピー内容に入る（画面で「送る前に消す」と案内）。Docker の E2E（`npm run test:e2e`）は今回の変更後に実行できていない（containerd が起動しない環境）
 16. **模範解答からの自動入力は代役 API でのみ検証** — 本物の模範解答での読み取り精度（特に配点表・作図・PDF の bbox）は Preview で確かめる。PDF の資料は該当箇所の枠を表示できない（ページを開くだけ）。作図の模範図は採点AIには送っていない（採点条件の文章だけ）
