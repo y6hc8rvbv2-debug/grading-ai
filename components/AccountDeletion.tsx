@@ -1,11 +1,12 @@
 "use client";
 // 本人によるアカウントの削除（生徒・教職員で共通）。確認の文字を入れてから削除する。
-// 削除はサーバー（/api/account/delete）が行う。消えるもの・残るものを先に示す。
+// 削除はサーバー（/api/account/delete）が行う。消えるもの・残るものを先に示す。本人のパスワードも聞き直す（再認証。2026-10-22）
 import React, { useState } from "react";
 
 export function AccountDeletion({ kind, onDeleted }: { kind: "student" | "staff"; onDeleted: () => void }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const btn: React.CSSProperties = { padding: "8px 14px", minHeight: 40, borderRadius: 10, border: "1px solid #B3261E", background: "#fff", color: "#B3261E", fontSize: 14, cursor: "pointer" };
@@ -13,7 +14,7 @@ export function AccountDeletion({ kind, onDeleted }: { kind: "student" | "staff"
   const remove = async () => {
     setBusy(true); setMessage("");
     try {
-      const res = await fetch("/api/account/delete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: text.trim() }), cache: "no-store" });
+      const res = await fetch("/api/account/delete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: text.trim(), password }), cache: "no-store" });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) { setMessage(j.error ?? "削除できませんでした。時間をおいてお試しください。"); return; }
       try { localStorage.clear(); sessionStorage.clear(); } catch { /* 使えない環境 */ }
@@ -43,10 +44,15 @@ export function AccountDeletion({ kind, onDeleted }: { kind: "student" | "staff"
             <input aria-label="確認の文字" value={text} onChange={(e) => setText(e.target.value)}
               style={{ display: "block", marginTop: 4, padding: 8, fontSize: 15, borderRadius: 8, border: "1px solid #9aa3ad", width: 160 }} />
           </label>
+          <label style={{ display: "block", marginBottom: 6 }}>
+            本人確認のため、ログインのパスワード
+            <input aria-label="本人確認のパスワード" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)}
+              style={{ display: "block", marginTop: 4, padding: 8, fontSize: 15, borderRadius: 8, border: "1px solid #9aa3ad", width: 220 }} />
+          </label>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button style={{ ...btn, background: "#B3261E", color: "#fff", opacity: text.trim() === "削除" && !busy ? 1 : 0.5 }}
-              disabled={text.trim() !== "削除" || busy} onClick={remove}>{busy ? "削除しています…" : "削除する"}</button>
-            <button style={{ ...btn, borderColor: "#9aa3ad", color: "#333" }} onClick={() => { setOpen(false); setText(""); setMessage(""); }}>やめる</button>
+            <button style={{ ...btn, background: "#B3261E", color: "#fff", opacity: text.trim() === "削除" && password && !busy ? 1 : 0.5 }}
+              disabled={text.trim() !== "削除" || !password || busy} onClick={remove}>{busy ? "削除しています…" : "削除する"}</button>
+            <button style={{ ...btn, borderColor: "#9aa3ad", color: "#333" }} onClick={() => { setOpen(false); setText(""); setPassword(""); setMessage(""); }}>やめる</button>
           </div>
           {message && <p role="alert" style={{ color: "#B3261E", margin: "6px 0 0" }}>{message}</p>}
         </div>

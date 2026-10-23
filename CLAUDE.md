@@ -14,8 +14,12 @@
 - 報告は「確認済みの URL」から始め、何を変えたか・何を確かめたか・確かめられなかったことを短く書く。URL は Claude が開いて確かめたものだけを「確認済み」と書く
 - 確かめられなかったときは、代わりの古い URL の結果で済ませず、そのまま伝える
 
+**セキュリティの点検も必ず行う（2026-10-22 ユーザーの指示。`docs/SECURITY-REVIEW.md`）**：アプリを作るとき・大きな変更のときは、第三者の不正侵入・書き換え・乗っ取り・個人情報の漏洩を許す脆弱性が無いか、
+不正アクセスの4経路で調べる ― ①正規のアプリ・API を装った侵入（認証・学校の分離・CSRF・回数の制限）②脆弱性（`npm audit`・XSS・CSV・AI への指示の書き込み・ヘッダー）
+③管理者のなりすまし（役割・RLS・関数の権限・MFA）④委託先・クラウド（依存関係・GitHub Actions・鍵）。見つけたらユーザーに報告し、既存の機能を壊さずに防ぐ仕組みを実装する（直せないものは理由とおすすめを書く）
+
 変更を push したら、毎回つぎを行ってから報告する。
-1. 手元の自動テスト → push（ブランチ claude/**）
+1. 手元の自動テスト → push（ブランチ claude/**）。ビルドは `.next` を消してから（lint の結果の使い回しで、Vercel だけが失敗することがある。2026-10-22）
 2. GitHub Actions の `checks`（単体・DB）と `verify-db`（新しいマイグレーションを検証用 saiten-verify に自動適用。`scripts/verify-db/apply.mjs --to latest`）の結果を確かめる
 3. Vercel の Preview はブランチの固定 URL https://grading-ai-git-claude-test-sc-b3ad9f-y6hc8rvbv2-debugs-projects.vercel.app で確かめる（鍵はこの環境の Network secrets が自動で付ける。2026-10-20 確認済み。個別 URL には付かないことがある）。固定 URL 以外は GitHub の Deployments から読み、`npm run preview:check -- <URL> --shots <scratchpad>` で確かめる
    （`VERCEL_AUTOMATION_BYPASS_SECRET` で Deployment Protection を通る。`PREVIEW_TEACHER_EMAIL`・`PREVIEW_TEACHER_PASSWORD` があれば `--email "$PREVIEW_TEACHER_EMAIL" --password-env PREVIEW_TEACHER_PASSWORD` でログインと準備状況も）
@@ -28,6 +32,16 @@
 ---
 
 ## 現在地
+
+### セキュリティの点検（2026-10-22。`docs/SECURITY-REVIEW.md`）
+
+- **Next.js を 14.2.35 → 15.5.28 に更新**（遠隔からのコード実行などの公開済みの脆弱性の修正。params は Promise → クライアントは `useParams`、route は `await ctx.params`。`serverExternalPackages`）。postcss は overrides で最新。`npm audit --omit=dev` は 0 件
+- **0021_security_hardening.sql**：viewer・board の書き込みを止める（restrictive ポリシー）・本人確認済みの提出を未ログインで上書きしない・提出は1リンク1分120件まで・intake_scans.created_at
+- `next.config.mjs` のセキュリティのヘッダー・`lib/security.ts`（crossSite・bearerMatches・AI の1日の上限）・CSV の式の無効化（`lib/util.ts`）・答案の AI への指示らしい文を要確認（`suspicious_text`）
+- 検証：`supabase/tests/security_test.sql`（run.sh・pglite）・`tests/unit/handy.test.ts`・`npm run preview:check` がヘッダーを確かめる
+- 2回目（同日。ユーザーの指示でおすすめをすべて実装）：**0022_account_security.sql**（二段階認証を設定した人は aal2 でないと current_school_id/current_role_is が空・生徒アカウントは招待→生徒の承認（student_account_invites・my_student_invites・accept/decline_student_invite。bind_student_account は招待を作るだけでアカウントの有無を答えない）・app_metadata の変更を profiles に反映）。
+  二段階認証の画面 `components/MfaSettings.tsx`・ログインの2段階目（`app/login`）・proxy.ts（旧 middleware.ts）の aal2 への誘導。再認証 `verifyPassword`（アカウント削除・/api/billing・/api/billing/prepaid。`password` が要る）。
+  verify-db は `VERIFY_DB_URL`（検証用 DB だけの接続文字列。ref・リージョンを照合）を優先（ユーザーが Secret を入れ替えるまでは SUPABASE_ACCESS_TOKEN で動く）。二段階認証は必須にしていない（未設定の管理者が締め出されるため）
 
 ### ver6（2026-10-19。ブランチ claude/test-scoring-v6-app-ii46ie）
 
@@ -58,15 +72,15 @@ DB は **0019_ver6.sql**（ai_settings・submission_links の列・link_uploads�
 - 未確認：本物の Claude・本物のスマホ・本物の Stripe（コンビニ/PayPay の入金）・本物の暗号資産の決済代行・Vercel（HTTP/2）での同時数（手元は HTTP/1.1 で6件まで）
 
 
-### Next.js 16 への更新（2026-10-21。ブランチ claude/nextjs-16-upgrade）
+### Next.js 16 への更新（2026-10-23。ブランチ claude/nextjs-16-upgrade → claude/test-scoring-v6-app-ii46ie の PR）
 
-`npm audit` の重大な警告（Next.js 14 系・postcss）を解消するため、Next.js 14.2 → **16.4**・React 18 → **19** に更新した。アプリに含まれる部品の警告は0件。
-- `params` は Promise で届く（`app/submit/[token]/page.tsx`・`app/(dashboard)/history/[id]/page.tsx` は `use(params)`、`app/api/submit/[token]/route.ts` は `await ctx.params`）
-- `middleware.ts` → **`proxy.ts`**（関数名も `proxy`。中身は同じ）。`next.config.mjs` の `experimental.serverComponentsExternalPackages` → `serverExternalPackages`
+ver6 のブランチで Next.js 15.5 に更新済み（2026-10-22）だったものを、さらに Next.js **16.4**・React 18 → **19** に更新した。
+- `params` は ver6 で `useParams`（クライアント）・`await ctx.params`（API）に直してあり、そのまま使える
+- `middleware.ts` → **`proxy.ts`**（関数名も `proxy`。中身は同じ）
 - `next lint` が無くなったので `npm run lint` は ESLint を直接使う（`eslint.config.mjs`。対象は以前と同じ app・components・lib・types・proxy.ts）。
   eslint-config-next 16 で増えた React Compiler 向けの規則（react-hooks/refs など）は、以前の検査に無かったので切ってある
-- ビルドは Turbopack（約25秒。以前は約53秒）。ページの静的/動的の区分は以前と同じ
-- 検証：ビルド・lint・単体（124 合格・2 スキップ）・DB・料金 DB・画面テスト（e2e-lite）。Vercel の Preview・実機は push 後に確かめる
+- ビルドは Turbopack。ページの静的/動的の区分は以前と同じ
+- 検証は PR の説明に記録（ビルド・lint・単体・DB・料金 DB・画面テスト）。Vercel の Preview は、この環境から *.vercel.app に届かず未確認
 
 ### 料金・決済・採点枠・夜間予約（PR #2 をこのブランチに取り込み。2026-10-11）
 
@@ -447,7 +461,7 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
 2. **0004〜0016 が本番 Supabase に未適用**（「次にやること」1。先に検証環境で行う。検証環境は 0015 まで適用済み）
 21. **ストアの申請は、iOS・Android のビルド・実機・審査を未実施**（開発環境に Xcode・Android SDK が無い。dl.google.com へも届かない）。
    本物の Supabase でのアカウントの削除（Auth の管理 API）・Vercel Cron の保存期間の削除も未確認。Apple 4.2（Web を包んだだけのアプリ）で断られる可能性がある。
-   （解決）`npm audit` の Next.js 14 系の重大な警告は、Next.js 16 への更新で解消（2026-10-21。アプリに含まれる部品の警告は0件。残りは開発用の道具 eslint-config-next・@capacitor/cli の中だけ）
+   （解決 2026-10-22）`npm audit` の Next.js 14 系の重大な警告 → Next.js 15.5.28 に更新して 0 件。その後 Next.js 16.4・React 19 へ更新（ブランチ claude/nextjs-16-upgrade）
 20. **B方式（本人の ChatGPT で復習）は Docker なしの画面テストでのみ検証** — 本物の Supabase（クラウド）・Vercel の Preview・実機（iPhone/iPad Safari・Android Chrome でのコピーと ChatGPT アプリへの受け渡し）は未確認。
    ChatGPT の利用条件（年齢・保護者の同意）も未確認。先生のコメントに名前を書くとコピー内容に入る（画面で「送る前に消す」と案内）。Docker の E2E（`npm run test:e2e`）は今回の変更後に実行できていない（containerd が起動しない環境）
 16. **模範解答からの自動入力は代役 API でのみ検証** — 本物の模範解答での読み取り精度（特に配点表・作図・PDF の bbox）は Preview で確かめる。PDF の資料は該当箇所の枠を表示できない（ページを開くだけ）。作図の模範図は採点AIには送っていない（採点条件の文章だけ）

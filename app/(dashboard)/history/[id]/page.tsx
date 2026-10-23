@@ -1,9 +1,9 @@
 "use client";
-import { use } from "react";
+import { useParams } from "next/navigation";
 import GradingDetail from "@/components/screens/GradingDetail";
 
-// Next.js 15 から params は Promise で届く
-export default function Page({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+// Next.js 15 では params が Promise になったため、クライアントでは useParams で読む
+export default function Page() {
+  const { id } = useParams<{ id: string }>();
   return <GradingDetail subId={decodeURIComponent(id)} />;
 }

@@ -11,6 +11,7 @@
 // ANTHROPIC_API_KEY はサーバーの中だけで使い、応答・ログには出さない。
 // ============================================================================
 import { NextResponse } from "next/server";
+import { crossSite } from "@/lib/security";
 import {
   COMPARE_ANSWER_KEY, COMPARE_CANDIDATES, COMPARE_EXPECTED, PRICES, PRICING_SOURCE,
   compareAvailability, compareClient, describeCompareError, resolveCompareModels,
@@ -50,6 +51,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (crossSite(request)) return NextResponse.json({ error: "別のサイトからの操作を拒否しました。ページを開き直してください。" }, { status: 403 });
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const action = typeof body?.action === "string" ? body.action : "";
 

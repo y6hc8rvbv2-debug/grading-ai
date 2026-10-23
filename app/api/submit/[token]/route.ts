@@ -60,11 +60,8 @@ function sniff(buf: Buffer): "jpg" | "png" | "webp" | null {
   return null;
 }
 
-// Next.js 15 から params は Promise で届く
-type Ctx = { params: Promise<{ token: string }> };
-
-export async function GET(_req: Request, ctx: Ctx) {
-  const params = await ctx.params;
+export async function GET(_req: Request, ctx: { params: Promise<{ token: string }> }) {
+  const params = await ctx.params;   // Next.js 15：params は Promise
   if (!configured()) return fail("この学校では、まだタブレット・スマホからの提出を使えません。先生に伝えてください。", 503);
   if (!TOKEN.test(params.token)) return fail("この提出リンクは使えません。先生に新しいリンクをもらってください。", 404);
   const { data, error } = await createAdminClient().rpc("submit_link_info", { p_token: params.token });
@@ -75,8 +72,8 @@ export async function GET(_req: Request, ctx: Ctx) {
   return NextResponse.json({ ...info, me: me && info.students.some((s) => s.id === me) ? me : null }, { headers: { "cache-control": "no-store" } });
 }
 
-export async function POST(req: Request, ctx: Ctx) {
-  const params = await ctx.params;
+export async function POST(req: Request, ctx: { params: Promise<{ token: string }> }) {
+  const params = await ctx.params;   // Next.js 15：params は Promise
   if (!configured()) return fail("この学校では、まだタブレット・スマホからの提出を使えません。先生に伝えてください。", 503);
   if (!TOKEN.test(params.token)) return fail("この提出リンクは使えません。先生に新しいリンクをもらってください。", 404);
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";

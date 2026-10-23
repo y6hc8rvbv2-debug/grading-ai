@@ -30,20 +30,22 @@ Replit のように「頼む → 自動で反映 → URL で確認 → 手直し
 
 > 鍵（トークン・パスワード）は、**チャットに貼らないでください**。下の画面に直接入れます。
 
-### 設定1．GitHub に Supabase の鍵を登録する（約5分）
+### 設定1．GitHub に検証用 DB の鍵を登録する（約5分）
 
-検証用 DB へ自動で適用するための鍵です。
+検証用 DB へ自動で適用するための鍵です。**検証用 DB だけに届く「接続文字列」（おすすめ）**を使います。
+（2026-10-22 まではアカウント全体を操作できるアクセストークン `SUPABASE_ACCESS_TOKEN` でした。登録済みなら、下の手順で入れ替えてください）
 
-1. https://supabase.com/dashboard/account/tokens を開き、**Generate new token** を押す
-   - 名前：`github-verify-db`　有効期限：**30日** など短めがおすすめ（切れたら同じ手順で作り直す）
-   - 表示された `sbp_…` をコピー（この画面を閉じると二度と見られません）
-2. GitHub のリポジトリ（grading-ai）→ **Settings → Secrets and variables → Actions → New repository secret**
-   - Name：`SUPABASE_ACCESS_TOKEN`
-   - Secret：さきほどコピーした値 → **Add secret**
-3. 確認：GitHub → **Actions → verify-db → Run workflow**。緑の ✓ になり、ログの最後に「完了：…」か「適用するファイルはありません」と出れば OK
+1. Supabase で **saiten-verify**（検証用）のプロジェクトを開き、上の **Connect** を押す
+2. **Session pooler** の接続文字列（`postgresql://postgres.cpfhsxbmzoyrlkynveqd:[YOUR-PASSWORD]@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres` の形）をコピーし、
+   `[YOUR-PASSWORD]` を検証用 DB のパスワードに置き換える（忘れたら Project Settings → Database → Reset database password。**検証用のプロジェクトだけ**）
+3. GitHub のリポジトリ（grading-ai）→ **Settings → Secrets and variables → Actions → New repository secret**
+   - Name：`VERIFY_DB_URL`
+   - Secret：手順2の文字列 → **Add secret**
+4. 入れ替えの場合：同じ画面で `SUPABASE_ACCESS_TOKEN` を **Remove**。Supabase の https://supabase.com/dashboard/account/tokens でも、そのトークンを **Revoke**（無効に）する
+5. 確認は Claude が行います（Actions → verify-db。ログに「接続先：検証用 DB の接続文字列」と出る）
 
-> この鍵は、先生の Supabase アカウントの全プロジェクトを操作できる強い鍵です。
-> ただし仕組みの側で、saiten-verify（名前・東京リージョン・ref まで照合）以外には使わないようにしています。心配なときは有効期限を短くしてください。
+> この鍵で届くのは検証用 DB だけです（本番のプロジェクトには届きません）。仕組みの側でも、接続先に saiten-verify の ref・東京リージョンが入っていなければ断ります。
+> `SUPABASE_ACCESS_TOKEN` が残っている間は、Actions に「アカウント全体のトークンを使っています」と警告が出ます。
 
 ### 設定2．Vercel の Preview に鍵を足す（約5分）
 
@@ -110,6 +112,7 @@ Stripe の決済・契約画面に出る商品名（例「テスト採点ver5 �
 | 症状 | 原因と直し方 |
 |---|---|
 | Actions の verify-db が「Secret … が無いので省きました」 | 設定1が未完了 |
+| verify-db が「検証用（saiten-verify）の DB ではありません」 | VERIFY_DB_URL に別のプロジェクトの接続文字列が入っている。設定1の手順2をやり直す |
 | verify-db が「HTTP 401」 | Supabase の鍵の期限切れ → 設定1で作り直して Secret を更新 |
 | verify-db が「どこまで適用済みか決められません」 | 名前を変えないマイグレーション（例 0020）の前後は、DB の形だけでは区別できない。Claude が番号を確かめ、Actions → verify-db → Run workflow の **at** にいまの番号を入れて実行する（以後は検証用 DB 内の記録 verify_ledger で自動で決まる） |
 | verify-db が「どの番号の適用後とも一致しません」 | 検証用 DB が手で変えられている。Claude に、表示された違いを伝える（自動では直しません） |

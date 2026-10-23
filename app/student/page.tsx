@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/data/source";
 import { analyzePage, displayableUrl } from "@/lib/redpen/analyze";
@@ -192,6 +193,8 @@ export default function StudentPage() {
   const [message, setMessage] = useState("");
   const [rows, setRows] = useState<Release[]>([]);
   const [inbox, setInbox] = useState<InboxRow[]>([]);
+  // 先生からの招待（0022）：承認すると、その出席番号の答案が返却されるようになる
+  const [invites, setInvites] = useState<{ id: string; school_name: string; class_label: string; number: number }[]>([]);
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<"list" | "settings" | "account" | string>("list");
   // 新規登録の同意（利用規約・プライバシーポリシー。13歳未満は保護者の同意）
@@ -235,7 +238,17 @@ export default function StudentPage() {
             : ((data || []) as Release[]),
         );
       setInbox((ib ?? []) as InboxRow[]);
+      // 0022 が無い DB では関数が無いので、招待は出さない
+      const { data: inv } = await db.rpc("my_student_invites");
+      setInvites(Array.isArray(inv) ? inv : []);
     }
+  };
+  const answerInvite = async (id: string, accept: boolean) => {
+    setBusy(true);
+    const { error } = await createClient().rpc(accept ? "accept_student_invite" : "decline_student_invite", { p_id: id });
+    setBusy(false);
+    setMessage(error ? error.message : accept ? "承認しました。先生が返却した答案がここに届きます。" : "招待を断りました。");
+    await load();
   };
   useEffect(() => {
     // ログイン前はチャッピー先生の状態を問い合わせない（未ログインの 401 を出さない）
@@ -280,6 +293,7 @@ export default function StudentPage() {
     setUser("");
     setRows([]);
     setInbox([]);
+    setInvites([]);
     setStatus(null);
     setCopy(null);
   };
@@ -347,10 +361,7 @@ export default function StudentPage() {
             </span>
           </label>
           <p style={{ fontSize: 12.5, color: "#555" }}>
-            <a href="/support">困ったとき・お問い合わせ</a>　<a href="/account-deletion">アカウントの削除について</a>　
-            {/* 生徒の画面の状態を残さないよう、先生の画面へはページごと読み直して移る */}
-            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-            <a href="/">先生の方はこちら</a>
+            <a href="/support">困ったとき・お問い合わせ</a>　<a href="/account-deletion">アカウントの削除について</a>　<Link href="/">先生の方はこちら</Link>
           </p>
         </form>
       ) : (
@@ -386,6 +397,17 @@ export default function StudentPage() {
           )}
           {view === "list" && (
             <>
+              {invites.map((iv) => (
+                <section key={iv.id} data-testid="invite" style={{ border: "2px solid #2f5bd3", borderRadius: 12, padding: 12, margin: "8px 0", background: "#f3f6ff" }}>
+                  <b>先生からの招待</b>
+                  <p style={{ margin: "6px 0" }}>{iv.school_name}・{iv.class_label}・出席番号 {iv.number} の答案を、このアカウントで受け取りますか？</p>
+                  <p style={{ margin: "6px 0", fontSize: 13, color: "#555" }}>自分の出席番号でなければ「断る」を押して、先生に伝えてください。</p>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button disabled={busy} onClick={() => answerInvite(iv.id, true)} style={{ padding: "8px 16px", borderRadius: 10, background: "#1E3A5F", color: "#fff", border: "none" }}>承認する</button>
+                    <button disabled={busy} onClick={() => answerInvite(iv.id, false)} style={{ padding: "8px 16px", borderRadius: 10 }}>断る</button>
+                  </div>
+                </section>
+              ))}
               {!rows.length && (
                 <p>
                   返却された答案はまだありません。先生の配信後にここへ表示されます。

@@ -51,6 +51,18 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // 二段階認証（0022）：設定済みの人が1段階目（パスワード）だけで止まっていたら、コードの入力に戻す（DB も 2段階目まで済まないとデータを返さない）
+  if (user && !isPublic) {
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aal?.nextLevel === "aal2" && aal.currentLevel !== "aal2") {
+      if (path.startsWith("/api/")) return NextResponse.json({ error: "二段階認証のコードを入力してください。ページを開き直してください。" }, { status: 401 });
+      const url = request.nextUrl.clone();
+      url.pathname = "/login";
+      url.search = "?mfa=1";
+      return NextResponse.redirect(url);
+    }
+  }
+
   return response;
 }
 

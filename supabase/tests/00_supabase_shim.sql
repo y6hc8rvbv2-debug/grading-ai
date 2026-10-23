@@ -46,6 +46,19 @@ create function auth.role() returns text language sql stable as $$
   select nullif(current_setting('request.jwt.claims', true)::jsonb->>'role', '')
 $$;
 grant execute on function auth.uid(), auth.role() to anon, authenticated, service_role, app_owner;
+-- 二段階認証（0022）：Supabase の auth.jwt() と auth.mfa_factors の代役（aal は JWT の主張から読む）
+create function auth.jwt() returns jsonb language sql stable as $$
+  select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb
+$$;
+grant execute on function auth.jwt() to anon, authenticated, service_role, app_owner;
+create table auth.mfa_factors (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  factor_type text not null default 'totp',
+  status      text not null default 'unverified',
+  created_at  timestamptz not null default now()
+);
+grant all on auth.mfa_factors to app_owner;
 
 -- ---------------------------------------------------------------- storage
 create schema storage;

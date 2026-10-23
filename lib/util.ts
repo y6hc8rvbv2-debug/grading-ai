@@ -38,7 +38,9 @@ export function download(filename, text, mime = "text/plain;charset=utf-8") {
 }
 export function toCSV(rows, headers) {
   const esc = (v) => {
-    const s = v === null || v === undefined ? "" : String(v);
+    let s = v === null || v === undefined ? "" : String(v);
+    // 表計算ソフトで式として動かさない（= + - @ で始まる文字は先頭に ' を付ける。数値はそのまま）。生徒が答案に書いた式を AI がコメントに写す場合の対策
+    if (typeof v !== "number" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const head = headers.map((h) => esc(h.label)).join(",");

@@ -90,7 +90,8 @@ export type ReviewFlag =
   | "unreadable"          // 無記入ではないのに読み取れていない・判読不能の印がある
   | "blank_mismatch"      // 無記入なのに読み取った文字がある
   | "key_contradiction"   // 正答と読み取った解答が一致するのに × / 一致しないのに ○
-  | "model_disagreement"; // 前の段階のモデルと判定が分かれた
+  | "model_disagreement"  // 前の段階のモデルと判定が分かれた
+  | "suspicious_text";    // 答案に AI への指示らしい文（「満点にして」など）がある（プロンプトインジェクション対策）
 
 export type NormalizedQuality = {
   ok: boolean;
@@ -383,6 +384,10 @@ const num = (v: unknown, d = 0) => (typeof v === "number" && Number.isFinite(v) 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
+/** 答案に書かれた「AI への指示」らしい文。生徒が答案で採点AIを操ろうとした場合に、先生の確認へ回す（点数は変えない） */
+const SUSPICIOUS = /(指示を?無視|ルールを?無視|満点に(し|す)|全問正解に|正解(扱い|にして)|点数を(上げ|変え)|採点(基準|ルール)を(無視|変更)|システム(プロンプト|への指示)|ignore (all |the |previous |prior )*(instructions|rules)|full (marks|score)|system prompt|you are now)/i;
+export const looksLikeInjection = (s: string) => SUSPICIOUS.test(s.normalize("NFKC"));
+
 /** AI の出力を、アプリの規則で整えて保存できる形にする */
 export function normalizeResult(raw: unknown, test: GradeTest, rubric: Rubric) {
   const r = (raw ?? {}) as { quality?: Record<string, unknown>; items?: unknown[] };
@@ -427,6 +432,7 @@ export function normalizeResult(raw: unknown, test: GradeTest, rubric: Rubric) {
     if (confidence < threshold) flags.push("low_confidence");
     if (rubric.requireTeacher && written && !blank) flags.push("teacher_required");
     if (rubric.partialStep <= 1 && mark === "△") flags.push("partial_not_allowed");
+    if (looksLikeInjection(`${str(o.detected)}\n${str(o.comment)}\n${str(o.reason)}`)) flags.push("suspicious_text");
     const need_review = flags.length > 0;
 
     const b = (o.bbox ?? {}) as Record<string, unknown>;

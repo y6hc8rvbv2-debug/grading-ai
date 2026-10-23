@@ -55,5 +55,8 @@
     "supabase": "^2.118.0",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "postcss": "^8.5.31"
   }
 }
