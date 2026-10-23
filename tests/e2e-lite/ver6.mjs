@@ -269,6 +269,10 @@ await page.getByText("今月の AI採点").waitFor();
 await page.getByText("今月の AI採点").scrollIntoViewIfNeeded();
 await shot("12-dashboard-ai-usage");
 ok(/AI採点\s*\n?\s*[4-9]/.test(await text()) || (await text()).includes("AIの費用"), "ダッシュボードに今月の AI採点（件数・費用・時間）を表示");
+// セキュリティ対策の表示（ダッシュボードの欄・よくある質問）
+ok((await page.getByTestId("security-measures").innerText()).includes("二段階認証"), "ダッシュボードにセキュリティ対策を表示");
+await page.getByText("不正アクセスへの対策はしていますか？").click();
+ok((await text()).includes("学校ごとにデータを分け、他校からは見えないようにしています"), "よくある質問にセキュリティ対策の答え");
 
 // ================================================================ ⑨ 100枚以上：120人分を一度に入れて、おまかせで採点する
 const BIG = "eeeeeeee-0000-0000-0000-000000000062";
