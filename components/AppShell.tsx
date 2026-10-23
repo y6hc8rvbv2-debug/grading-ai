@@ -413,15 +413,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </footer>
         </main>
 
-        {mobile && (
-          <button onClick={() => go("new")} aria-label="新規採点"
-            style={{
-              position: "fixed", insetInlineEnd: 16, bottom: 16, zIndex: 120,
-              width: 54, height: 54, borderRadius: 18, border: "none", background: T.shu, color: "#fff",
-              fontSize: 21, cursor: "pointer", boxShadow: "0 8px 22px rgba(200,52,43,.4)",
-            }}>＋</button>
-        )}
-
         <Toast toasts={toasts} />
       </div>
     </Ctx.Provider>
