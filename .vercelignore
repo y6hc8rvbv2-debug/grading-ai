@@ -1,0 +1,10 @@
+# 公開する静的サイトには載せないファイル
+# PII Shield は本来「サーバー専用」。鍵や設定・サーバー側コードを公開CDNに置かないため除外する。
+# （これらは Git には残るので PII Shield の組み込み自体は維持される）
+security-guard/package.json
+security-guard/lib
+security-guard/.github
+security-guard/.env
+security-guard/.env.example
+security-guard/.gitignore
+security-guard/CLAUDE.md
