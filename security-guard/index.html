@@ -33,6 +33,8 @@
   .logo{font-size:30px; line-height:1}
   h1{font-size:22px; margin:0;}
   .sub{color:var(--muted); font-size:14px; margin:2px 0 0;}
+  .badges{display:flex; gap:8px; flex-wrap:wrap; margin:14px 0 2px;}
+  .badge{background:var(--chip); color:var(--muted); font-size:12.5px; font-weight:700; padding:5px 11px; border-radius:999px;}
   .privacy{
     display:flex; gap:10px; align-items:flex-start; background:var(--ok-bg); color:var(--ink);
     border:1px solid color-mix(in srgb, var(--ok) 35%, transparent);
@@ -115,11 +117,17 @@
     </div>
   </header>
 
+  <div class="badges">
+    <span class="badge">💴 無料</span>
+    <span class="badge">🙅 登録・インストール不要</span>
+    <span class="badge">🗄️ データ保存なし</span>
+  </div>
+
   <div class="privacy">
     <span>🔒</span>
-    <div>入力した内容は<b>この端末のブラウザの中だけ</b>で処理されます。サーバーには一切送信されません（通信は発生しません）。安心して貼り付けてください。</div>
+    <div>入力した内容は<b>この端末のブラウザの中だけ</b>で処理されます。サーバーには一切送信・保存されません（誰が使っても、他の利用者やあなたの入力は互いに見えません）。安心して貼り付けてください。</div>
   </div>
-  <p class="ethic">このツールは「自分の側を守る」ためのものです。相手のPCやサーバーに侵入・反撃する機能はありません（個人が行うと不正アクセス禁止法などに触れます）。できるのは、異常の検知・あなた自身の設定強化・自分側でのブロックです。</p>
+  <p class="ethic">⚠️ このツールは<b>「自分（や自分が管理する機器）を守る」</b>ためのものです。<b>他人のPC・サーバー・アカウントへの侵入や攻撃・反撃には使わないでください</b>（個人が行うと不正アクセス禁止法などに触れます）。できるのは、異常の検知・あなた自身の設定強化・自分側でのブロックだけです。</p>
 
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" aria-selected="true" data-tab="login">🔑 不正ログイン検知</button>
