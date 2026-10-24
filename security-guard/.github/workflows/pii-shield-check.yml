@@ -1,0 +1,16 @@
+# GitHub にコードを上げるたびに「必ず守ってほしいこと」の違反がないか自動で確認する
+name: pii-shield-check
+on: [push, pull_request]
+jobs:
+  pii-shield-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: security-guard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npx pii-shield-check

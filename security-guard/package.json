@@ -1,0 +1,11 @@
+{
+  "name": "security-guard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check:pii": "pii-shield-check"
+  },
+  "dependencies": {
+    "pii-shield": "github:y6hc8rvbv2-debug/pii-shield"
+  }
+}

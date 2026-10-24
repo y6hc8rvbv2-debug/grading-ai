@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>守りダッシュボード</title>
+<meta name="description" content="不正ログイン検知・不正アクセス検知・フィッシング判定を、端末内だけで安全にチェックする守りのツール" />
+<style>
+  :root{
+    --bg:#f4f6fb; --panel:#ffffff; --panel-2:#f8fafc; --ink:#1f2430; --muted:#5b6475;
+    --line:#e4e8f0; --brand:#3b5bdb; --brand-ink:#ffffff;
+    --ok:#1a9d6a; --ok-bg:#e6f7ef; --warn:#c77700; --warn-bg:#fff4e0;
+    --danger:#d6336c; --danger-bg:#fde8ef; --danger-strong:#c0244f;
+    --chip:#eef1f7; --shadow:0 6px 24px rgba(20,30,60,.08);
+    --radius:16px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0f131c; --panel:#161c28; --panel-2:#1b2230; --ink:#e9edf5; --muted:#9aa4b8;
+      --line:#2a3344; --brand:#5b7bff; --brand-ink:#0b1020;
+      --ok:#39d08c; --ok-bg:#122b22; --warn:#f0a93b; --warn-bg:#2e2412;
+      --danger:#ff6b9d; --danger-bg:#331320; --danger-strong:#ff7fa9;
+      --chip:#222a3a; --shadow:0 6px 24px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.65; -webkit-text-size-adjust:100%;
+  }
+  .wrap{max-width:860px; margin:0 auto; padding:24px 16px 72px;}
+  header.top{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px;}
+  .logo{font-size:30px; line-height:1}
+  h1{font-size:22px; margin:0;}
+  .sub{color:var(--muted); font-size:14px; margin:2px 0 0;}
+  .privacy{
+    display:flex; gap:10px; align-items:flex-start; background:var(--ok-bg); color:var(--ink);
+    border:1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+    padding:12px 14px; border-radius:12px; font-size:13.5px; margin:16px 0 8px;
+  }
+  .privacy b{color:var(--ok)}
+  .ethic{font-size:12.5px; color:var(--muted); margin:8px 2px 18px; padding-left:6px; border-left:3px solid var(--line)}
+  .tabs{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;}
+  .tab{
+    border:1px solid var(--line); background:var(--panel); color:var(--muted);
+    padding:10px 14px; border-radius:999px; cursor:pointer; font-size:14px; font-weight:600;
+    display:flex; align-items:center; gap:7px; transition:.15s;
+  }
+  .tab:hover{border-color:var(--brand)}
+  .tab[aria-selected="true"]{background:var(--brand); color:var(--brand-ink); border-color:var(--brand);}
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:20px; margin-bottom:18px;}
+  .panel h2{font-size:17px; margin:0 0 4px; display:flex; align-items:center; gap:8px;}
+  .panel .desc{color:var(--muted); font-size:13.5px; margin:0 0 14px;}
+  label.fld{display:block; font-size:13px; font-weight:600; margin:0 0 6px; color:var(--muted);}
+  textarea, input[type=text]{
+    width:100%; border:1px solid var(--line); background:var(--panel-2); color:var(--ink);
+    border-radius:12px; padding:12px; font-size:14px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    resize:vertical;
+  }
+  textarea:focus, input:focus{outline:2px solid color-mix(in srgb,var(--brand) 45%,transparent); border-color:var(--brand);}
+  .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px;}
+  button.btn{
+    background:var(--brand); color:var(--brand-ink); border:none; padding:11px 20px; border-radius:12px;
+    cursor:pointer; font-size:15px; font-weight:700;
+  }
+  button.ghost{background:transparent; color:var(--brand); border:1px solid var(--line); font-weight:600; padding:10px 16px; border-radius:12px; cursor:pointer; font-size:14px;}
+  button:active{transform:translateY(1px)}
+  .hint{font-size:12.5px; color:var(--muted); margin-top:8px;}
+  .results{margin-top:18px; display:none;}
+  .results.show{display:block}
+  .verdict{display:flex; align-items:center; gap:14px; padding:16px; border-radius:14px; margin-bottom:16px;}
+  .verdict .gauge{font-size:34px; font-weight:800; min-width:92px; text-align:center;}
+  .verdict .txt{flex:1}
+  .verdict .txt .lv{font-size:18px; font-weight:800; margin:0}
+  .verdict .txt .note{font-size:13.5px; color:var(--muted); margin:3px 0 0}
+  .v-ok{background:var(--ok-bg)} .v-ok .gauge{color:var(--ok)} .v-ok .lv{color:var(--ok)}
+  .v-warn{background:var(--warn-bg)} .v-warn .gauge{color:var(--warn)} .v-warn .lv{color:var(--warn)}
+  .v-danger{background:var(--danger-bg)} .v-danger .gauge{color:var(--danger-strong)} .v-danger .lv{color:var(--danger-strong)}
+  .findings{list-style:none; padding:0; margin:0 0 8px;}
+  .findings li{display:flex; gap:10px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; margin-bottom:8px; background:var(--panel-2); font-size:13.5px;}
+  .findings li .ic{flex:0 0 auto; font-size:15px}
+  .sev-high{border-left:4px solid var(--danger)}
+  .sev-mid{border-left:4px solid var(--warn)}
+  .sev-low{border-left:4px solid var(--muted)}
+  .sev-ok{border-left:4px solid var(--ok)}
+  .block{margin-top:12px}
+  .block h3{font-size:14px; margin:0 0 6px; display:flex; align-items:center; gap:7px}
+  .actions{background:var(--chip); border-radius:12px; padding:12px 14px; font-size:13.5px}
+  .actions ul{margin:6px 0 0; padding-left:20px}
+  .actions li{margin:3px 0}
+  table{width:100%; border-collapse:collapse; font-size:13px; margin-top:6px}
+  th,td{text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top}
+  th{color:var(--muted); font-weight:600; font-size:12px}
+  code.ip{font-family:ui-monospace,monospace; background:var(--chip); padding:1px 6px; border-radius:6px}
+  .pill{display:inline-block; padding:1px 9px; border-radius:999px; font-size:11.5px; font-weight:700}
+  .pill-h{background:var(--danger-bg); color:var(--danger-strong)}
+  .pill-m{background:var(--warn-bg); color:var(--warn)}
+  .pill-l{background:var(--chip); color:var(--muted)}
+  pre.copybox{background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:12px; font-size:12.5px; overflow:auto; white-space:pre; margin:6px 0 0}
+  .seg{display:flex; gap:6px; flex-wrap:wrap; margin:6px 0 0}
+  .seg button{border:1px solid var(--line); background:var(--panel-2); color:var(--muted); font-size:12.5px; padding:6px 11px; border-radius:8px; cursor:pointer}
+  .seg button[aria-pressed="true"]{background:var(--brand); color:var(--brand-ink); border-color:var(--brand)}
+  footer{color:var(--muted); font-size:12px; text-align:center; margin-top:28px}
+  .empty{color:var(--muted); font-size:13.5px; text-align:center; padding:18px}
+  @media (max-width:560px){ .verdict .gauge{font-size:28px; min-width:70px} .panel{padding:16px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="logo">🛡️</div>
+    <div>
+      <h1>守りダッシュボード</h1>
+      <p class="sub">不正ログイン・不正アクセス・フィッシングを、あなたの端末だけでチェック</p>
+    </div>
+  </header>
+
+  <div class="privacy">
+    <span>🔒</span>
+    <div>入力した内容は<b>この端末のブラウザの中だけ</b>で処理されます。サーバーには一切送信されません（通信は発生しません）。安心して貼り付けてください。</div>
+  </div>
+  <p class="ethic">このツールは「自分の側を守る」ためのものです。相手のPCやサーバーに侵入・反撃する機能はありません（個人が行うと不正アクセス禁止法などに触れます）。できるのは、異常の検知・あなた自身の設定強化・自分側でのブロックです。</p>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" data-tab="login">🔑 不正ログイン検知</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="access">📡 不正アクセス検知</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="phish">🎣 フィッシング判定</button>
+  </div>
+
+  <!-- ===== Tab 1: Login ===== -->
+  <section class="panel" id="tab-login">
+    <h2>🔑 不正ログイン検知</h2>
+    <p class="desc">各サービスの「ログイン履歴」を貼り付けると、見慣れない場所・時刻・端末、連続失敗、不可能な移動などの<strong>あやしいサインを自動で採点</strong>します。</p>
+    <label class="fld" for="login-in">ログイン履歴（1行1件）— 例：<code>日時, 場所(国/都市), IPアドレス, 端末・ブラウザ, 結果(成功/失敗)</code></label>
+    <textarea id="login-in" rows="7" placeholder="2026-10-24 09:12, Japan/Tokyo, 126.0.0.1, iPhone Safari, 成功
+2026-10-24 03:41, Russia/Moscow, 5.188.0.9, Windows Chrome, 失敗
+2026-10-24 03:41, Russia/Moscow, 5.188.0.9, Windows Chrome, 失敗
+2026-10-24 03:42, Russia/Moscow, 5.188.0.9, Windows Chrome, 成功"></textarea>
+    <div class="row">
+      <button class="btn" onclick="runLogin()">チェックする</button>
+      <button class="ghost" onclick="sampleLogin()">サンプルを入れる</button>
+      <button class="ghost" onclick="clearBox('login')">クリア</button>
+    </div>
+    <p class="hint">💡 「普段の場所」を決めておくと精度が上がります：<input type="text" id="login-home" placeholder="例：Japan" style="width:140px;display:inline-block;padding:6px 10px;font-size:13px"></p>
+    <div class="results" id="login-res"></div>
+  </section>
+
+  <!-- ===== Tab 2: Access ===== -->
+  <section class="panel" id="tab-access" style="display:none">
+    <h2>📡 不正アクセス検知</h2>
+    <p class="desc">サーバーやルーターの<strong>アクセスログ</strong>を貼り付けると、攻撃っぽいアクセス元IPを見つけ出し、<strong>あなた自身のファイアウォール用ブロックリスト</strong>を作ります。</p>
+    <label class="fld" for="access-in">アクセスログ（1行1リクエスト。Apache/Nginx形式や「IP 日時 "メソッド パス" ステータス UA」でOK）</label>
+    <textarea id="access-in" rows="7" placeholder='203.0.113.9 - - [24/Oct/2026:03:11:02] "GET /wp-login.php" 401 "sqlmap/1.7"
+203.0.113.9 - - [24/Oct/2026:03:11:03] "GET /.env" 404 "python-requests/2.31"
+198.51.100.7 - - [24/Oct/2026:09:02:10] "GET /index.html" 200 "Mozilla/5.0"'></textarea>
+    <div class="row">
+      <button class="btn" onclick="runAccess()">チェックする</button>
+      <button class="ghost" onclick="sampleAccess()">サンプルを入れる</button>
+      <button class="ghost" onclick="clearBox('access')">クリア</button>
+    </div>
+    <div class="results" id="access-res"></div>
+  </section>
+
+  <!-- ===== Tab 3: Phishing ===== -->
+  <section class="panel" id="tab-phish" style="display:none">
+    <h2>🎣 フィッシング判定</h2>
+    <p class="desc">あやしいメール・SMS・URLを貼り付けると、<strong>偽ドメイン・なりすまし・あおり文句</strong>などを分析して危険度を判定します。</p>
+    <label class="fld" for="phish-url">URL（任意）</label>
+    <input type="text" id="phish-url" placeholder="https://example-login.verify-account.top/...">
+    <label class="fld" for="phish-text" style="margin-top:12px">メール・SMSの本文（任意）</label>
+    <textarea id="phish-text" rows="6" placeholder="【重要】お客様のアカウントが一時停止されました。24時間以内に下記より本人確認を行ってください…"></textarea>
+    <div class="row">
+      <button class="btn" onclick="runPhish()">判定する</button>
+      <button class="ghost" onclick="samplePhish()">サンプルを入れる</button>
+      <button class="ghost" onclick="clearBox('phish')">クリア</button>
+    </div>
+    <div class="results" id="phish-res"></div>
+  </section>
+
+  <footer>
+    🛡️ 守りダッシュボード ／ すべての処理は端末内で完結します ／ 困ったら各サービスの公式アプリ・公式サイトから確認を
+  </footer>
+</div>
+
+<script>
+/* ============ 共通 ============ */
+const $ = (id) => document.getElementById(id);
+document.querySelectorAll('.tab').forEach(t=>{
+  t.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected','false'));
+    t.setAttribute('aria-selected','true');
+    const map={login:'tab-login',access:'tab-access',phish:'tab-phish'};
+    Object.values(map).forEach(id=>$(id).style.display='none');
+    $(map[t.dataset.tab]).style.display='block';
+  });
+});
+function clearBox(kind){
+  if(kind==='login'){ $('login-in').value=''; hide('login-res'); }
+  if(kind==='access'){ $('access-in').value=''; hide('access-res'); }
+  if(kind==='phish'){ $('phish-url').value=''; $('phish-text').value=''; hide('phish-res'); }
+}
+function hide(id){ const e=$(id); e.classList.remove('show'); e.innerHTML=''; }
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function verdictBlock(score, labels){
+  // labels: {ok:[min,txt,note], warn:[min,...], danger:[...]}
+  let cls='v-ok', lv=labels.ok[1], note=labels.ok[2];
+  if(score>=labels.danger[0]){ cls='v-danger'; lv=labels.danger[1]; note=labels.danger[2]; }
+  else if(score>=labels.warn[0]){ cls='v-warn'; lv=labels.warn[1]; note=labels.warn[2]; }
+  return `<div class="verdict ${cls}"><div class="gauge">${score}</div><div class="txt"><p class="lv">${lv}</p><p class="note">${note}</p></div></div>`;
+}
+function findingLi(sev, icon, text){ return `<li class="sev-${sev}"><span class="ic">${icon}</span><span>${text}</span></li>`; }
+function actionsBlock(title, items){
+  return `<div class="block"><div class="actions"><h3 style="margin-top:0">✅ ${title}</h3><ul>${items.map(i=>`<li>${i}</li>`).join('')}</ul></div></div>`;
+}
+
+/* ============ Tab 1: 不正ログイン検知 ============ */
+function sampleLogin(){
+  $('login-in').value=`2026-10-24 09:12, Japan/Tokyo, 126.0.0.1, iPhone Safari, 成功
+2026-10-24 12:30, Japan/Osaka, 126.0.0.2, iPhone Safari, 成功
+2026-10-24 03:40, Russia/Moscow, 5.188.0.9, Windows Chrome, 失敗
+2026-10-24 03:41, Russia/Moscow, 5.188.0.9, Windows Chrome, 失敗
+2026-10-24 03:41, Russia/Moscow, 5.188.0.9, Windows Chrome, 失敗
+2026-10-24 03:42, Russia/Moscow, 5.188.0.9, Windows Chrome, 成功
+2026-10-24 03:45, Brazil/SaoPaulo, 177.0.0.1, Android Chrome, 成功`;
+  $('login-home').value='Japan';
+}
+function parseLoginLines(raw){
+  return raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(line=>{
+    const p=line.split(',').map(s=>s.trim());
+    const dt=p[0]||''; const place=p[1]||''; const ip=p[2]||''; const dev=p[3]||'';
+    const resultRaw=(p[4]||'').toLowerCase();
+    const ok=/成功|success|ok|200/.test(resultRaw);
+    const fail=/失敗|fail|denied|401|403|invalid/.test(resultRaw);
+    const country=(place.split(/[\/、]/)[0]||'').trim();
+    let hour=null; const m=dt.match(/(\d{1,2}):(\d{2})/); if(m) hour=parseInt(m[1],10);
+    const t=Date.parse(dt.replace(/\//g,'-'));
+    return {line, dt, place, country, ip, dev, ok, fail: fail||!ok, hour, t:isNaN(t)?null:t};
+  });
+}
+function runLogin(){
+  const ev=parseLoginLines($('login-in').value);
+  if(!ev.length){ showEmpty('login-res','ログイン履歴を貼り付けてください。'); return; }
+  const home=($('login-home').value||'').trim().toLowerCase();
+  // baseline
+  const countryCount={}, devCount={};
+  ev.forEach(e=>{ if(e.country) countryCount[e.country]=(countryCount[e.country]||0)+1; if(e.dev) devCount[e.dev]=(devCount[e.dev]||0)+1; });
+  const topCountry=Object.entries(countryCount).sort((a,b)=>b[1]-a[1])[0]?.[0]||'';
+  const baseCountry = home || topCountry.toLowerCase();
+  const knownDevs = Object.entries(devCount).filter(([,c])=>c>=2).map(([d])=>d);
+
+  let score=0; const findings=[]; const seen=new Set();
+  // 連続失敗（ブルートフォース）
+  const failByIp={}; ev.forEach(e=>{ if(e.fail&&e.ip) failByIp[e.ip]=(failByIp[e.ip]||0)+1; });
+  Object.entries(failByIp).forEach(([ip,n])=>{ if(n>=3){ score+=30; findings.push(['high','🔁',`<code class="ip">${esc(ip)}</code> から <b>${n}回の連続ログイン失敗</b>。パスワード総当たり（ブルートフォース）の疑いがあります。`]); } });
+  // 失敗の直後に成功（乗っ取り成功の疑い）
+  for(let i=1;i<ev.length;i++){ if(ev[i].ok && ev[i-1].fail && ev[i].ip===ev[i-1].ip){ score+=25; findings.push(['high','⚠️',`失敗が続いた直後に <code class="ip">${esc(ev[i].ip)}</code> から<b>ログイン成功</b>。突破された可能性があります。至急パスワード変更を。`]); break; } }
+  // 見慣れない国
+  ev.forEach(e=>{ if(e.ok && e.country && baseCountry && e.country.toLowerCase()!==baseCountry && !seen.has('c'+e.country)){ seen.add('c'+e.country); score+=20; findings.push(['high','🌍',`普段と違う国 <b>${esc(e.country)}</b> から成功ログインがあります（普段：${esc(home||topCountry)}）。`]); } });
+  // 不可能な移動（短時間での国またぎ成功）
+  const succ=ev.filter(e=>e.ok && e.t && e.country).sort((a,b)=>a.t-b.t);
+  for(let i=1;i<succ.length;i++){ const dtH=(succ[i].t-succ[i-1].t)/3600000; if(succ[i].country!==succ[i-1].country && dtH>=0 && dtH<3){ score+=25; findings.push(['high','✈️',`${esc(succ[i-1].country)} → ${esc(succ[i].country)} へ <b>${dtH.toFixed(1)}時間</b>で移動して両方ログイン成功。物理的にあり得ない「不可能な移動」です。`]); break; } }
+  // 深夜帯
+  ev.forEach(e=>{ if(e.ok && e.hour!=null && (e.hour>=1 && e.hour<=5) && !seen.has('h')){ seen.add('h'); score+=10; findings.push(['mid','🌙',`深夜帯（${e.hour}時台）の成功ログインがあります。身に覚えがなければ要注意。`]); } });
+  // 新しい端末
+  ev.forEach(e=>{ if(e.ok && e.dev && knownDevs.length && !knownDevs.includes(e.dev) && !seen.has('d'+e.dev)){ seen.add('d'+e.dev); score+=15; findings.push(['mid','📱',`見慣れない端末 <b>${esc(e.dev)}</b> からの成功ログインがあります。`]); } });
+
+  score=Math.min(100,score);
+  if(!findings.length) findings.push(['ok','✅','あやしいサインは見つかりませんでした。履歴はいつも通りに見えます。']);
+
+  const recs = score>=40
+    ? ['今すぐ<b>パスワードを変更</b>し、他サービスと使い回していれば全部変える','<b>2段階認証（2FA）</b>を有効にする（SMSよりアプリ/パスキー推奨）','「すべての端末からログアウト／セッション失効」を実行','メールの<b>自動転送・フィルタ設定</b>が勝手に追加されていないか確認','被害がありそうなら各サービスのサポートへ連絡']
+    : ['2段階認証（2FA）がまだなら有効化しておく','パスワードの使い回しをやめる（パスワード管理アプリが便利）','ログイン通知をオンにして、次からは即気づけるようにする'];
+
+  let html = verdictBlock(score,{ok:[0,'🟢 いつも通り','大きな異常は見られません'],warn:[40,'🟡 要注意','気になる動きがあります。設定を見直しましょう'],danger:[60,'🔴 危険','乗っ取りの兆候があります。すぐ対処を']});
+  html += `<ul class="findings">${findings.map(f=>findingLi(f[0],f[1],f[2])).join('')}</ul>`;
+  html += actionsBlock('おすすめの対処', recs);
+  show('login-res',html);
+}
+
+/* ============ Tab 2: 不正アクセス検知 ============ */
+function sampleAccess(){
+  $('access-in').value=`203.0.113.9 - - [24/Oct/2026:03:11:02] "GET /wp-login.php HTTP/1.1" 401 "sqlmap/1.7"
+203.0.113.9 - - [24/Oct/2026:03:11:03] "GET /.env HTTP/1.1" 404 "python-requests/2.31"
+203.0.113.9 - - [24/Oct/2026:03:11:04] "GET /.git/config HTTP/1.1" 404 "python-requests/2.31"
+203.0.113.9 - - [24/Oct/2026:03:11:05] "POST /xmlrpc.php HTTP/1.1" 403 "-"
+45.146.0.22 - - [24/Oct/2026:03:20:00] "GET /admin/ HTTP/1.1" 403 "Nikto"
+198.51.100.7 - - [24/Oct/2026:09:02:10] "GET /index.html HTTP/1.1" 200 "Mozilla/5.0 (iPhone)"`;
+}
+const SENSITIVE=[/wp-login|wp-admin|xmlrpc/i,/\/\.env/i,/\/\.git/i,/phpmyadmin|pma|adminer/i,/\/admin\b/i,/\.(sql|bak|backup|zip|tar|gz)\b/i,/\/config|\/\.ssh|id_rsa/i,/\/actuator|\/debug|\/console/i];
+const BADUA=[/sqlmap/i,/nikto/i,/masscan|zgrab|nmap/i,/python-requests|go-http|curl\/|libwww|httpclient/i,/dirbuster|gobuster|wpscan|hydra/i];
+function parseAccess(raw){
+  return raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(line=>{
+    const ip=(line.match(/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/)||line.match(/\b([0-9a-f:]{4,})\b/i)||[])[1]||'?';
+    const req=(line.match(/"(?:GET|POST|PUT|HEAD|DELETE|OPTIONS|PATCH)\s+([^"\s]+)/i)||[])[1]||'';
+    const status=(line.match(/"\s+(\d{3})\b/)||line.match(/\s(\d{3})\s/)||[])[1]||'';
+    const ua=(line.match(/"([^"]*)"\s*$/)||[])[1]||'';
+    return {line, ip, req, status:parseInt(status,10)||0, ua};
+  });
+}
+function runAccess(){
+  const rows=parseAccess($('access-in').value);
+  if(!rows.length){ showEmpty('access-res','アクセスログを貼り付けてください。'); return; }
+  const byIp={};
+  rows.forEach(r=>{
+    if(r.ip==='?') return;
+    const s=byIp[r.ip]||(byIp[r.ip]={ip:r.ip,count:0,errors:0,sensitive:0,badua:false,reasons:new Set(),paths:new Set()});
+    s.count++;
+    if(r.status>=400) s.errors++;
+    if(SENSITIVE.some(re=>re.test(r.req))){ s.sensitive++; s.reasons.add('機密パスへの探索'); if(r.req) s.paths.add(r.req); }
+    if(BADUA.some(re=>re.test(r.ua))){ s.badua=true; s.reasons.add('攻撃ツールのUA'); }
+    if(r.ua==='-'||r.ua===''){ s.reasons.add('UAなし'); }
+  });
+  const ips=Object.values(byIp).map(s=>{
+    let risk=0;
+    risk+=Math.min(30,s.sensitive*10);
+    if(s.badua) risk+=35;
+    if(s.errors>=4) risk+=20; else if(s.errors>=2) risk+=10;
+    if(s.count>=6) risk+=10;
+    if(s.reasons.has('UAなし')&&s.sensitive) risk+=5;
+    s.risk=Math.min(100,risk);
+    return s;
+  }).sort((a,b)=>b.risk-a.risk);
+
+  const bad=ips.filter(s=>s.risk>=30);
+  const top=Math.max(0,...ips.map(s=>s.risk));
+
+  let html=verdictBlock(top,{ok:[0,'🟢 異常なし','攻撃っぽいアクセスは見当たりません'],warn:[30,'🟡 探索あり','怪しいアクセス元があります'],danger:[50,'🔴 攻撃あり','明確に攻撃っぽいアクセス元があります']});
+  html+=`<table><thead><tr><th>アクセス元IP</th><th>危険度</th><th>件数</th><th>理由</th></tr></thead><tbody>`;
+  ips.slice(0,12).forEach(s=>{
+    const pill=s.risk>=50?'pill-h':s.risk>=30?'pill-m':'pill-l';
+    html+=`<tr><td><code class="ip">${esc(s.ip)}</code></td><td><span class="pill ${pill}">${s.risk}</span></td><td>${s.count}（エラー${s.errors}）</td><td>${[...s.reasons].map(esc).join('、')||'—'}</td></tr>`;
+  });
+  html+=`</tbody></table>`;
+
+  if(bad.length){
+    const list=bad.map(s=>s.ip);
+    const ufw=list.map(ip=>`sudo ufw deny from ${ip}`).join('\n');
+    const nginx=list.map(ip=>`deny ${ip};`).join('\n');
+    const hta=list.map(ip=>`Deny from ${ip}`).join('\n');
+    html+=`<div class="block"><h3>🚫 自分側のブロックリスト（あなたのサーバーに貼るだけ）</h3>`;
+    html+=`<div class="seg"><button aria-pressed="true" onclick="segSel(this,'bl')">ufw</button><button aria-pressed="false" onclick="segSel(this,'bl')">nginx</button><button aria-pressed="false" onclick="segSel(this,'bl')">.htaccess</button></div>`;
+    html+=`<pre class="copybox" id="bl-box">${esc(ufw)}</pre>`;
+    html+=`<div class="row"><button class="ghost" onclick="copyBox('bl-box')">📋 コピー</button></div>`;
+    html+=`<script type="application/json" id="bl-data">${JSON.stringify({ufw,nginx,hta})}<\/script></div>`;
+    html+=actionsBlock('次にやること',['上のコマンドを<b>あなた自身のサーバー/ルーター</b>に適用して、その相手からの通信を遮断する','WordPress等はログインURLの変更・ログイン試行回数制限プラグインを入れる','公開不要な管理画面はIP制限やVPNの内側へ','相手を「攻撃し返す」ことはしない（違法・無関係な第三者の踏み台のことが多い）']);
+  } else {
+    html+=actionsBlock('メモ',['今回は強くブロックすべきIPはありませんでした','日常的にログを監視し、同じIPの連続エラーに注意しましょう']);
+  }
+  show('access-res',html);
+}
+function segSel(btn,group){
+  btn.parentElement.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed','false'));
+  btn.setAttribute('aria-pressed','true');
+  if(group==='bl'){
+    const data=JSON.parse($('bl-data').textContent);
+    const key=btn.textContent.includes('ufw')?'ufw':btn.textContent.includes('nginx')?'nginx':'hta';
+    $('bl-box').textContent=data[key];
+  }
+}
+
+/* ============ Tab 3: フィッシング判定 ============ */
+const SUSP_TLD=/\.(zip|mov|top|xyz|gq|cf|ml|tk|work|click|link|loan|country|kim|science|review)(\b|\/|$)/i;
+const BRANDS=['amazon','apple','paypal','google','microsoft','rakuten','mufg','smbc','mizuho','jcb','visa','mastercard','netflix','line','docomo','au','softbank','yamato','sagawa','jppost','etc','amex','facebook','instagram','metamask','coinbase','binance'];
+const URGENT=[/至急|今すぐ|緊急|ただちに|直ちに/,/24時間以内|期限|本日中|まもなく|停止され|ロックされ|制限され/,/urgent|immediately|suspend|locked|verify now|within 24/i];
+const ASK=[/パスワード|暗証番号|カード番号|セキュリティコード|ワンタイム|認証コード|口座番号|個人情報|本人確認/,/password|credit card|ssn|one-?time|verify your account|confirm your identity/i];
+const LURE=[/当選|高額|副業|必ず儲か|無料プレゼント|現金|給付金|還付金|未納|滞納|裁判/,/you(?:'ve| have) won|prize|refund|lottery|bitcoin|investment/i];
+function samplePhish(){
+  $('phish-url').value='https://amazon.co.jp.verify-account.top/login?id=889921';
+  $('phish-text').value='【Amazon】お客様のアカウントは異常なログインが検出されたため一時停止されました。24時間以内に下記リンクより本人確認（パスワード・カード情報の再登録）を行ってください。手続きがない場合、アカウントは永久に停止されます。';
+}
+function analyzeUrl(url){
+  const out=[]; let score=0; let host='';
+  try{
+    const u=new URL(url.trim());
+    host=u.hostname;
+    const parts=host.split('.');
+    const tld=parts.slice(-2).join('.');
+    if(/^\d{1,3}(\.\d{1,3}){3}$/.test(host)){ score+=35; out.push(['high','🔢',`URLのドメインが<b>IPアドレス直打ち</b>（${esc(host)}）。正規サービスではまず使いません。`]); }
+    if(url.includes('@')){ score+=30; out.push(['high','🎭',`URLに <b>@</b> が含まれます。@より前は飾りで、実際は <code>${esc(host)}</code> に飛びます。`]); }
+    if(host.includes('xn--')){ score+=30; out.push(['high','🅰️',`国際化ドメイン（<b>xn--</b>）。正規そっくりの偽文字が使われている可能性があります。`]); }
+    if(SUSP_TLD.test(host)){ score+=25; out.push(['high','🚩',`あやしい種類のドメイン末尾（例：.top/.zip/.xyz など）です。`]); }
+    if(parts.length>=5){ score+=15; out.push(['mid','🧩',`サブドメインが非常に多い（${esc(host)}）。本物のブランド名を前方に置いた偽装の手口によくあります。`]); }
+    // ブランド名がドメイン本体ではなくサブドメイン/パスにある
+    const regDomain=parts.slice(-2).join('.').toLowerCase();
+    BRANDS.forEach(b=>{
+      if((host.toLowerCase().includes(b)||url.toLowerCase().includes(b)) && !regDomain.includes(b)){
+        score+=30; out.push(['high','🏷️',`「<b>${b}</b>」の名前が出てきますが、本当のドメインは <code>${esc(regDomain)}</code> です。<b>なりすまし</b>の疑いが濃厚。`]);
+      }
+    });
+    if(/-/.test(parts[parts.length-2]||'') && BRANDS.some(b=>host.toLowerCase().includes(b))){ score+=10; out.push(['mid','➖',`ブランド名＋ハイフンのドメインは偽装に多い形です。`]); }
+    if(u.protocol!=='https:'){ score+=10; out.push(['mid','🔓',`暗号化されていない通信（http）です。`]); }
+  }catch(e){
+    if(url.trim()){ score+=10; out.push(['mid','❓','URLとして正しく読み取れませんでした。手入力・短縮URLの可能性があります。']); }
+  }
+  // 短縮URL
+  if(/(bit\.ly|tinyurl|t\.co|is\.gd|goo\.gl|ow\.ly|cutt\.ly|rb\.gy)/i.test(url)){ score+=15; out.push(['mid','🔗','短縮URLです。本当の飛び先が隠されています。展開してから確認を。']); }
+  return {score,findings:out,host};
+}
+function analyzeText(text){
+  const out=[]; let score=0;
+  if(URGENT.some(re=>re.test(text))){ score+=20; out.push(['high','⏰','「至急・24時間以内・停止されました」などの<b>あおり文句</b>。あわてさせて判断を奪う典型手口。']); }
+  if(ASK.some(re=>re.test(text))){ score+=30; out.push(['high','🔑','<b>パスワード・カード番号・認証コードなどの入力</b>を求めています。正規はメール/SMSから直接要求しません。']); }
+  if(LURE.some(re=>re.test(text))){ score+=20; out.push(['mid','🎁','「当選・還付金・未納・副業」などの<b>うま過ぎる/不安をあおる</b>話題。']); }
+  if(/(http|www\.|\.com|\.jp|リンク|下記|こちら)/i.test(text) && /(確認|手続|ログイン|更新|再登録)/.test(text)){ score+=10; out.push(['mid','👉','リンクを踏ませてログイン/手続きさせようとしています。']); }
+  if(/(お客様各位|ユーザー様|会員様)/.test(text) && !/様\s*$/.test(text)){ out.push(['low','🙇','宛名があなたの名前でなく「お客様」など一般的。ばらまき型の可能性。']); score+=5; }
+  return {score,findings:out};
+}
+function runPhish(){
+  const url=$('phish-url').value.trim();
+  const text=$('phish-text').value.trim();
+  if(!url && !text){ showEmpty('phish-res','URL か 本文のどちらかを入れてください。'); return; }
+  const u=analyzeUrl(url);
+  const t=analyzeText(text);
+  let score=Math.min(100, u.score + t.score);
+  const findings=[...u.findings,...t.findings];
+  if(!findings.length) findings.push(['ok','✅','分かりやすい危険サインは見つかりませんでした。ただし油断は禁物です。']);
+  findings.sort((a,b)=>({high:0,mid:1,low:2,ok:3}[a[0]]-{high:0,mid:1,low:2,ok:3}[b[0]]));
+
+  let html=verdictBlock(score,{ok:[0,'🟢 危険サインは少なめ','ただし100%安全の保証はありません'],warn:[30,'🟡 あやしい','フィッシングの疑いあり。リンクは踏まないで'],danger:[55,'🔴 フィッシングの疑い大','絶対にリンクを開かず、情報を入力しないで']});
+  if(u.host) html+=`<p class="hint">本当の飛び先ドメイン：<code class="ip">${esc(u.host)}</code></p>`;
+  html+=`<ul class="findings">${findings.map(f=>findingLi(f[0],f[1],f[2])).join('')}</ul>`;
+  const recs = score>=30
+    ? ['メール/SMS内の<b>リンクは踏まない</b>。公式アプリや、自分でブックマークした公式サイトから確認する','<b>パスワードやカード情報を入力しない</b>','本物か不安なら、カード裏面やサービス公式の問い合わせ先に電話で確認','docomo/au/SoftBankの迷惑SMS報告、フィッシング対策協議会への報告も有効','もう入力してしまったら、すぐパスワード変更・カード会社へ連絡・2FA設定']
+    : ['それでもリンクは<b>公式アプリ/ブックマーク経由</b>で開く習慣を','送信元アドレスのドメインが公式と一致するか確認する'];
+  html+=actionsBlock('どうすればいい？', recs);
+  show('phish-res',html);
+}
+
+/* ============ 出力ヘルパ ============ */
+function show(id,html){ const e=$(id); e.innerHTML=html; e.classList.add('show'); e.scrollIntoView({behavior:'smooth',block:'nearest'}); }
+function showEmpty(id,msg){ show(id,`<div class="empty">${esc(msg)}</div>`); }
+function copyBox(id){
+  const txt=$(id).textContent;
+  navigator.clipboard?.writeText(txt).then(()=>{ /* copied */ },()=>fallbackCopy(txt));
+}
+function fallbackCopy(txt){ const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); }
+</script>
+</body>
+</html>
