@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CEO ミシュランガイド</title>
+<style>
+:root{
+  --bg:#f7f5f2; --card:#ffffff; --text:#1f1b18; --sub:#6b635c; --line:#e6e0d9;
+  --accent:#b3121f; --accent-soft:#fbe9ea; --star:#c8102e; --star-off:#ddd5cc;
+  --chip:#f1ece6;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#161311; --card:#211d1a; --text:#f1ebe5; --sub:#a89f96; --line:#3a332e;
+    --accent:#ff5a63; --accent-soft:#3a1d20; --star:#ff5a63; --star-off:#4a423c;
+    --chip:#2c2622;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#161311; --card:#211d1a; --text:#f1ebe5; --sub:#a89f96; --line:#3a332e;
+  --accent:#ff5a63; --accent-soft:#3a1d20; --star:#ff5a63; --star-off:#4a423c;
+  --chip:#2c2622;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:"Hiragino Sans","Noto Sans JP","Yu Gothic",sans-serif; line-height:1.7;
+}
+.wrap{max-width:960px; margin:0 auto; padding:24px 16px 64px}
+header{text-align:center; padding:16px 0 8px}
+.edition{
+  display:inline-block; background:var(--accent); color:#fff; font-weight:700;
+  padding:4px 16px; border-radius:999px; font-size:14px; letter-spacing:.05em;
+}
+h1{margin:12px 0 4px; font-size:30px; letter-spacing:.04em}
+.lead{color:var(--sub); font-size:14px; margin:0}
+.panel{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:20px; margin-top:20px}
+.panel h2{font-size:17px; margin:0 0 12px}
+.legend{display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:8px; margin:0; padding:0; list-style:none}
+.legend li{background:var(--chip); border-radius:10px; padding:8px 12px; font-size:13px}
+.legend b{display:block; font-size:14px}
+.stars{color:var(--star); letter-spacing:2px; white-space:nowrap}
+.stars .off{color:var(--star-off)}
+.controls{display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-top:20px}
+.controls label{font-size:13px; color:var(--sub); display:flex; align-items:center; gap:6px}
+select,input{
+  font:inherit; font-size:14px; padding:8px 10px; border-radius:10px;
+  border:1px solid var(--line); background:var(--card); color:var(--text);
+}
+input{flex:1; min-width:180px}
+.grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:16px; margin-top:16px}
+.ceo{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px; display:flex; flex-direction:column}
+.ceo .top{display:flex; justify-content:space-between; align-items:flex-start; gap:8px}
+.company{font-size:13px; color:var(--sub)}
+.name{font-size:21px; font-weight:700; margin:2px 0 0}
+.role{font-size:12px; color:var(--sub)}
+.big{font-size:26px; text-align:right; line-height:1.2}
+.big small{display:block; font-size:12px; color:var(--sub); letter-spacing:0}
+.tag{display:inline-block; font-size:11px; background:var(--accent-soft); color:var(--accent); border-radius:6px; padding:1px 8px; margin-top:6px; font-weight:700}
+details{margin-top:12px; border-top:1px solid var(--line); padding-top:10px}
+summary{cursor:pointer; font-size:14px; font-weight:700; color:var(--accent)}
+.rows{margin:10px 0 0; padding:0; list-style:none}
+.rows li{padding:8px 0; border-bottom:1px dashed var(--line)}
+.rows li:last-child{border-bottom:none}
+.rowhead{display:flex; justify-content:space-between; gap:8px; font-size:13px; font-weight:700}
+.rowhead .stars{font-size:13px; letter-spacing:1px}
+.rows p{margin:2px 0 0; font-size:13px; color:var(--sub)}
+.empty{color:var(--sub); text-align:center; padding:32px}
+.notice{font-size:12px; color:var(--sub)}
+.notice p{margin:4px 0}
+footer{margin-top:28px; text-align:center; font-size:12px; color:var(--sub)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="edition" id="editionBadge">— 年度版</span>
+    <h1>CEO ミシュランガイド</h1>
+    <p class="lead">日本の上場企業トップを、インタビューでの発言と実績から ★1〜★5 で格付け</p>
+  </header>
+
+  <section class="panel">
+    <h2>星の意味</h2>
+    <ul class="legend">
+      <li><span class="stars">★★★★★</span><b>五つ星</b>時代をつくる、世界に誇る経営者</li>
+      <li><span class="stars">★★★★<span class="off">★</span></span><b>四つ星</b>卓越した経営で企業価値を高めている</li>
+      <li><span class="stars">★★★<span class="off">★★</span></span><b>三つ星</b>確かな手腕。今後の成果に期待</li>
+      <li><span class="stars">★★<span class="off">★★★</span></span><b>二つ星</b>堅実だが、強みがまだ見えにくい</li>
+      <li><span class="stars">★<span class="off">★★★★</span></span><b>一つ星</b>課題が多く、立て直しの途中</li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <h2>評価の観点（各1〜5点 → 平均で星を決定）</h2>
+    <ul class="legend" id="criteria"></ul>
+  </section>
+
+  <div class="controls">
+    <label>年度
+      <select id="yearSelect"></select>
+    </label>
+    <label>並び順
+      <select id="sortSelect">
+        <option value="stars">星の多い順</option>
+        <option value="company">会社名順</option>
+      </select>
+    </label>
+    <label>星
+      <select id="starFilter">
+        <option value="0">すべて</option>
+        <option value="5">★5</option>
+        <option value="4">★4</option>
+        <option value="3">★3</option>
+        <option value="2">★2</option>
+        <option value="1">★1</option>
+      </select>
+    </label>
+    <input id="search" type="search" placeholder="会社名・CEO名で検索" aria-label="会社名・CEO名で検索" />
+  </div>
+
+  <div class="grid" id="list"><div class="empty">読み込み中…</div></div>
+
+  <section class="panel notice">
+    <p id="asOf"></p>
+    <p>※ 本ガイドは、公開されているインタビュー記事・決算説明会・統合報告書などの内容を要約し、独自の観点で評価した参考情報です。発言の引用ではなく要旨であり、投資の推奨を目的とするものではありません。最新の事実は各社の公式発表をご確認ください。</p>
+    <p>※ 「暫定」は就任から1年未満のため、実績の評価が限られることを示します。</p>
+    <p>※ 毎年、実績と新たなインタビューをもとに評価を更新します。過去の年度版は「年度」から切り替えて確認できます。</p>
+  </section>
+
+  <footer>CEO ミシュランガイド</footer>
+</div>
+
+<script>
+const state = { data: null, sort: "stars", minStar: 0, q: "" };
+const $ = (id) => document.getElementById(id);
+
+// HTMLに埋め込む文字列は必ずエスケープする
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+
+const starHtml = (n) => `<span class="stars" aria-label="${n}つ星">${"★".repeat(n)}<span class="off">${"★".repeat(5 - n)}</span></span>`;
+
+// 5観点の平均点から星の数を決める（4.5以上→5、3.5以上→4 …）
+function average(scores, criteria){
+  const vals = criteria.map((c) => scores[c.key]);
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+function starsFrom(avg){ return Math.min(5, Math.max(1, Math.floor(avg + 0.5))); }
+
+function renderCriteria(){
+  $("criteria").innerHTML = state.data.criteria
+    .map((c) => `<li><b>${esc(c.name)}</b>${esc(c.desc)}</li>`).join("");
+}
+
+function render(){
+  const { criteria, ceos } = state.data;
+  const q = state.q.trim().toLowerCase();
+  let items = ceos.map((c) => {
+    const avg = average(c.scores, criteria);
+    return { ...c, avg, stars: starsFrom(avg) };
+  });
+  if (state.minStar) items = items.filter((c) => c.stars === state.minStar);
+  if (q) items = items.filter((c) => (c.company + c.name).toLowerCase().includes(q));
+  items.sort(state.sort === "stars"
+    ? (a, b) => b.avg - a.avg || a.company.localeCompare(b.company, "ja")
+    : (a, b) => a.company.localeCompare(b.company, "ja"));
+
+  if (!items.length){ $("list").innerHTML = `<div class="empty">該当するCEOがいません</div>`; return; }
+
+  $("list").innerHTML = items.map((c) => `
+    <article class="ceo">
+      <div class="top">
+        <div>
+          <div class="company">${esc(c.company)}（${esc(c.code)}）・${esc(c.industry)}</div>
+          <div class="name">${esc(c.name)}</div>
+          <div class="role">${esc(c.title)}／就任 ${esc(c.since)}</div>
+          ${c.provisional ? `<span class="tag">暫定評価</span>` : ""}
+        </div>
+        <div class="big">${starHtml(c.stars)}<small>平均 ${c.avg.toFixed(1)} 点</small></div>
+      </div>
+      <details>
+        <summary>観点別の理由を見る</summary>
+        <ul class="rows">
+          ${criteria.map((k) => `
+            <li>
+              <div class="rowhead"><span>${esc(k.name)}</span>${starHtml(c.scores[k.key])}</div>
+              <p>${esc(c.reasons[k.key])}</p>
+            </li>`).join("")}
+        </ul>
+      </details>
+    </article>`).join("");
+}
+
+async function loadYear(year){
+  $("list").innerHTML = `<div class="empty">読み込み中…</div>`;
+  try{
+    const res = await fetch(`/ceo-michelin/data/${year}.json`);
+    if (!res.ok) throw new Error(res.status);
+    state.data = await res.json();
+    $("editionBadge").textContent = `${state.data.edition}年度版`;
+    document.title = `CEO ミシュランガイド ${state.data.edition}年度版`;
+    $("asOf").textContent = `※ ${state.data.edition}年度版（評価時点：${state.data.asOf}）。${state.data.note}`;
+    renderCriteria();
+    render();
+  }catch(e){
+    $("list").innerHTML = `<div class="empty">データを読み込めませんでした</div>`;
+  }
+}
+
+async function init(){
+  let editions = [];
+  try{
+    const res = await fetch("/ceo-michelin/data/editions.json");
+    editions = (await res.json()).editions;
+  }catch(e){
+    $("list").innerHTML = `<div class="empty">年度一覧を読み込めませんでした</div>`;
+    return;
+  }
+  $("yearSelect").innerHTML = editions.map((y) => `<option value="${y}">${y}年度版</option>`).join("");
+  $("yearSelect").addEventListener("change", (e) => loadYear(e.target.value));
+  $("sortSelect").addEventListener("change", (e) => { state.sort = e.target.value; render(); });
+  $("starFilter").addEventListener("change", (e) => { state.minStar = Number(e.target.value); render(); });
+  $("search").addEventListener("input", (e) => { state.q = e.target.value; if (state.data) render(); });
+  loadYear(editions[0]);
+}
+init();
+</script>
+</body>
+</html>
