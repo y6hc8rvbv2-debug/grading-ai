@@ -1,0 +1,7 @@
+package.json
+lib
+.env
+.env.example
+.gitignore
+CLAUDE.md
+.github
