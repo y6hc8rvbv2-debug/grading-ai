@@ -56,8 +56,8 @@ export function ReviewCopyCard() {
   const [s, setS] = useState<ReviewCopySettings | null>(null);
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
-  // ChatGPT の利用条件は13歳以上。有効にするクラスの生徒が13歳以上であることを、保存の前に先生が確かめる
-  const [age13, setAge13] = useState(false);
+  // 年齢別の使い方（12歳以下は大人が操作・13〜17は保護者の許可）を、保存の前に先生が確認する
+  const [ackPolicy, setAckPolicy] = useState(false);
   useEffect(() => {
     if (ds.mode !== "supabase") return;
     loadReviewCopySettings().then((v) => { if (v) setS(v); else setMissing(true); });
@@ -68,10 +68,19 @@ export function ReviewCopyCard() {
   return (
     <Card title="生徒の復習：本人の ChatGPT で復習" sub="返却した答案の間違えた問題を、生徒が自分の ChatGPT に貼り付けて復習します">
       <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.8, marginBottom: 10 }}>
-        生徒は、本人に返却された答案から間違えた問題を選び、送る内容（問題文・本人の解答・判定・先生のコメントと、ヒントから順に教える家庭教師への指示）を確かめてからコピーし、
-        自分の ChatGPT にログインして貼り付けます。正答と解説は、テストの設定で「返却時に生徒に見せる」にしたときだけ入ります。氏名・学校名・出席番号・答案画像は入りません。
+        生徒は、本人に返却された答案から問題を選び、送る内容（問題文・本人の解答・判定・先生のコメントと、ヒントから順に教える家庭教師への指示）を確かめてからコピーし、
+        ChatGPT に貼り付けます（だれのアカウントで使うかは下の「年齢ごとの使い方」のとおり）。正答と解説は、テストの設定で「返却時に生徒に見せる」にしたときだけ入ります。氏名・学校名・出席番号・答案画像は入りません。
         <b>このアプリは AI を呼ばず、会話の内容や理解度も受け取りません</b>（復習の状態は生徒の自己申告。「理解確認済み」は先生が付けます）。
-        ChatGPT の利用条件（年齢・保護者の同意など）を確かめてから、使ってよいクラスだけ有効にしてください。
+      </div>
+      <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.8, marginBottom: 10, background: "#eef4fb", border: `1px solid ${T.line}`, borderRadius: 10, padding: "8px 10px" }}>
+        <b>年齢ごとの使い方（生徒の画面で案内します）</b>
+        <ul style={{ margin: "4px 0 0", paddingInlineStart: 20 }}>
+          <li><b>12歳以下（13歳未満）</b>：子ども本人が ChatGPT を直接使うのではなく、保護者や先生（大人）が<b>大人自身のアカウント</b>で操作し、いっしょにヒントを読みます。大人のアカウント・パスワードを子どもに貸さないでください。</li>
+          <li><b>13〜17歳</b>：保護者の許可を得たうえで、本人のアカウントで使えます。</li>
+          <li><b>18歳以上</b>：本人のアカウントで使えます。</li>
+        </ul>
+        生徒の画面では年齢を選んでもらいますが、<b>だれが実際に操作したかをアプリは確認できません</b>。クラスの実態に合わせて案内してください。
+        ChatGPT の利用条件（OpenAI の年齢・保護者の同意など）を確かめてから有効にしてください。
       </div>
       {missing && <div style={{ fontSize: 12.5, color: T.warn }}>まだ使えません。管理者が Supabase で 0015_review_copy.sql を実行してください。</div>}
       {s && (
@@ -89,11 +98,11 @@ export function ReviewCopyCard() {
           <div style={{ fontSize: 12, color: T.textFaint }}>学校とクラスの両方で有効なときだけ、生徒の画面に「ChatGPT で復習」が出ます。アプリ内の AI との会話の設定とは別です。</div>
           {canEdit && s.enabled && s.classIds.length > 0 && (
             <label style={{ color: T.text }}>
-              <input type="checkbox" checked={age13} onChange={(e) => setAge13(e.target.checked)} /> 使えるクラスの生徒は、全員13歳以上です（ChatGPT の利用条件。小学生のクラスは有効にしないでください）
+              <input type="checkbox" checked={ackPolicy} onChange={(e) => setAckPolicy(e.target.checked)} /> 上の「年齢ごとの使い方」（12歳以下は大人が操作・13〜17は保護者の許可）を確認し、クラスに合わせて案内します
             </label>
           )}
           {canEdit ? (
-            <div><Btn variant="primary" disabled={busy || (s.enabled && s.classIds.length > 0 && !age13)} onClick={async () => {
+            <div><Btn variant="primary" disabled={busy || (s.enabled && s.classIds.length > 0 && !ackPolicy)} onClick={async () => {
               setBusy(true);
               try { await saveReviewCopySettings(s); toast("ChatGPT での復習の設定を保存しました"); } catch (e) { toast((e as Error).message, "ng"); }
               setBusy(false);

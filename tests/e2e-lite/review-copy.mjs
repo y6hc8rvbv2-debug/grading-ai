@@ -63,8 +63,8 @@ await card.waitFor();
 ok(!(await adm.evaluate(() => document.body.innerText)).includes("チャッピー先生（生徒の音声復習）"), "先生の設定画面：アプリ内の会話（キー・時間）の設定は出ない");
 ok(!(await card.getByRole("checkbox").first().isChecked()), "先生の設定画面：既定は無効");
 for (const c of await card.getByRole("checkbox").all()) await c.check();
-ok(await card.getByRole("button", { name: "設定を保存" }).isDisabled(), "有効にするクラスの生徒が13歳以上かを確かめるまで保存できない");
-await card.getByRole("checkbox", { name: /全員13歳以上/ }).check();
+ok(await card.getByRole("button", { name: "設定を保存" }).isDisabled(), "年齢ごとの使い方を確認するまで保存できない");
+await card.getByRole("checkbox", { name: /年齢ごとの使い方/ }).check();
 await shot(adm, "0-teacher-settings", adm.locator("section", { hasText: "生徒の復習：本人の ChatGPT で復習" }).first());
 await card.getByRole("button", { name: "設定を保存" }).click();
 await adm.getByText("ChatGPT での復習の設定を保存しました").waitFor();
@@ -89,8 +89,22 @@ for (const s of ["HIDDEN-ANSWER", "HIDDEN-EXPLANATION", "正答（先生が公�
 }
 await panel.scrollIntoViewIfNeeded(); await shot(stu, "2-panel-before-check", panel);
 await panel.getByRole("checkbox", { name: "送る内容を確認しました" }).check();
-ok(await copyBtn.isDisabled() && (await panel.getByRole("link", { name: /ChatGPT を開く/ }).count()) === 0, "13歳以上の確認が無いと、コピーも ChatGPT を開くこともできない");
-await panel.getByRole("checkbox", { name: /13歳以上です/ }).check();
+ok(await copyBtn.isDisabled() && (await panel.getByRole("link", { name: /ChatGPT を開く/ }).count()) === 0, "年齢を選ぶまで、コピーも ChatGPT を開くこともできない（既定は未選択）");
+// 12歳以下：本人だけでは使えず、大人が操作する案内が出る
+await panel.getByRole("radio", { name: /12歳以下/ }).check();
+ok((await panel.getByTestId("review-under13").innerText()).includes("保護者や先生に行ってもらってください"), "12歳以下：大人が操作する案内（例文）を表示");
+ok(await copyBtn.isDisabled() && (await panel.getByRole("link", { name: /ChatGPT を開く/ }).count()) === 0, "12歳以下：大人といっしょにのチェックが無いと使えない");
+await panel.getByTestId("review-adultwith").check();
+ok(!(await copyBtn.isDisabled()) && (await panel.getByRole("link", { name: /大人のアカウントで/ }).count()) === 1, "12歳以下：大人といっしょにで使え、リンクは「大人のアカウントで」");
+await shot(stu, "2b-under13", panel);
+// 13〜17歳：保護者の許可のチェックが要る
+await panel.getByRole("radio", { name: "13〜17歳" }).check();
+ok(await copyBtn.isDisabled(), "13〜17歳：保護者の許可のチェックが無いと使えない");
+await panel.getByTestId("review-guardian").check();
+ok(!(await copyBtn.isDisabled()), "13〜17歳：保護者の許可のチェックで使える");
+// 18歳以上：本人で使える
+await panel.getByRole("radio", { name: "18歳以上" }).check();
+ok(!(await copyBtn.isDisabled()), "18歳以上：本人で使える");
 await copyBtn.click();
 await panel.getByText("復習内容をコピーしました").waitFor();
 await shot(stu, "3-copied", panel);
@@ -186,7 +200,7 @@ if (process.env.STORE_SHOT_DIR) {
     await p.getByRole("button", { name: "ChatGPT で復習" }).click();
     const panel = p.getByTestId("review-copy");
     await panel.getByRole("checkbox", { name: "送る内容を確認しました" }).check();
-    await panel.getByRole("checkbox", { name: /13歳以上です/ }).check();
+    await panel.getByRole("radio", { name: "18歳以上" }).check();
     await panel.evaluate((el) => el.scrollIntoView({ block: "start" }));
     await p.waitForTimeout(500);
     await p.screenshot({ path: `${process.env.STORE_SHOT_DIR}/${name}/07-student-review.png` });

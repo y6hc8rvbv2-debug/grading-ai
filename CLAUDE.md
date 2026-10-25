@@ -283,7 +283,7 @@ ver6 のブランチで Next.js 15.5 に更新済み（2026-10-22）だったも
 - **保存期間の削除**：`app/api/retention/purge`（Vercel Cron 毎日、`CRON_SECRET`）→ `lib/retention.ts`：期限切れの答案の画像を Storage API で消してから `purge_submissions(ids)`（0016）で削除済みに。成績の記録は残る
 - **AI に送る前の同意**（Apple 5.1.2(i)）：`lib/ai-consent.ts`・`components/AiConsentDialog.tsx`（AppShell）。採点・テストの読み取り・振り分け・比較試験の前。端末に保存し、設定画面で取り消せる
 - **公開の情報**：`lib/app-info.ts`（初期値は 椎井重臣・testsaiten.support@gmail.com・https://saiten.school-app1.com。`NEXT_PUBLIC_APP_PROVIDER`・`NEXT_PUBLIC_SUPPORT_EMAIL`・`NEXT_PUBLIC_APP_URL` で上書き可）。確認は `npm run store:check`
-- **13歳未満**：生徒の登録は規約・ポリシー（13歳未満は保護者）への同意が必要。「ChatGPT で復習」は先生がクラスの生徒が13歳以上と確認して有効にし、生徒も13歳以上をチェック
+- **13歳未満**：生徒の登録は規約・ポリシー（13歳未満は保護者）への同意が必要。「ChatGPT で復習」（B方式）は年齢別に案内（2026-10-25 改修）：生徒の画面で年齢区分を選び（既定は未選択・学年からは決めない・不明を自動で13歳以上にしない）、**12歳以下は大人が大人自身のアカウントで操作して一緒に復習（本人は直接使わない・大人の認証情報を子に貸さない）／13〜17は保護者の許可／18以上は本人**。全問正解でも大人と解き方・類題で復習できる。先生設定は「全員13歳以上」強制をやめ、年齢別運用の確認に変更。だれが操作したかはアプリで確認できない旨も明記。API・音声（A方式）は別条件・既定オフ。詳細は `docs/REVIEW-CHATGPT.md`
 - **ネイティブ**：`capacitor.config.ts`（本番の URL は既定で https://saiten.school-app1.com、`server.url` = `/start`、通信できないときは `mobile/www/offline.html`）。カメラの権限の文、Android のバックアップ除外。アイコン・起動画面は `npm run mobile:icons`、ストアの画面写真は `scripts/mobile/screenshots.mjs`
 
 ---

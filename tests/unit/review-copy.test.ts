@@ -55,6 +55,24 @@ test("ChatGPT を開くリンクは公式の URL", () => {
   assert.equal(CHATGPT_URL, "https://chatgpt.com/");
 });
 
+test("生徒の画面：年齢区分は既定が未選択。12歳以下は大人が操作する案内・13〜17は保護者の許可・操作者は確認できない旨", () => {
+  const src = readFileSync(join(ROOT, "components/tutor/ReviewCopyPanel.tsx"), "utf8");
+  assert.ok(/useState<Band>\(""\)/.test(src), "年齢区分の既定は未選択（不明を自動で13歳以上にしない）");
+  assert.ok(src.includes("13歳未満の方は、ChatGPT とのやり取りを保護者や先生に行ってもらってください"), "12歳以下は大人が操作する案内（例文）");
+  assert.ok(src.includes("大人のアカウントやパスワードを子どもに貸さないでください"), "大人の認証情報を子どもに貸す案内をしない");
+  assert.ok(/保護者の許可/.test(src), "13〜17歳は保護者の許可");
+  assert.ok(src.includes("だれが実際に操作したかをアプリが確認することはできません"), "操作者を確認できない限界を明記");
+  // 単一の「13歳以上」チェックで直接使わせる旧仕様が残っていない
+  assert.ok(!/13歳以上です（18歳未満/.test(src), "旧仕様（13歳以上チェックだけで本人が使う）が残っていない");
+});
+
+test("全問正解でも、大人と解き方・類題で復習できる導線がある", () => {
+  const src = readFileSync(join(ROOT, "app/student/page.tsx"), "utf8");
+  assert.ok(/const allCorrect = wrong\.length === 0/.test(src) && /reviewItems/.test(src), "全問正解でも reviewItems で問題を選べる");
+  assert.ok(src.includes("全問正解です。よくできました。"));
+  assert.ok(/review-allcorrect/.test(src), "全問正解のときに復習の案内を出す");
+});
+
 test("アプリ内の会話（A方式）は既定で無効。TUTOR_INAPP=on のときだけ有効、緊急停止で無効", () => {
   const keep = { inapp: process.env.TUTOR_INAPP, feature: process.env.TUTOR_FEATURE };
   try {
@@ -109,7 +127,7 @@ test("B方式の画面は、AI・API キー・暗号鍵・見回りのコード�
 
 test("生徒の画面：アプリ内の会話・キーの設定は、サーバーが使う設定（inapp）のときだけ出す", () => {
   const src = readFileSync(join(ROOT, "app/student/page.tsx"), "utf8");
-  assert.ok(/\{inapp && \(\s*<button/.test(src), "「チャッピー先生に聞く」は inapp のときだけ");
+  assert.ok(/\{inapp && !allCorrect && \(\s*<button/.test(src), "「チャッピー先生に聞く」は inapp かつ間違いがあるときだけ");
   assert.ok(/open\.mode === "inapp" && inapp &&/.test(src), "会話の画面は inapp のときだけ");
   assert.ok(/status\.inapp === true && <button[^\n]*setView\("settings"\)/.test(src), "キー・同意の設定タブは inapp のときだけ");
   assert.ok(/view === "settings" && status\?\.inapp === true/.test(src), "設定画面は inapp のときだけ");

@@ -140,6 +140,9 @@ function ReleasedAnswer({ r, tutor }: { r: Release; tutor?: React.ReactNode }) {
 function ReleaseDetail({ r, copy, status, ephemeral, openSettings }: { r: Release; copy: CopyStatus | null; status: TutorStatus | null; ephemeral: EphemeralKey; openSettings: () => void }) {
   const [open, setOpen] = useState<{ qno: number; mode: "copy" | "inapp" } | null>(null);
   const wrong = r.payload.items.filter((i) => i.mark !== "○");
+  const allCorrect = wrong.length === 0;
+  // 全問正解でも、大人といっしょに解き方の確認・類題で復習できるよう、問題を選べるようにする
+  const reviewItems = allCorrect ? r.payload.items : wrong;
   const inapp = status?.inapp === true;
   const meta = { grade: r.payload.grade ?? null, subject: r.payload.subject ?? "", showModelAnswer: r.payload.showModelAnswer === true };
   const toggle = (qno: number, mode: "copy" | "inapp") => setOpen(open?.qno === qno && open.mode === mode ? null : { qno, mode });
@@ -147,13 +150,18 @@ function ReleaseDetail({ r, copy, status, ephemeral, openSettings }: { r: Releas
   return (
     <ReleasedAnswer r={r} tutor={
       <section>
-        <h3>間違えた問題（{wrong.length}問）</h3>
-        {!wrong.length && <p>全問正解です。</p>}
-        {wrong.length > 0 && copy && !copy.enabled && (
+        <h3>{allCorrect ? "全問正解です。よくできました。" : `間違えた問題（${wrong.length}問）`}</h3>
+        {allCorrect && copy?.enabled && (
+          <p data-testid="review-allcorrect" style={{ fontSize: 13.5, color: "#555", lineHeight: 1.8 }}>
+            さらに力をつけたいときは、問題を選んで、解き方の確認や類題にちょうせんできます。
+            12歳以下の人は、保護者や先生（大人）といっしょに取り組みましょう。
+          </p>
+        )}
+        {reviewItems.length > 0 && copy && !copy.enabled && (
           <p data-testid="review-copy-off" style={{ fontSize: 13.5, color: "#555" }}>ChatGPT での復習は、先生が学校・クラスで有効にすると使えます。</p>
         )}
-        {wrong.map((i) => (
-          <div key={i.qno} data-testid="wrong-question" style={{ borderTop: "1px solid #e1e4e8", padding: "10px 0" }}>
+        {reviewItems.map((i) => (
+          <div key={i.qno} data-testid={allCorrect ? "review-question" : "wrong-question"} style={{ borderTop: "1px solid #e1e4e8", padding: "10px 0" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <b>{i.label}</b><span>{i.mark}</span><span>{i.earned}／{i.points}点</span>
               {copy?.enabled && (
@@ -161,7 +169,7 @@ function ReleaseDetail({ r, copy, status, ephemeral, openSettings }: { r: Releas
                   {open?.qno === i.qno && open.mode === "copy" ? "閉じる" : "ChatGPT で復習"}
                 </button>
               )}
-              {inapp && (
+              {inapp && !allCorrect && (
                 <button style={pill(open?.qno === i.qno && open.mode === "inapp")} onClick={() => toggle(i.qno, "inapp")}>
                   {open?.qno === i.qno && open.mode === "inapp" ? "閉じる" : "チャッピー先生に聞く"}
                 </button>
@@ -171,7 +179,7 @@ function ReleaseDetail({ r, copy, status, ephemeral, openSettings }: { r: Releas
             {open?.qno === i.qno && open.mode === "copy" && copy?.enabled && (
               <ReviewCopyPanel releaseId={r.id} item={i} meta={meta} />
             )}
-            {open?.qno === i.qno && open.mode === "inapp" && inapp && (
+            {open?.qno === i.qno && open.mode === "inapp" && inapp && !allCorrect && (
               <TutorPanel releaseId={r.id} item={i as TutorItem} showModelAnswer={!!r.payload.showModelAnswer}
                 status={status} ephemeral={ephemeral} onOpenSettings={openSettings} />
             )}
