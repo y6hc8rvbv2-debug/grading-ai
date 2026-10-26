@@ -7,7 +7,7 @@
 <meta name="theme-color" content="#3b5bdb" />
 <link rel="icon" href="/icon-192.png" />
 <link rel="apple-touch-icon" href="/icon-192.png" />
-<meta name="description" content="届いた電話・メール・SMSをAIが自動で危険判定し、通知と音声でお知らせ。不正ログイン・不正アクセスも端末内だけで安全にチェックする守りのツール" />
+<meta name="description" content="届いた電話・メール・SMSを自動で危険判定し、通知と音声でお知らせ。不正ログイン・不正アクセスも端末内だけで安全にチェックする守りのツール" />
 <style>
   :root{
     --bg:#f4f6fb; --panel:#ffffff; --panel-2:#f8fafc; --ink:#1f2430; --muted:#5b6475;
@@ -64,7 +64,8 @@
   }
   textarea:focus, input:focus{outline:2px solid color-mix(in srgb,var(--brand) 45%,transparent); border-color:var(--brand);}
   .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px;}
-  button.btn{
+  a.btn{display:inline-block; text-decoration:none}
+  button.btn, a.btn{
     background:var(--brand); color:var(--brand-ink); border:none; padding:11px 20px; border-radius:12px;
     cursor:pointer; font-size:15px; font-weight:700;
   }
@@ -135,7 +136,7 @@
     <div class="logo">🛡️</div>
     <div>
       <h1>守りダッシュボード</h1>
-      <p class="sub">届いた電話・メール・SMSをAIが自動で見張って危険をお知らせ。不正ログイン・不正アクセスも、あなたの端末だけでチェック</p>
+      <p class="sub">届いた電話・メール・SMSを自動で見張って危険をお知らせ。不正ログイン・不正アクセスも、あなたの端末だけでチェック</p>
     </div>
   </header>
 
@@ -147,90 +148,69 @@
 
   <div class="privacy">
     <span>🔒</span>
-    <div>不正ログイン・不正アクセスのチェックは<b>この端末のブラウザの中だけ</b>で処理され、サーバーには送信されません。AIの見張りは、判定のためだけに届いた内容をAIへ送りますが（メールアドレス・電話番号などは一部を隠して送信）、<b>どこにも保存しません</b>。</div>
+    <div>不正ログイン・不正アクセスのチェックは<b>この端末のブラウザの中だけ</b>で処理され、サーバーには送信されません。自動チェックは、判定のためだけに届いた内容をサーバーへ送りますが、<b>どこにも保存しません</b>。</div>
   </div>
   <p class="ethic">⚠️ このツールは<b>「自分（や自分が管理する機器）を守る」</b>ためのものです。<b>他人のPC・サーバー・アカウントへの侵入や攻撃・反撃には使わないでください</b>（個人が行うと不正アクセス禁止法などに触れます）。できるのは、異常の検知・あなた自身の設定強化・自分側でのブロックだけです。</p>
 
   <div class="tabs" role="tablist">
-    <button class="tab" role="tab" aria-selected="true" data-tab="auto">🤖 AIが自動で見張る</button>
+    <button class="tab" role="tab" aria-selected="true" data-tab="auto">🛡️ 届いたら自動でチェック</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="login">🔑 不正ログイン検知</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="access">📡 不正アクセス検知</button>
   </div>
 
   <!-- ===== Tab 0: 自動見張り ===== -->
   <section class="panel" id="tab-auto">
-    <h2>🤖 AIが自動で見張る</h2>
-    <p class="desc">メール・SMS・電話が届いたら、<strong>AI（Claude）が自動で中身を見て危険かどうかを判定</strong>し、「このメールは危険です」と<strong>通知と音声</strong>でお知らせします。貼り付けたり届けたりする作業はいりません。<strong>最初に1回だけ</strong>スマホの設定をすれば、あとは自動です。</p>
+    <h2>🛡️ 届いたら自動でチェック</h2>
+    <p class="desc">メール・SMS・電話が届くと、<strong>自動で中身をチェックして、危険なときだけ</strong>「このSMSは危険です」と<strong>通知と音声</strong>でお知らせします。無料・登録不要で、合言葉もいりません。<strong>最初に1回だけ</strong>、スマホの設定をしてください。</p>
 
     <div class="howto-grid">
       <div class="howto"><b>📩 ① 届く</b><span>SMS・メール・電話（Androidは LINE などの通知も）</span></div>
-      <div class="howto"><b>🤖 ② AIが判定</b><span>スマホが自動で内容をAIに送り、危険度を判定</span></div>
-      <div class="howto"><b>🔔 ③ お知らせ</b><span>危険・あやしいときだけ、通知と音声で「このSMSは危険です」</span></div>
+      <div class="howto"><b>🔍 ② 自動でチェック</b><span>スマホが内容を送り、詐欺のサインがないか調べる</span></div>
+      <div class="howto"><b>🔔 ③ お知らせ</b><span>危険・あやしいときだけ、通知と音声で知らせる</span></div>
+    </div>
+
+    <div class="block" id="easy-setup" hidden>
+      <h3>⚡ かんたん設定（タップするだけ）</h3>
+      <div class="row">
+        <a class="btn" id="easy-ios" hidden>🍎 iPhone：ショートカットを追加</a>
+        <a class="btn" id="easy-android" hidden>🤖 Android：設定ファイルを読み込む</a>
+      </div>
     </div>
 
     <div class="block">
-      <h3>🧰 設定で使う2つの情報</h3>
-      <table>
-        <tr><th>送り先URL</th><td><code class="ip" id="api-url">https://grading-ai-security-guard.vercel.app/api/check</code> <button class="ghost mini" onclick="copyBox('api-url')">📋 コピー</button></td></tr>
-        <tr><th>合言葉</th><td>このアプリの管理者が決めた合言葉（AIを他人に勝手に使われないための鍵）</td></tr>
-      </table>
+      <h3>📮 設定で使う「送り先」（これ1つだけ）</h3>
+      <p><code class="ip" id="api-url">https://grading-ai-security-guard.vercel.app/api/check</code> <button class="ghost mini" onclick="copyBox('api-url')">📋 コピー</button></p>
     </div>
 
     <details class="setup" open>
-      <summary>🍎 iPhone の設定（ショートカット アプリ）</summary>
-      <h3>SMS・iMessage を見張る</h3>
+      <summary>🍎 iPhone の設定（「ショートカット」アプリ・約3分）</summary>
       <ol>
-        <li>「ショートカット」アプリ →「オートメーション」→「＋」→「<b>メッセージ</b>」</li>
-        <li>「メッセージに含まれる」に <code class="ip">http</code> と入力（リンク付きのメッセージを見張ります。詐欺SMSのほとんどはリンク付きです）→「<b>すぐに実行</b>」を選ぶ</li>
-        <li>アクション「<b>URLの内容を取得</b>」を追加し、次のように設定
-          <ul>
-            <li>URL：上の<b>送り先URL</b></li>
-            <li>方法：<b>POST</b>　／　本文を要求：<b>JSON</b></li>
-            <li>フィールドを追加（テキスト）：<code class="ip">text</code> ＝「ショートカットの入力」、<code class="ip">kind</code> ＝ <code class="ip">sms</code>、<code class="ip">code</code> ＝ 合言葉、<code class="ip">format</code> ＝ <code class="ip">text</code></li>
-          </ul></li>
-        <li>アクション「<b>もし</b>」を追加：「URLの内容」が「<b>任意の値を持つ</b>」</li>
-        <li>その中に「<b>通知を表示</b>」（中身＝URLの内容）と「<b>テキストを読み上げ</b>」（中身＝URLの内容）を入れる</li>
+        <li>「ショートカット」アプリ →「オートメーション」→「＋」→「<b>メッセージ</b>」（メールを見張るなら「<b>メール</b>」）</li>
+        <li>「メッセージに含まれる」に <code class="ip">http</code> と入れて（詐欺SMSのほとんどはリンク付きです）、「<b>すぐに実行</b>」を選ぶ</li>
+        <li>「<b>URLの内容を取得</b>」を追加 → URLに上の<b>送り先</b>を貼る → 詳細で 方法＝<b>POST</b>、本文を要求＝<b>JSON</b>、フィールド <code class="ip">text</code> ＝「<b>ショートカットの入力</b>」</li>
+        <li>「<b>もし</b>」を追加（「URLの内容」が「任意の値を持つ」）→ その中に「<b>通知を表示</b>」と「<b>テキストを読み上げ</b>」を入れ、中身を「URLの内容」にする</li>
       </ol>
-      <h3>メールを見張る</h3>
-      <ol>
-        <li>「オートメーション」→「＋」→「<b>メール</b>」→ 見張りたいアカウントなどの条件を選び、「すぐに実行」</li>
-        <li>あとは上の 3〜5 と同じ（<code class="ip">kind</code> だけ <code class="ip">mail</code> にする）</li>
-      </ol>
-      <p class="hint">※ iPhoneの<b>電話の着信</b>とLINEなどのアプリは、Appleの制限で自動連携できません。</p>
+      <p class="hint">※ iPhoneの<b>電話の着信</b>とLINEなどのアプリは、Appleの制限で自動チェックできません。</p>
     </details>
 
     <details class="setup">
-      <summary>🤖 Android の設定（無料アプリ MacroDroid）</summary>
+      <summary>🤖 Android の設定（無料アプリ「MacroDroid」・約3分）</summary>
       <ol>
         <li>Google Play から「<b>MacroDroid</b>」を入れて、「マクロを追加」</li>
-        <li><b>トリガー</b>（きっかけ）を選ぶ
-          <ul>
-            <li>SMS：「SMS受信」（送信元：すべて）</li>
-            <li>電話：「着信」（すべての番号）</li>
-            <li>メール・LINE など：「通知受信」→ Gmail や LINE などのアプリを選ぶ</li>
-          </ul></li>
-        <li><b>アクション</b>「HTTPリクエスト」を追加
-          <ul>
-            <li>方法：<b>POST</b>　／　URL：送り先URL＋ <code class="ip">?kind=sms&amp;format=text</code>（電話は <code class="ip">kind=call</code>、メールは <code class="ip">kind=mail</code>、LINE などは <code class="ip">kind=sns</code>）</li>
-            <li>ヘッダー：<code class="ip">X-Omamori-Code</code> ＝ 合言葉</li>
-            <li>本文（text/plain）：SMSなら <code class="ip">[sms_message]</code>、電話なら <code class="ip">[call_number]</code>、通知なら <code class="ip">[notification_title] [notification]</code></li>
-            <li>「応答を変数に保存」をオンにし、文字列の変数（例：<code class="ip">判定</code>）を作って保存先にする</li>
-          </ul></li>
-        <li>アクション「通知を表示」と「テキストを読み上げ」を追加し、中身を <code class="ip">[lv=判定]</code> にする</li>
-        <li><b>制約</b>「変数の値」で「判定 が 空ではない」を付ける（危険・あやしいときだけお知らせ）</li>
+        <li><b>トリガー</b>を選ぶ：「SMS受信」（すべて）、「着信」（すべて）、または「通知受信」（Gmail・LINE など）</li>
+        <li><b>アクション</b>「HTTPリクエスト」→ 方法＝<b>POST</b>、URL＝上の<b>送り先</b>、本文＝ SMSなら <code class="ip">[sms_message]</code>／電話なら <code class="ip">[call_number]</code>／通知なら <code class="ip">[notification]</code>。「応答を変数に保存」で変数（例：<code class="ip">判定</code>）に保存</li>
+        <li><b>アクション</b>「通知を表示」と「テキストを読み上げ」を追加し、中身を <code class="ip">[lv=判定]</code> に。<b>制約</b>「変数の値：判定 が 空ではない」を付ける</li>
       </ol>
     </details>
     <p class="hint">※ 機種やOSのバージョンで、メニューの名前が少し違うことがあります。<br>
-    🔒 届いた内容は判定のためだけにAIへ送られ、<b>保存はしません</b>。送る前にメールアドレス・電話番号・カード番号は自動で一部を隠します。</p>
+    🔒 届いた内容はチェックのためだけに送られ、<b>保存しません</b>。危険なサインが見つからなければ何も通知しません。</p>
 
     <div class="block">
       <h3>🧪 設定できたか試す</h3>
-      <label class="fld" for="in-text">試しに判定する内容（SMS・メール本文や電話番号）</label>
+      <label class="fld" for="in-text">試しにチェックする内容（SMS・メール本文や電話番号）</label>
       <textarea id="in-text" rows="4" placeholder="例）【佐川急便】不在の為持ち帰りました。下記よりご確認ください https://..."></textarea>
-      <label class="fld" for="in-code" style="margin-top:10px">合言葉（AIで判定するときに必要）</label>
-      <input type="password" id="in-code" autocomplete="off" placeholder="合言葉">
       <div class="row">
-        <button class="btn" onclick="testCheck()">AIで判定してみる</button>
+        <button class="btn" onclick="testCheck()">チェックしてみる</button>
         <button class="ghost" onclick="demoIncoming('sms')">例：危険なSMS</button>
         <button class="ghost" onclick="demoIncoming('call')">例：海外から着信</button>
         <button class="ghost" onclick="demoIncoming('mail')">例：なりすましメール</button>
@@ -465,7 +445,10 @@ function copyBox(id){
   navigator.clipboard?.writeText(txt).then(()=>{ /* copied */ },()=>fallbackCopy(txt));
 }
 function fallbackCopy(txt){ const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); }
-/* ============ Tab 0: AIが自動で見張る（設定のテスト） ============ */
+/* ============ Tab 0: 届いたら自動でチェック（設定のテスト） ============ */
+// かんたん設定：管理者がスマホで作った iPhoneショートカットの共有リンク／MacroDroid の設定ファイルのURLを入れると、ボタンが表示される
+const EASY_SETUP={ ios:'', android:'' };
+['ios','android'].forEach(k=>{ if(EASY_SETUP[k]){ $('easy-'+k).href=EASY_SETUP[k]; $('easy-'+k).hidden=false; $('easy-setup').hidden=false; } });
 $('api-url').textContent=location.origin.startsWith('http')?location.origin+'/api/check':$('api-url').textContent;
 function demoIncoming(k){
   $('in-text').value={
@@ -491,10 +474,10 @@ async function testCheck(){
   if(!text){ $('auto-alert').hidden=true; return; }
   const box=$('auto-alert'); box.className='alert-box'; box.hidden=false; box.innerHTML='<div class="a-icon">⏳</div><div><p class="a-msg">判定中…</p></div>';
   try{
-    const res=await fetch('/api/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,code:$('in-code').value})});
+    const res=await fetch('/api/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,format:'json'})});
     const r=await res.json();
     if(!res.ok){ showAlert({level:'warn',icon:'🔑',title:r.error||'判定できませんでした',reason:'',advice:''},''); return; }
-    showAlert(r, r.engine==='ai' ? '🤖 AI（Claude）が判定しました' : r.aiAvailable ? '📏 ルールで判定しました（AIで判定するには合言葉を入れてください）' : '📏 ルールで判定しました（AIはまだ設定されていません）');
+    showAlert(r, r.engine==='ai' ? '🤖 AI（Claude）が判定しました' : '🔍 詐欺のサインを自動でチェックしました');
   }catch(e){
     showAlert(localCheck(text),'📴 サーバーにつながらないため、この端末の中だけで判定しました');
   }

@@ -1,10 +1,13 @@
 // 届いたメール・SMS・着信の危険度を判定する API（スマホの自動化アプリから呼ばれる）
 //
 // POST /api/check
-//   本文: JSON {"text": "...", "kind": "sms|mail|call|sns", "code": "合言葉", "format": "text"}
-//         または text/plain（本文そのもの。kind・format は ?kind=sms&format=text で指定）
-//   合言葉: 本文の code か、ヘッダー X-Omamori-Code
-//   format=text のとき: 危険・あやしいときだけ通知用の文章を返し、安全なら空を返す（all=1 で常に返す）
+//   本文: JSON {"text": "..."} か、text/plain（本文そのもの）。誰でも合言葉なしで使える
+//   応答: 既定では、危険・あやしいときだけ通知用の文章を返し、安全なら空を返す（all=1 で常に返す）
+//         format=json で詳しい結果を JSON で返す（画面のテスト用）
+//   任意: kind（sms|mail|call|sns）で種類を指定。省略すると自動判別
+//
+// 判定は無料のルールで行う。管理者が OMAMORI_ACCESS_CODE と ANTHROPIC_API_KEY を設定し、
+// 合言葉（本文の code かヘッダー X-Omamori-Code）付きで呼んだときだけ AI（Claude）で判定する。
 //
 // 個人情報の扱い: 受け取った内容は保存もログ出力もしない。AI に渡す前に PII Shield の
 // マスキングでメールアドレス・電話番号・カード番号を隠し、応答にも個人情報を含めない。
@@ -94,12 +97,13 @@ async function judgeWithAI(text, kindHint, rule) {
 function readInput(req) {
   const q = req.query || {};
   let body = req.body ?? {};
+  if (Buffer.isBuffer(body)) body = body.toString('utf8'); // 種類の分からない本文はそのまま文字として扱う
   if (typeof body === 'string') body = { text: body };
   return {
     text: String(body.text ?? q.text ?? '').slice(0, MAX_TEXT),
     kind: KINDS.includes(body.kind ?? q.kind) ? (body.kind ?? q.kind) : '',
     code: String(req.headers['x-omamori-code'] ?? body.code ?? ''),
-    format: String(body.format ?? q.format ?? 'json'),
+    format: String(body.format ?? q.format ?? 'text'),
     all: String(body.all ?? q.all ?? '') === '1',
   };
 }
@@ -148,7 +152,7 @@ export default async function handler(req, res) {
   const advice = maskPII(result.advice);
 
   res.setHeader('Cache-Control', 'no-store');
-  if (input.format === 'text') {
+  if (input.format !== 'json') {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     if (result.level === 'ok' && !input.all) return res.status(200).send('');
     return res.status(200).send(`${ICON[result.level]} ${title}\n${reason}\n${advice}`.trim());
