@@ -4,7 +4,11 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>守りダッシュボード</title>
-<meta name="description" content="不正ログイン検知・不正アクセス検知・フィッシング判定を、端末内だけで安全にチェックする守りのツール" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#3b5bdb" />
+<link rel="icon" href="/icon-192.png" />
+<link rel="apple-touch-icon" href="/icon-192.png" />
+<meta name="description" content="電話・メール・SMS・SNSの着信を自動で危険判定してお知らせ。不正ログイン・不正アクセスも端末内だけで安全にチェックする守りのツール" />
 <style>
   :root{
     --bg:#f4f6fb; --panel:#ffffff; --panel-2:#f8fafc; --ink:#1f2430; --muted:#5b6475;
@@ -102,6 +106,35 @@
   .seg{display:flex; gap:6px; flex-wrap:wrap; margin:6px 0 0}
   .seg button{border:1px solid var(--line); background:var(--panel-2); color:var(--muted); font-size:12.5px; padding:6px 11px; border-radius:8px; cursor:pointer}
   .seg button[aria-pressed="true"]{background:var(--brand); color:var(--brand-ink); border-color:var(--brand)}
+  .howto-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin:4px 0 12px}
+  .howto{background:var(--panel-2); border:1px solid var(--line); border-radius:12px; padding:10px 12px; font-size:13px; display:flex; flex-direction:column; gap:3px}
+  .howto span{color:var(--muted)}
+  .toggles{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px}
+  .toggles button[aria-pressed="true"]{background:var(--brand); color:var(--brand-ink); border-color:var(--brand)}
+  .chk{font-size:14px; display:flex; align-items:center; gap:6px; cursor:pointer}
+  .chk input{width:auto; margin:0}
+  .alert-box{display:flex; gap:14px; align-items:flex-start; padding:16px 18px; border-radius:14px; margin:0 0 14px; border:2px solid transparent}
+  .alert-box[hidden]{display:none}
+  .a-icon,.ov-icon{font-size:38px; line-height:1}
+  .a-title{font-size:20px; font-weight:800; margin:0}
+  .a-msg{font-size:14px; margin:4px 0 0}
+  .a-meta{font-size:12px; color:var(--muted); margin:6px 0 0}
+  .a-danger{background:var(--danger-bg); border-color:var(--danger)} .a-danger .a-title{color:var(--danger-strong)}
+  .a-warn{background:var(--warn-bg); border-color:var(--warn)} .a-warn .a-title{color:var(--warn)}
+  .a-ok{background:var(--ok-bg); border-color:var(--ok)} .a-ok .a-title{color:var(--ok)}
+  .overlay{position:fixed; inset:0; background:rgba(10,15,30,.55); display:flex; align-items:center; justify-content:center; padding:16px; z-index:50}
+  .ov-card{max-width:420px; width:100%; border-radius:18px; padding:26px 22px; text-align:center; box-shadow:var(--shadow); border:3px solid transparent}
+  .ov-card .ov-icon{font-size:56px; margin-bottom:8px}
+  .ov-card .a-title{font-size:23px}
+  .ov-card .a-msg{color:var(--ink); margin-bottom:16px}
+  .a-danger.ov-card{animation:pulse 1s ease-in-out 3}
+  @keyframes pulse{50%{transform:scale(1.03)}}
+  details.setup{margin-top:18px; border:1px solid var(--line); border-radius:12px; padding:12px 14px; background:var(--panel-2); font-size:13.5px}
+  details.setup summary{cursor:pointer; font-weight:700}
+  details.setup h3{font-size:14px; margin:14px 0 4px}
+  details.setup ol{margin:4px 0; padding-left:20px}
+  details.setup li{margin:4px 0}
+  details.setup code.ip{word-break:break-all}
   footer{color:var(--muted); font-size:12px; text-align:center; margin-top:28px}
   .empty{color:var(--muted); font-size:13.5px; text-align:center; padding:18px}
   @media (max-width:560px){ .verdict .gauge{font-size:28px; min-width:70px} .panel{padding:16px} }
@@ -113,7 +146,7 @@
     <div class="logo">🛡️</div>
     <div>
       <h1>守りダッシュボード</h1>
-      <p class="sub">不正ログイン・不正アクセス・フィッシングを、あなたの端末だけでチェック</p>
+      <p class="sub">届いた電話・メール・SMSを自動で危険判定。不正ログイン・不正アクセスも、あなたの端末だけでチェック</p>
     </div>
   </header>
 
@@ -130,13 +163,72 @@
   <p class="ethic">⚠️ このツールは<b>「自分（や自分が管理する機器）を守る」</b>ためのものです。<b>他人のPC・サーバー・アカウントへの侵入や攻撃・反撃には使わないでください</b>（個人が行うと不正アクセス禁止法などに触れます）。できるのは、異常の検知・あなた自身の設定強化・自分側でのブロックだけです。</p>
 
   <div class="tabs" role="tablist">
-    <button class="tab" role="tab" aria-selected="true" data-tab="login">🔑 不正ログイン検知</button>
+    <button class="tab" role="tab" aria-selected="true" data-tab="auto">📲 着信を自動チェック</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="login">🔑 不正ログイン検知</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="access">📡 不正アクセス検知</button>
-    <button class="tab" role="tab" aria-selected="false" data-tab="phish">🎣 フィッシング判定</button>
   </div>
 
+  <!-- ===== Tab 0: 着信を自動チェック ===== -->
+  <section class="panel" id="tab-auto">
+    <h2>📲 着信を自動チェック</h2>
+    <p class="desc">電話・メール・SMS・SNSのメッセージが届いたら、<strong>この画面に届けるだけで自動判定</strong>し、「このメールは危険です」のようにすぐお知らせします。判定ボタンもURLのコピペも不要です。</p>
+
+    <div class="alert-box" id="auto-alert" hidden></div>
+
+    <div class="howto-grid">
+      <div class="howto"><b>📤 共有するだけ</b><span>受信したSMS・メールを長押し →「共有」→「守りダッシュボード」。開いた瞬間に自動判定（Android／アプリとして追加したとき）</span></div>
+      <div class="howto"><b>📋 コピーするだけ</b><span>着信番号や本文をコピーしてこの画面に戻ると自動判定（下のスイッチをオン）</span></div>
+      <div class="howto"><b>⚡ 受信と同時に</b><span>スマホの自動化機能で「受信したらこの画面を開く」設定にすると、受信と同時に判定（設定方法は下へ）</span></div>
+    </div>
+
+    <div class="toggles">
+      <button class="ghost" id="clip-toggle" aria-pressed="false" onclick="toggleClip()">📋 コピーしたら自動チェック：オフ</button>
+      <button class="ghost" id="notif-toggle" onclick="enableNotif()">🔔 通知で知らせる</button>
+      <label class="chk"><input type="checkbox" id="speak-toggle" onchange="saveSpeak()"> 🔊 声で知らせる</label>
+    </div>
+
+    <label class="fld" for="in-text">届いた内容（電話番号・メール・SMS・SNSのメッセージ）— 入れた瞬間に自動で判定します</label>
+    <textarea id="in-text" rows="6" placeholder="例）+675 12345678　／　【重要】お客様のアカウントが停止されました…　／　差出人: Amazon &lt;info@amazon-support.top&gt;"></textarea>
+    <div class="seg" id="kind-seg" aria-label="種類">
+      <button aria-pressed="true" data-kind="auto">🤖 自動判別</button>
+      <button aria-pressed="false" data-kind="call">📞 電話</button>
+      <button aria-pressed="false" data-kind="mail">✉️ メール</button>
+      <button aria-pressed="false" data-kind="sms">💬 SMS</button>
+      <button aria-pressed="false" data-kind="sns">📱 SNS</button>
+    </div>
+    <div class="row">
+      <button class="ghost" onclick="demoIncoming('sms')">例：危険なSMSが届いた</button>
+      <button class="ghost" onclick="demoIncoming('call')">例：海外から着信</button>
+      <button class="ghost" onclick="demoIncoming('mail')">例：なりすましメール</button>
+      <button class="ghost" onclick="clearBox('auto')">クリア</button>
+    </div>
+    <div class="results" id="auto-res"></div>
+
+    <details class="setup">
+      <summary>⚡ 「受信と同時に自動判定」にする設定方法</summary>
+      <p class="hint">ブラウザで動くアプリは、セキュリティ上の理由で電話やメールの受信を直接のぞくことができません。そのため、スマホの「共有」や「自動化」機能から内容を受け取る仕組みにしています。受け取った内容は端末の中だけで判定され、サーバーには送られません。</p>
+      <h3>🤖 Androidの場合</h3>
+      <ol>
+        <li>Chromeでこのページを開き、メニュー →「ホーム画面に追加」（または「アプリをインストール」）</li>
+        <li>これで、SMS・メールアプリの「共有」先に<b>守りダッシュボード</b>が出ます。共有した瞬間に自動判定されます</li>
+        <li>完全に自動にしたい場合は、自動化アプリ（例：MacroDroid）で「SMS受信」や「着信」をきっかけに、次のURLを開くよう設定します<br>
+          SMS：<code class="ip">https://grading-ai-security-guard.vercel.app/#kind=sms&amp;text=【本文】</code><br>
+          電話：<code class="ip">https://grading-ai-security-guard.vercel.app/#kind=call&amp;text=【着信番号】</code></li>
+      </ol>
+      <h3>🍎 iPhoneの場合</h3>
+      <ol>
+        <li>「ショートカット」アプリ →「オートメーション」→「＋」→「メッセージ」（メールなら「メール」）</li>
+        <li>「メッセージに含まれる」に <code class="ip">http</code> などを入れ、「すぐに実行」を選ぶ</li>
+        <li>アクションに「テキストをURLエンコード」（中身＝ショートカットの入力）→「URLを開く」を追加し、URLを<br>
+          <code class="ip">https://grading-ai-security-guard.vercel.app/#kind=sms&amp;text=</code>＋エンコードしたテキスト にする</li>
+        <li>iPhoneの<b>電話の着信</b>はAppleの制限で自動連携できません。着信履歴の番号をコピーしてこの画面を開けば自動判定されます</li>
+      </ol>
+      <p class="hint">※ 機種・OSのバージョンによりメニュー名が少し違うことがあります。URLの「#」より後ろはサーバーに送られない部分なので、内容が外に出ることはありません。</p>
+    </details>
+  </section>
+
   <!-- ===== Tab 1: Login ===== -->
-  <section class="panel" id="tab-login">
+  <section class="panel" id="tab-login" style="display:none">
     <h2>🔑 不正ログイン検知</h2>
     <p class="desc">各サービスの「ログイン履歴」を貼り付けると、見慣れない場所・時刻・端末、連続失敗、不可能な移動などの<strong>あやしいサインを自動で採点</strong>します。</p>
     <label class="fld" for="login-in">ログイン履歴（1行1件）— 例：<code>日時, 場所(国/都市), IPアドレス, 端末・ブラウザ, 結果(成功/失敗)</code></label>
@@ -169,22 +261,6 @@
     <div class="results" id="access-res"></div>
   </section>
 
-  <!-- ===== Tab 3: Phishing ===== -->
-  <section class="panel" id="tab-phish" style="display:none">
-    <h2>🎣 フィッシング判定</h2>
-    <p class="desc">あやしいメール・SMS・URLを貼り付けると、<strong>偽ドメイン・なりすまし・あおり文句</strong>などを分析して危険度を判定します。</p>
-    <label class="fld" for="phish-url">URL（任意）</label>
-    <input type="text" id="phish-url" placeholder="https://example-login.verify-account.top/...">
-    <label class="fld" for="phish-text" style="margin-top:12px">メール・SMSの本文（任意）</label>
-    <textarea id="phish-text" rows="6" placeholder="【重要】お客様のアカウントが一時停止されました。24時間以内に下記より本人確認を行ってください…"></textarea>
-    <div class="row">
-      <button class="btn" onclick="runPhish()">判定する</button>
-      <button class="ghost" onclick="samplePhish()">サンプルを入れる</button>
-      <button class="ghost" onclick="clearBox('phish')">クリア</button>
-    </div>
-    <div class="results" id="phish-res"></div>
-  </section>
-
   <footer>
     🛡️ 守りダッシュボード ／ すべての処理は端末内で完結します ／ 困ったら各サービスの公式アプリ・公式サイトから確認を
   </footer>
@@ -197,7 +273,7 @@ document.querySelectorAll('.tab').forEach(t=>{
   t.addEventListener('click',()=>{
     document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected','false'));
     t.setAttribute('aria-selected','true');
-    const map={login:'tab-login',access:'tab-access',phish:'tab-phish'};
+    const map={auto:'tab-auto',login:'tab-login',access:'tab-access'};
     Object.values(map).forEach(id=>$(id).style.display='none');
     $(map[t.dataset.tab]).style.display='block';
   });
@@ -205,7 +281,7 @@ document.querySelectorAll('.tab').forEach(t=>{
 function clearBox(kind){
   if(kind==='login'){ $('login-in').value=''; hide('login-res'); }
   if(kind==='access'){ $('access-in').value=''; hide('access-res'); }
-  if(kind==='phish'){ $('phish-url').value=''; $('phish-text').value=''; hide('phish-res'); }
+  if(kind==='auto'){ $('in-text').value=''; hide('auto-res'); $('auto-alert').hidden=true; setKind('auto'); }
 }
 function hide(id){ const e=$(id); e.classList.remove('show'); e.innerHTML=''; }
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -366,16 +442,12 @@ function segSel(btn,group){
   }
 }
 
-/* ============ Tab 3: フィッシング判定 ============ */
+/* ============ フィッシング判定の部品（着信チェックで使う） ============ */
 const SUSP_TLD=/\.(zip|mov|top|xyz|gq|cf|ml|tk|work|click|link|loan|country|kim|science|review)(\b|\/|$)/i;
 const BRANDS=['amazon','apple','paypal','google','microsoft','rakuten','mufg','smbc','mizuho','jcb','visa','mastercard','netflix','line','docomo','au','softbank','yamato','sagawa','jppost','etc','amex','facebook','instagram','metamask','coinbase','binance'];
 const URGENT=[/至急|今すぐ|緊急|ただちに|直ちに/,/24時間以内|期限|本日中|まもなく|停止され|ロックされ|制限され/,/urgent|immediately|suspend|locked|verify now|within 24/i];
 const ASK=[/パスワード|暗証番号|カード番号|セキュリティコード|ワンタイム|認証コード|口座番号|個人情報|本人確認/,/password|credit card|ssn|one-?time|verify your account|confirm your identity/i];
 const LURE=[/当選|高額|副業|必ず儲か|無料プレゼント|現金|給付金|還付金|未納|滞納|裁判/,/you(?:'ve| have) won|prize|refund|lottery|bitcoin|investment/i];
-function samplePhish(){
-  $('phish-url').value='https://amazon.co.jp.verify-account.top/login?id=889921';
-  $('phish-text').value='【Amazon】お客様のアカウントは異常なログインが検出されたため一時停止されました。24時間以内に下記リンクより本人確認（パスワード・カード情報の再登録）を行ってください。手続きがない場合、アカウントは永久に停止されます。';
-}
 function analyzeUrl(url){
   const out=[]; let score=0; let host='';
   try{
@@ -389,9 +461,13 @@ function analyzeUrl(url){
     if(SUSP_TLD.test(host)){ score+=25; out.push(['high','🚩',`あやしい種類のドメイン末尾（例：.top/.zip/.xyz など）です。`]); }
     if(parts.length>=5){ score+=15; out.push(['mid','🧩',`サブドメインが非常に多い（${esc(host)}）。本物のブランド名を前方に置いた偽装の手口によくあります。`]); }
     // ブランド名がドメイン本体ではなくサブドメイン/パスにある
-    const regDomain=parts.slice(-2).join('.').toLowerCase();
+    // co.jp などの2段の末尾は3つ分を「本当のドメイン」とみなす
+    const regDomain=parts.slice(/^(co|ne|or|go|ac|ad|ed|gr|lg|com|net|org|gov|edu)\.[a-z]{2}$/i.test(parts.slice(-2).join('.'))?-3:-2).join('.').toLowerCase();
+    const labels=host.toLowerCase().split(/[.\-]/);
     BRANDS.forEach(b=>{
-      if((host.toLowerCase().includes(b)||url.toLowerCase().includes(b)) && !regDomain.includes(b)){
+      // au・line などの短い名前は単語として一致したときだけ数える（auction などの誤判定を防ぐ）
+      const hit = b.length<=4 ? labels.includes(b) : (host.toLowerCase().includes(b)||url.toLowerCase().includes(b));
+      if(hit && !regDomain.split('.')[0].includes(b)){
         score+=30; out.push(['high','🏷️',`「<b>${b}</b>」の名前が出てきますが、本当のドメインは <code>${esc(regDomain)}</code> です。<b>なりすまし</b>の疑いが濃厚。`]);
       }
     });
@@ -413,27 +489,6 @@ function analyzeText(text){
   if(/(お客様各位|ユーザー様|会員様)/.test(text) && !/様\s*$/.test(text)){ out.push(['low','🙇','宛名があなたの名前でなく「お客様」など一般的。ばらまき型の可能性。']); score+=5; }
   return {score,findings:out};
 }
-function runPhish(){
-  const url=$('phish-url').value.trim();
-  const text=$('phish-text').value.trim();
-  if(!url && !text){ showEmpty('phish-res','URL か 本文のどちらかを入れてください。'); return; }
-  const u=analyzeUrl(url);
-  const t=analyzeText(text);
-  let score=Math.min(100, u.score + t.score);
-  const findings=[...u.findings,...t.findings];
-  if(!findings.length) findings.push(['ok','✅','分かりやすい危険サインは見つかりませんでした。ただし油断は禁物です。']);
-  findings.sort((a,b)=>({high:0,mid:1,low:2,ok:3}[a[0]]-{high:0,mid:1,low:2,ok:3}[b[0]]));
-
-  let html=verdictBlock(score,{ok:[0,'🟢 危険サインは少なめ','ただし100%安全の保証はありません'],warn:[30,'🟡 あやしい','フィッシングの疑いあり。リンクは踏まないで'],danger:[55,'🔴 フィッシングの疑い大','絶対にリンクを開かず、情報を入力しないで']});
-  if(u.host) html+=`<p class="hint">本当の飛び先ドメイン：<code class="ip">${esc(u.host)}</code></p>`;
-  html+=`<ul class="findings">${findings.map(f=>findingLi(f[0],f[1],f[2])).join('')}</ul>`;
-  const recs = score>=30
-    ? ['メール/SMS内の<b>リンクは踏まない</b>。公式アプリや、自分でブックマークした公式サイトから確認する','<b>パスワードやカード情報を入力しない</b>','本物か不安なら、カード裏面やサービス公式の問い合わせ先に電話で確認','docomo/au/SoftBankの迷惑SMS報告、フィッシング対策協議会への報告も有効','もう入力してしまったら、すぐパスワード変更・カード会社へ連絡・2FA設定']
-    : ['それでもリンクは<b>公式アプリ/ブックマーク経由</b>で開く習慣を','送信元アドレスのドメインが公式と一致するか確認する'];
-  html+=actionsBlock('どうすればいい？', recs);
-  show('phish-res',html);
-}
-
 /* ============ 出力ヘルパ ============ */
 function show(id,html){ const e=$(id); e.innerHTML=html; e.classList.add('show'); e.scrollIntoView({behavior:'smooth',block:'nearest'}); }
 function showEmpty(id,msg){ show(id,`<div class="empty">${esc(msg)}</div>`); }
@@ -442,6 +497,229 @@ function copyBox(id){
   navigator.clipboard?.writeText(txt).then(()=>{ /* copied */ },()=>fallbackCopy(txt));
 }
 function fallbackCopy(txt){ const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); }
+/* ============ Tab 0: 着信を自動チェック ============ */
+const KIND_LABEL={call:'この電話',mail:'このメール',sms:'このSMS',sns:'このSNSメッセージ',url:'このURL'};
+const KIND_NAME={call:'電話',mail:'メール',sms:'SMS',sns:'SNSメッセージ',url:'URL'};
+// 電話・SMSで多い「お金を払わせる・カードを渡させる」系の言葉
+const MONEY_SCAM=[/ATM|キャッシュカード|暗証番号|口座(が|を)?凍結/,/警察|検察|金融庁|裁判所|逮捕|捜査/,/電子マネー|ギフトカード|プリペイドカード|コンビニで(購入|支払)/,/会社のお金|示談金|(息子|孫|オレ|俺).{0,6}(だけど|です)/];
+// 折り返すと高額になりやすい国・地域の国番号（ワン切り詐欺で多い）
+const HIGH_RISK_CC=['675','676','677','678','679','681','682','685','686','688','690','691','692','881','882','883','252','236','239','247','246','222','223'];
+const FREEMAIL=/(^|\.)(gmail\.com|yahoo\.co\.jp|ymail\.ne\.jp|outlook\.(com|jp)|hotmail\.(com|co\.jp)|icloud\.com|me\.com|aol\.com|163\.com|qq\.com|mail\.ru)$/i;
+// [名前, 本文に出てくる言葉, 公式ドメインに含まれる文字]
+const BRAND_MAP=[
+  ['Amazon',/amazon|アマゾン/i,/amazon\./],['楽天',/rakuten|楽天/i,/rakuten\./],['Apple',/\bapple\b|アップル|icloud/i,/apple\.com|icloud\.com/],
+  ['PayPay',/paypay/i,/paypay/],['三井住友',/smbc|三井住友/i,/smbc|vpass/],['三菱UFJ',/mufg|三菱ＵＦＪ|三菱UFJ/i,/mufg/],['みずほ',/mizuho|みずほ/i,/mizuho/],
+  ['ゆうちょ銀行',/ゆうちょ|jp-bank/i,/jp-bank|japanpost/],['日本郵便',/日本郵便|郵便局|japan ?post/i,/japanpost/],
+  ['ヤマト運輸',/ヤマト運輸|クロネコ|kuroneko/i,/kuronekoyamato|yamato/],['佐川急便',/佐川|sagawa/i,/sagawa/],
+  ['NTTドコモ',/docomo|ドコモ/i,/docomo/],['au',/\bKDDI\b|auからの|au ID/i,/au\.com|kddi/],['ソフトバンク',/softbank|ソフトバンク/i,/softbank/],
+  ['国税庁',/国税庁|税務署/,/nta\.go\.jp/],['メルカリ',/mercari|メルカリ/i,/mercari/],['ETC',/ETC利用|ETCサービス/,/etc-meisai|go-etc|nexco/],
+  ['Netflix',/netflix|ネットフリックス/i,/netflix\./],['PayPal',/paypal/i,/paypal\./],['Microsoft',/microsoft|マイクロソフト/i,/microsoft|outlook\.com|live\.com/],
+];
+let kindOverride='auto', lastClip='', autoTimer=null;
+
+function toHalf(s){ return String(s).replace(/[０-９Ａ-Ｚａ-ｚ＋－（）：＠．]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/[ー―‐−]/g,'-'); }
+function detectKind(text){
+  const t=toHalf(text).trim();
+  if(/^(着信|電話)?[:\s]*(非通知|通知不可能?|公衆電話)\s*$/.test(t)) return 'call';
+  const digits=t.replace(/\D/g,'');
+  if(/^[\d+\-()\s]+$/.test(t) && digits.length>=3 && digits.length<=15) return 'call';
+  if(/^(from|to|subject|差出人|送信者|宛先|件名)\s*:/im.test(t) || /[\w.+-]+@[\w-]+\.[\w.-]+/.test(t)) return 'mail';
+  if(/^\S+$/.test(t) && /^(https?:\/\/|www\.)/i.test(t)) return 'url';
+  if(/instagram|facebook|messenger|twitter|tiktok|discord|インスタ|フォロー|友だち追加|ストーリー/i.test(t) || /\bLINE\b|\bDM\b/.test(t)) return 'sns';
+  return 'sms';
+}
+function extractUrls(text){
+  return [...new Set((text.match(/\bhttps?:\/\/[^\s<>"'（）「」、。]+|\bwww\.[^\s<>"'（）「」、。]+/gi)||[]).map(u=>/^www\./i.test(u)?'https://'+u:u))].slice(0,5);
+}
+function extractPhones(text){
+  return [...new Set((toHalf(text).match(/\+?\d[\d\-\s()]{7,17}\d/g)||[]).filter(n=>{ const d=n.replace(/\D/g,''); return d.length>=10&&d.length<=15; }))].slice(0,3);
+}
+function analyzePhone(raw){
+  const out=[]; let score=0;
+  const s=toHalf(raw).trim();
+  if(/非通知|通知不可|公衆電話|unknown|private|anonymous/i.test(s)){
+    score+=30; out.push(['mid','🙈','<b>非通知・番号不明</b>の着信です。詐欺や迷惑電話によく使われます。大事な用件なら相手は番号を出してかけ直してきます。']);
+    return {score,findings:out};
+  }
+  let d=s.replace(/[^\d+]/g,'');
+  if(d.startsWith('+81')) d='0'+d.slice(3);
+  else if(d.startsWith('00')) d='+'+d.slice(2);
+  if(d.startsWith('+')){
+    score+=45; out.push(['high','🌐',`<b>海外からの電話</b>（国番号 ${esc(d.slice(0,4))}…）です。身に覚えがなければ出ない・折り返さないで。国際詐欺電話や、ワン切りで折り返させる手口の典型です。`]);
+    if(HIGH_RISK_CC.some(c=>d.slice(1).startsWith(c))){ score+=25; out.push(['high','💸','<b>折り返すと高額な通話料</b>を請求されやすい国・地域の番号です。']); }
+    return {score,findings:out};
+  }
+  if(/^1\d{2}$/.test(d)){ out.push(['ok','🚓','緊急・公共サービスの短い番号です。']); return {score,findings:out}; }
+  if(/^0990/.test(d)){ score+=40; out.push(['high','💴','<b>0990（有料情報サービス）</b>の番号です。折り返すと高い料金がかかります。']); }
+  else if(/^0570/.test(d)){ score+=15; out.push(['mid','📟','<b>0570（ナビダイヤル）</b>は通話料が高めです。折り返す前に公式サイトの番号か確認を。']); }
+  else if(/^050/.test(d)){ score+=20; out.push(['mid','☎️','<b>050（IP電話）</b>は誰でも簡単に取れる番号で、詐欺や架空請求によく使われます。']); }
+  else if(/^(0120|0800)/.test(d)){ score+=5; out.push(['low','🆓','フリーダイヤルです。企業の窓口のほか、営業・勧誘電話のこともあります。']); }
+  else if(/^0[789]0/.test(d)){ out.push(['low','📱','携帯電話の番号です。知らない番号なら、出る前に番号をネット検索するのも手です。']); }
+  if(/^0/.test(d) && (d.length<10||d.length>11)){ score+=20; out.push(['mid','🔢','日本の電話番号としては<b>桁数がおかしい</b>です。偽装された番号の可能性があります。']); }
+  if(!/^[0+]/.test(d)){ score+=10; out.push(['mid','❓','電話番号として正しく読み取れませんでした。']); }
+  return {score,findings:out};
+}
+function analyzeSender(text){
+  const out=[]; let score=0;
+  const t=toHalf(text);
+  const m=t.match(/(?:from|差出人|送信者)\s*:[^\n]*?([\w.+-]+@[\w-]+(?:\.[\w-]+)+)/i)||t.match(/([\w.+-]+@[\w-]+(?:\.[\w-]+)+)/);
+  if(!m) return {score,findings:out,domain:''};
+  const domain=m[1].split('@')[1].toLowerCase();
+  if(SUSP_TLD.test(domain)){ score+=25; out.push(['high','🚩',`差出人のドメイン <code class="ip">${esc(domain)}</code> は、詐欺によく使われる種類の末尾です。`]); }
+  const claimed=BRAND_MAP.filter(([,word,dom])=>word.test(t) && !dom.test(domain)).map(([name])=>name);
+  if(claimed.length && FREEMAIL.test(domain)){ score+=35; out.push(['high','🎭',`「<b>${esc(claimed[0])}</b>」を名乗っているのに、差出人は<b>フリーメール</b>（${esc(domain)}）です。企業がフリーメールで連絡することはまずありません。`]); }
+  else if(claimed.length){ score+=30; out.push(['high','🏷️',`「<b>${esc(claimed[0])}</b>」を名乗っていますが、差出人のドメイン <code class="ip">${esc(domain)}</code> は公式のものではありません。<b>なりすまし</b>の疑いが濃厚です。`]); }
+  return {score,findings:out,domain};
+}
+function analyzeIncoming(raw, kindHint){
+  const text=raw.trim();
+  const kind=(kindHint&&kindHint!=='auto')?kindHint:detectKind(text);
+  let score=0; const findings=[]; const hosts=[];
+  const add=(r,prefix)=>{ score+=r.score; r.findings.forEach(f=>findings.push(prefix?[f[0],f[1],prefix+f[2]]:f)); };
+  if(kind==='call'){
+    const nums=extractPhones(text);
+    add(analyzePhone(nums[0]||text));
+    const memo=text.replace(/\+?\d[\d\-\s()（）]{2,}\d/g,'');
+    if(memo.replace(/\s/g,'').length>3) add(analyzeText(memo));
+  }else{
+    // 本文中のURLは自動で取り出して、一番危険なものを採点
+    const urls=kind==='url'?[text]:extractUrls(text);
+    const ur=urls.map(u=>analyzeUrl(u)).sort((a,b)=>b.score-a.score);
+    ur.forEach(r=>{ if(r.host) hosts.push(r.host); });
+    if(ur[0]) add(ur[0], urls.length>1?'本文中のURL：':'');
+    if(kind!=='url'){
+      add(analyzeText(text));
+      if(kind==='mail') add(analyzeSender(text));
+      const pr=extractPhones(text).map(n=>analyzePhone(n)).sort((a,b)=>b.score-a.score)[0];
+      if(pr && pr.score>0){ pr.score=Math.round(pr.score*0.6); add(pr,'本文中の電話番号：'); }
+    }
+  }
+  if(MONEY_SCAM.some(re=>re.test(text))){ score+=35; findings.push(['high','💳','<b>ATM・キャッシュカード・電子マネー・警察</b>などの話が出ています。お金やカードを求める電話・メッセージは詐欺を強く疑ってください。']); }
+  score=Math.min(100,score);
+  if(!findings.length) findings.push(['ok','✅','分かりやすい危険サインは見つかりませんでした。']);
+  const ord={high:0,mid:1,low:2,ok:3};
+  findings.sort((a,b)=>ord[a[0]]-ord[b[0]]);
+  return {kind,score,findings,hosts:[...new Set(hosts)]};
+}
+function alertInfo(kind,score){
+  const label=KIND_LABEL[kind];
+  if(score>=55) return {cls:'danger',icon:'🚨',title:`${label}は危険です。`,
+    msg: kind==='call'?'出ない・折り返さないでください。出てしまったら、お金やカードの話が出た時点ですぐに切りましょう。'
+       : kind==='url'?'このURLは開かないでください。':'リンクを開かず、返信もしないでください。パスワードやカード番号は絶対に入力しないで。'};
+  if(score>=30) return {cls:'warn',icon:'⚠️',title:`${label}はあやしいです。注意してください。`,
+    msg: kind==='call'?'知らない番号ならすぐには出ず、用件は留守電で確認するのが安全です。':'リンクは開かず、公式アプリや公式サイトから自分で確認しましょう。'};
+  return {cls:'ok',icon:'✅',title:`${label}に大きな危険サインは見つかりませんでした。`,msg:'ただし100%安全とは限りません。少しでも変だと感じたら、公式の窓口に確認を。'};
+}
+function runIncoming(source){
+  const raw=$('in-text').value;
+  if(!raw.trim()){ hide('auto-res'); $('auto-alert').hidden=true; return; }
+  const r=analyzeIncoming(raw,kindOverride);
+  const a=alertInfo(r.kind,r.score);
+  const box=$('auto-alert');
+  box.className='alert-box a-'+a.cls; box.hidden=false;
+  box.innerHTML=`<div class="a-icon">${a.icon}</div><div><p class="a-title">${esc(a.title)}</p><p class="a-msg">${esc(a.msg)}</p><p class="a-meta">種類：${esc(KIND_NAME[r.kind])}${kindOverride==='auto'?'（自動判別）':''}　危険度：${r.score} / 100</p></div>`;
+  let html='';
+  if(r.hosts.length) html+=`<p class="hint">リンクの本当の飛び先：${r.hosts.map(h=>`<code class="ip">${esc(h)}</code>`).join(' ')}</p>`;
+  html+=`<ul class="findings">${r.findings.map(f=>findingLi(f[0],f[1],f[2])).join('')}</ul>`;
+  const recs = r.kind==='call'
+    ? (r.score>=30
+      ? ['知らない番号には<b>出ない・折り返さない</b>。本当に大事な用件なら留守電やSMSが残ります','「還付金」「ATMへ」「カードを預かる」と言われたら<b>即切る</b>のが正解','不安なら家族や<b>警察相談専用電話 #9110</b>、消費者ホットライン <b>188</b> に相談','スマホの設定で、この番号を<b>着信拒否</b>にしておく']
+      : ['知らない番号は留守電に任せ、内容を聞いてから折り返すと安全です','かけ直すときは、着信の番号ではなく<b>公式サイトに載っている番号</b>へ'])
+    : (r.score>=30
+      ? ['メッセージ内の<b>リンクは開かない</b>。公式アプリや、自分でブックマークした公式サイトから確認する','<b>パスワード・カード番号・認証コードを入力しない</b>、返信もしない','本物か不安なら、カード裏面やサービス公式の問い合わせ先に確認','迷惑SMSは各携帯会社へ、フィッシングメールはフィッシング対策協議会へ報告できます','もう入力してしまったら、すぐパスワード変更・カード会社へ連絡・2段階認証を設定']
+      : ['それでもリンクは<b>公式アプリ/ブックマーク経由</b>で開く習慣を','差出人のアドレスが公式と一致するか確認する']);
+  html+=actionsBlock('どうすればいい？',recs);
+  const res=$('auto-res'); res.innerHTML=html; res.classList.add('show');
+  if(source==='typing') return;
+  if(source!=='paste'||a.cls!=='ok') notifyResult(a, source!=='paste');
+  box.scrollIntoView({behavior:'smooth',block:'start'});
+}
+/* ---- お知らせ（画面・振動・声・通知）---- */
+function notifyResult(a, overlay){
+  if(overlay) showOverlay(a);
+  if(a.cls==='danger') try{ navigator.vibrate?.([300,120,300,120,300]); }catch(e){}
+  if($('speak-toggle').checked && 'speechSynthesis' in window){
+    try{ speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(a.title+(a.cls==='ok'?'':a.msg)); u.lang='ja-JP'; speechSynthesis.speak(u); }catch(e){}
+  }
+  // 通知には内容は載せず、判定結果だけを出す（ロック画面で他人に見られても安心）
+  if('Notification' in window && Notification.permission==='granted' && navigator.serviceWorker){
+    navigator.serviceWorker.ready.then(reg=>reg.showNotification(a.icon+' '+a.title,{body:a.msg,tag:'omamori-result',icon:'/icon-192.png',badge:'/icon-192.png'})).catch(()=>{});
+  }
+}
+function showOverlay(a){
+  let ov=$('alert-overlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='alert-overlay'; ov.className='overlay'; document.body.appendChild(ov); ov.addEventListener('click',e=>{ if(e.target===ov||e.target.closest('[data-close]')) ov.remove(); }); }
+  ov.innerHTML=`<div class="ov-card a-${a.cls}" role="alertdialog" aria-live="assertive"><div class="ov-icon">${a.icon}</div><p class="a-title">${esc(a.title)}</p><p class="a-msg">${esc(a.msg)}</p><button class="btn" data-close>くわしく見る</button></div>`;
+}
+/* ---- 入力したら自動判定 ---- */
+$('in-text').addEventListener('input',()=>{ clearTimeout(autoTimer); autoTimer=setTimeout(()=>runIncoming('typing'),400); });
+$('in-text').addEventListener('paste',()=>{ clearTimeout(autoTimer); setTimeout(()=>runIncoming('paste'),0); });
+$('kind-seg').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  $('kind-seg').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
+  kindOverride=b.dataset.kind; if($('in-text').value.trim()) runIncoming('typing');
+});
+function setKind(k){ kindOverride=['call','mail','sms','sns','url'].includes(k)?k:'auto'; $('kind-seg').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.kind===(kindOverride==='url'?'auto':kindOverride)))); }
+function receive(text, kind, source){
+  if(!text.trim()) return;
+  document.querySelector('.tab[data-tab="auto"]').click();
+  setKind(kind); $('in-text').value=text; runIncoming(source);
+}
+function demoIncoming(k){
+  const demo={
+    sms:'【佐川急便】お荷物のお届けにあがりましたが不在の為持ち帰りました。24時間以内に下記よりご確認ください。 https://sagawa-exp.delivery-check.top/track',
+    call:'+675 7012 3456',
+    mail:'差出人: Amazon.co.jp <account-update@gmail.com>\n件名: 【重要】お支払い方法の確認\n\nお客様各位\nお客様のアカウントで異常なログインが検出されたため一時停止されました。本日中に下記より本人確認（パスワード・カード番号の再登録）を行ってください。\nhttps://amazon.co.jp.verify-account.xyz/login'
+  }[k];
+  receive(demo,'auto','link');
+}
+/* ---- 共有・自動化アプリから届いた内容を受け取る（#以降はサーバーに送られない）---- */
+function readIncomingFromUrl(){
+  const h=new URLSearchParams(location.hash.slice(1));
+  const q=new URLSearchParams(location.search);
+  const get=k=>h.get(k)||q.get(k)||'';
+  const text=[get('title'),get('text'),get('url')].filter(Boolean).join('\n');
+  const kind=get('kind');
+  if(text||location.search) history.replaceState(null,'',location.pathname); // 履歴に内容を残さない
+  if(text) receive(text,kind,'share');
+}
+window.addEventListener('hashchange',readIncomingFromUrl);
+/* ---- コピーしたら自動チェック ---- */
+function loadPref(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function savePref(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+function setClipUi(on){ const b=$('clip-toggle'); b.setAttribute('aria-pressed',String(on)); b.textContent='📋 コピーしたら自動チェック：'+(on?'オン':'オフ'); }
+async function checkClipboard(){
+  if(loadPref('omamori-clip')!=='1' || document.hidden || !navigator.clipboard?.readText) return;
+  try{
+    const t=(await navigator.clipboard.readText()).trim();
+    if(t && t!==lastClip && t.length>=3 && t.length<=5000){ lastClip=t; receive(t,'auto','clipboard'); }
+  }catch(e){ /* 許可がない・対応していない */ }
+}
+async function toggleClip(){
+  const on=loadPref('omamori-clip')!=='1';
+  if(on){
+    if(!navigator.clipboard?.readText){ alert('このブラウザでは「コピーしたら自動チェック」が使えません。貼り付けると自動で判定します。'); return; }
+    try{ lastClip=(await navigator.clipboard.readText()).trim(); }
+    catch(e){ alert('クリップボードの読み取りが許可されませんでした。ブラウザの設定で許可するか、貼り付けて判定してください。'); return; }
+  }
+  savePref('omamori-clip',on?'1':'0'); setClipUi(on);
+}
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) checkClipboard(); });
+window.addEventListener('focus',checkClipboard);
+/* ---- 通知・声の設定 ---- */
+async function enableNotif(){
+  if(!('Notification' in window)){ alert('この端末・ブラウザは通知に対応していません（iPhoneはホーム画面に追加すると使えます）。'); return; }
+  const p=await Notification.requestPermission();
+  $('notif-toggle').textContent = p==='granted'?'🔔 通知：オン':'🔕 通知：許可されていません';
+}
+function saveSpeak(){ savePref('omamori-speak',$('speak-toggle').checked?'1':'0'); }
+(function initAuto(){
+  setClipUi(loadPref('omamori-clip')==='1');
+  $('speak-toggle').checked=loadPref('omamori-speak')==='1';
+  if('Notification' in window && Notification.permission==='granted') $('notif-toggle').textContent='🔔 通知：オン';
+  if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  readIncomingFromUrl();
+})();
 </script>
 </body>
 </html>
