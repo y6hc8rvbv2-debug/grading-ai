@@ -1,6 +1,8 @@
 {
   "framework": null,
   "buildCommand": "",
-  "installCommand": "",
-  "outputDirectory": "."
+  "outputDirectory": "public",
+  "functions": {
+    "api/check.js": { "maxDuration": 30 }
+  }
 }

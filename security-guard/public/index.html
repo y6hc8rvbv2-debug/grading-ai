@@ -4,7 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>守りダッシュボード</title>
-<meta name="description" content="不正ログイン検知・不正アクセス検知・フィッシング判定を、端末内だけで安全にチェックする守りのツール" />
+<meta name="theme-color" content="#3b5bdb" />
+<link rel="icon" href="/icon-192.png" />
+<link rel="apple-touch-icon" href="/icon-192.png" />
+<meta name="description" content="届いた電話・メール・SMSを自動で危険判定し、通知と音声でお知らせ。不正ログイン・不正アクセスも端末内だけで安全にチェックする守りのツール" />
 <style>
   :root{
     --bg:#f4f6fb; --panel:#ffffff; --panel-2:#f8fafc; --ink:#1f2430; --muted:#5b6475;
@@ -61,7 +64,8 @@
   }
   textarea:focus, input:focus{outline:2px solid color-mix(in srgb,var(--brand) 45%,transparent); border-color:var(--brand);}
   .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px;}
-  button.btn{
+  a.btn{display:inline-block; text-decoration:none}
+  button.btn, a.btn{
     background:var(--brand); color:var(--brand-ink); border:none; padding:11px 20px; border-radius:12px;
     cursor:pointer; font-size:15px; font-weight:700;
   }
@@ -102,6 +106,25 @@
   .seg{display:flex; gap:6px; flex-wrap:wrap; margin:6px 0 0}
   .seg button{border:1px solid var(--line); background:var(--panel-2); color:var(--muted); font-size:12.5px; padding:6px 11px; border-radius:8px; cursor:pointer}
   .seg button[aria-pressed="true"]{background:var(--brand); color:var(--brand-ink); border-color:var(--brand)}
+  .howto-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin:4px 0 12px}
+  .howto{background:var(--panel-2); border:1px solid var(--line); border-radius:12px; padding:10px 12px; font-size:13px; display:flex; flex-direction:column; gap:3px}
+  .howto span{color:var(--muted)}
+  .alert-box{display:flex; gap:14px; align-items:flex-start; padding:16px 18px; border-radius:14px; margin:0 0 14px; border:2px solid transparent}
+  .alert-box[hidden]{display:none}
+  button.mini{padding:4px 10px; font-size:12.5px; margin-left:6px}
+  .a-icon{font-size:38px; line-height:1}
+  .a-title{font-size:20px; font-weight:800; margin:0}
+  .a-msg{font-size:14px; margin:4px 0 0}
+  .a-meta{font-size:12px; color:var(--muted); margin:6px 0 0}
+  .a-danger{background:var(--danger-bg); border-color:var(--danger)} .a-danger .a-title{color:var(--danger-strong)}
+  .a-warn{background:var(--warn-bg); border-color:var(--warn)} .a-warn .a-title{color:var(--warn)}
+  .a-ok{background:var(--ok-bg); border-color:var(--ok)} .a-ok .a-title{color:var(--ok)}
+  details.setup{margin-top:18px; border:1px solid var(--line); border-radius:12px; padding:12px 14px; background:var(--panel-2); font-size:13.5px}
+  details.setup summary{cursor:pointer; font-weight:700}
+  details.setup h3{font-size:14px; margin:14px 0 4px}
+  details.setup ol{margin:4px 0; padding-left:20px}
+  details.setup li{margin:4px 0}
+  details.setup code.ip{word-break:break-all}
   footer{color:var(--muted); font-size:12px; text-align:center; margin-top:28px}
   .empty{color:var(--muted); font-size:13.5px; text-align:center; padding:18px}
   @media (max-width:560px){ .verdict .gauge{font-size:28px; min-width:70px} .panel{padding:16px} }
@@ -113,7 +136,7 @@
     <div class="logo">🛡️</div>
     <div>
       <h1>守りダッシュボード</h1>
-      <p class="sub">不正ログイン・不正アクセス・フィッシングを、あなたの端末だけでチェック</p>
+      <p class="sub">届いた電話・メール・SMSを自動で見張って危険をお知らせ。不正ログイン・不正アクセスも、あなたの端末だけでチェック</p>
     </div>
   </header>
 
@@ -125,18 +148,81 @@
 
   <div class="privacy">
     <span>🔒</span>
-    <div>入力した内容は<b>この端末のブラウザの中だけ</b>で処理されます。サーバーには一切送信・保存されません（誰が使っても、他の利用者やあなたの入力は互いに見えません）。安心して貼り付けてください。</div>
+    <div>不正ログイン・不正アクセスのチェックは<b>この端末のブラウザの中だけ</b>で処理され、サーバーには送信されません。自動チェックは、判定のためだけに届いた内容をサーバーへ送りますが、<b>どこにも保存しません</b>。</div>
   </div>
   <p class="ethic">⚠️ このツールは<b>「自分（や自分が管理する機器）を守る」</b>ためのものです。<b>他人のPC・サーバー・アカウントへの侵入や攻撃・反撃には使わないでください</b>（個人が行うと不正アクセス禁止法などに触れます）。できるのは、異常の検知・あなた自身の設定強化・自分側でのブロックだけです。</p>
 
   <div class="tabs" role="tablist">
-    <button class="tab" role="tab" aria-selected="true" data-tab="login">🔑 不正ログイン検知</button>
+    <button class="tab" role="tab" aria-selected="true" data-tab="auto">🛡️ 届いたら自動でチェック</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="login">🔑 不正ログイン検知</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="access">📡 不正アクセス検知</button>
-    <button class="tab" role="tab" aria-selected="false" data-tab="phish">🎣 フィッシング判定</button>
   </div>
 
+  <!-- ===== Tab 0: 自動見張り ===== -->
+  <section class="panel" id="tab-auto">
+    <h2>🛡️ 届いたら自動でチェック</h2>
+    <p class="desc">メール・SMS・電話が届くと、<strong>自動で中身をチェックして、危険なときだけ</strong>「このSMSは危険です」と<strong>通知と音声</strong>でお知らせします。無料・登録不要で、合言葉もいりません。<strong>最初に1回だけ</strong>、スマホの設定をしてください。</p>
+
+    <div class="howto-grid">
+      <div class="howto"><b>📩 ① 届く</b><span>SMS・メール・電話（Androidは LINE などの通知も）</span></div>
+      <div class="howto"><b>🔍 ② 自動でチェック</b><span>スマホが内容を送り、詐欺のサインがないか調べる</span></div>
+      <div class="howto"><b>🔔 ③ お知らせ</b><span>危険・あやしいときだけ、通知と音声で知らせる</span></div>
+    </div>
+
+    <div class="block" id="easy-setup" hidden>
+      <h3>⚡ かんたん設定（タップするだけ）</h3>
+      <div class="row">
+        <a class="btn" id="easy-ios" hidden>🍎 iPhone：ショートカットを追加</a>
+        <a class="btn" id="easy-android" hidden>🤖 Android：設定ファイルを読み込む</a>
+      </div>
+    </div>
+
+    <div class="block">
+      <h3>📮 設定で使う「送り先」（これ1つだけ）</h3>
+      <p><code class="ip" id="api-url">https://grading-ai-security-guard.vercel.app/api/check</code> <button class="ghost mini" onclick="copyBox('api-url')">📋 コピー</button></p>
+    </div>
+
+    <details class="setup" open>
+      <summary>🍎 iPhone の設定（「ショートカット」アプリ・約3分）</summary>
+      <ol>
+        <li>「ショートカット」アプリ →「オートメーション」→「＋」→「<b>メッセージ</b>」（メールを見張るなら「<b>メール</b>」）</li>
+        <li>「メッセージに含まれる」に <code class="ip">http</code> と入れて（詐欺SMSのほとんどはリンク付きです）、「<b>すぐに実行</b>」を選ぶ</li>
+        <li>「<b>URLの内容を取得</b>」を追加 → URLに上の<b>送り先</b>を貼る → 詳細で 方法＝<b>POST</b>、本文を要求＝<b>JSON</b>、フィールド <code class="ip">text</code> ＝「<b>ショートカットの入力</b>」</li>
+        <li>「<b>もし</b>」を追加（「URLの内容」が「任意の値を持つ」）→ その中に「<b>通知を表示</b>」と「<b>テキストを読み上げ</b>」を入れ、中身を「URLの内容」にする</li>
+      </ol>
+      <p class="hint">※ iPhoneの<b>電話の着信</b>とLINEなどのアプリは、Appleの制限で自動チェックできません。</p>
+    </details>
+
+    <details class="setup">
+      <summary>🤖 Android の設定（無料アプリ「MacroDroid」・約3分）</summary>
+      <ol>
+        <li>Google Play から「<b>MacroDroid</b>」を入れて、「マクロを追加」</li>
+        <li><b>トリガー</b>を選ぶ：「SMS受信」（すべて）、「着信」（すべて）、または「通知受信」（Gmail・LINE など）</li>
+        <li><b>アクション</b>「HTTPリクエスト」→ 方法＝<b>POST</b>、URL＝上の<b>送り先</b>、本文＝ SMSなら <code class="ip">[sms_message]</code>／電話なら <code class="ip">[call_number]</code>／通知なら <code class="ip">[notification]</code>。「応答を変数に保存」で変数（例：<code class="ip">判定</code>）に保存</li>
+        <li><b>アクション</b>「通知を表示」と「テキストを読み上げ」を追加し、中身を <code class="ip">[lv=判定]</code> に。<b>制約</b>「変数の値：判定 が 空ではない」を付ける</li>
+      </ol>
+    </details>
+    <p class="hint">※ 機種やOSのバージョンで、メニューの名前が少し違うことがあります。<br>
+    🔒 届いた内容はチェックのためだけに送られ、<b>保存しません</b>。危険なサインが見つからなければ何も通知しません。</p>
+
+    <div class="block">
+      <h3>🧪 設定できたか試す</h3>
+      <label class="fld" for="in-text">試しにチェックする内容（SMS・メール本文や電話番号）</label>
+      <textarea id="in-text" rows="4" placeholder="例）【佐川急便】不在の為持ち帰りました。下記よりご確認ください https://..."></textarea>
+      <div class="row">
+        <button class="btn" onclick="testCheck()">チェックしてみる</button>
+        <button class="ghost" onclick="demoIncoming('sms')">例：危険なSMS</button>
+        <button class="ghost" onclick="demoIncoming('call')">例：海外から着信</button>
+        <button class="ghost" onclick="demoIncoming('mail')">例：なりすましメール</button>
+        <button class="ghost" onclick="clearBox('auto')">クリア</button>
+      </div>
+      <p class="hint">スマホに届く通知と同じ文章が、下に表示されます。</p>
+      <div class="alert-box" id="auto-alert" hidden></div>
+    </div>
+  </section>
+
   <!-- ===== Tab 1: Login ===== -->
-  <section class="panel" id="tab-login">
+  <section class="panel" id="tab-login" style="display:none">
     <h2>🔑 不正ログイン検知</h2>
     <p class="desc">各サービスの「ログイン履歴」を貼り付けると、見慣れない場所・時刻・端末、連続失敗、不可能な移動などの<strong>あやしいサインを自動で採点</strong>します。</p>
     <label class="fld" for="login-in">ログイン履歴（1行1件）— 例：<code>日時, 場所(国/都市), IPアドレス, 端末・ブラウザ, 結果(成功/失敗)</code></label>
@@ -169,27 +255,12 @@
     <div class="results" id="access-res"></div>
   </section>
 
-  <!-- ===== Tab 3: Phishing ===== -->
-  <section class="panel" id="tab-phish" style="display:none">
-    <h2>🎣 フィッシング判定</h2>
-    <p class="desc">あやしいメール・SMS・URLを貼り付けると、<strong>偽ドメイン・なりすまし・あおり文句</strong>などを分析して危険度を判定します。</p>
-    <label class="fld" for="phish-url">URL（任意）</label>
-    <input type="text" id="phish-url" placeholder="https://example-login.verify-account.top/...">
-    <label class="fld" for="phish-text" style="margin-top:12px">メール・SMSの本文（任意）</label>
-    <textarea id="phish-text" rows="6" placeholder="【重要】お客様のアカウントが一時停止されました。24時間以内に下記より本人確認を行ってください…"></textarea>
-    <div class="row">
-      <button class="btn" onclick="runPhish()">判定する</button>
-      <button class="ghost" onclick="samplePhish()">サンプルを入れる</button>
-      <button class="ghost" onclick="clearBox('phish')">クリア</button>
-    </div>
-    <div class="results" id="phish-res"></div>
-  </section>
-
   <footer>
-    🛡️ 守りダッシュボード ／ すべての処理は端末内で完結します ／ 困ったら各サービスの公式アプリ・公式サイトから確認を
+    🛡️ 守りダッシュボード ／ 内容は保存しません ／ 困ったら各サービスの公式アプリ・公式サイトから確認を
   </footer>
 </div>
 
+<script src="/rules.js"></script>
 <script>
 /* ============ 共通 ============ */
 const $ = (id) => document.getElementById(id);
@@ -197,7 +268,7 @@ document.querySelectorAll('.tab').forEach(t=>{
   t.addEventListener('click',()=>{
     document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected','false'));
     t.setAttribute('aria-selected','true');
-    const map={login:'tab-login',access:'tab-access',phish:'tab-phish'};
+    const map={auto:'tab-auto',login:'tab-login',access:'tab-access'};
     Object.values(map).forEach(id=>$(id).style.display='none');
     $(map[t.dataset.tab]).style.display='block';
   });
@@ -205,7 +276,7 @@ document.querySelectorAll('.tab').forEach(t=>{
 function clearBox(kind){
   if(kind==='login'){ $('login-in').value=''; hide('login-res'); }
   if(kind==='access'){ $('access-in').value=''; hide('access-res'); }
-  if(kind==='phish'){ $('phish-url').value=''; $('phish-text').value=''; hide('phish-res'); }
+  if(kind==='auto'){ $('in-text').value=''; $('auto-alert').hidden=true; }
 }
 function hide(id){ const e=$(id); e.classList.remove('show'); e.innerHTML=''; }
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -366,74 +437,6 @@ function segSel(btn,group){
   }
 }
 
-/* ============ Tab 3: フィッシング判定 ============ */
-const SUSP_TLD=/\.(zip|mov|top|xyz|gq|cf|ml|tk|work|click|link|loan|country|kim|science|review)(\b|\/|$)/i;
-const BRANDS=['amazon','apple','paypal','google','microsoft','rakuten','mufg','smbc','mizuho','jcb','visa','mastercard','netflix','line','docomo','au','softbank','yamato','sagawa','jppost','etc','amex','facebook','instagram','metamask','coinbase','binance'];
-const URGENT=[/至急|今すぐ|緊急|ただちに|直ちに/,/24時間以内|期限|本日中|まもなく|停止され|ロックされ|制限され/,/urgent|immediately|suspend|locked|verify now|within 24/i];
-const ASK=[/パスワード|暗証番号|カード番号|セキュリティコード|ワンタイム|認証コード|口座番号|個人情報|本人確認/,/password|credit card|ssn|one-?time|verify your account|confirm your identity/i];
-const LURE=[/当選|高額|副業|必ず儲か|無料プレゼント|現金|給付金|還付金|未納|滞納|裁判/,/you(?:'ve| have) won|prize|refund|lottery|bitcoin|investment/i];
-function samplePhish(){
-  $('phish-url').value='https://amazon.co.jp.verify-account.top/login?id=889921';
-  $('phish-text').value='【Amazon】お客様のアカウントは異常なログインが検出されたため一時停止されました。24時間以内に下記リンクより本人確認（パスワード・カード情報の再登録）を行ってください。手続きがない場合、アカウントは永久に停止されます。';
-}
-function analyzeUrl(url){
-  const out=[]; let score=0; let host='';
-  try{
-    const u=new URL(url.trim());
-    host=u.hostname;
-    const parts=host.split('.');
-    const tld=parts.slice(-2).join('.');
-    if(/^\d{1,3}(\.\d{1,3}){3}$/.test(host)){ score+=35; out.push(['high','🔢',`URLのドメインが<b>IPアドレス直打ち</b>（${esc(host)}）。正規サービスではまず使いません。`]); }
-    if(url.includes('@')){ score+=30; out.push(['high','🎭',`URLに <b>@</b> が含まれます。@より前は飾りで、実際は <code>${esc(host)}</code> に飛びます。`]); }
-    if(host.includes('xn--')){ score+=30; out.push(['high','🅰️',`国際化ドメイン（<b>xn--</b>）。正規そっくりの偽文字が使われている可能性があります。`]); }
-    if(SUSP_TLD.test(host)){ score+=25; out.push(['high','🚩',`あやしい種類のドメイン末尾（例：.top/.zip/.xyz など）です。`]); }
-    if(parts.length>=5){ score+=15; out.push(['mid','🧩',`サブドメインが非常に多い（${esc(host)}）。本物のブランド名を前方に置いた偽装の手口によくあります。`]); }
-    // ブランド名がドメイン本体ではなくサブドメイン/パスにある
-    const regDomain=parts.slice(-2).join('.').toLowerCase();
-    BRANDS.forEach(b=>{
-      if((host.toLowerCase().includes(b)||url.toLowerCase().includes(b)) && !regDomain.includes(b)){
-        score+=30; out.push(['high','🏷️',`「<b>${b}</b>」の名前が出てきますが、本当のドメインは <code>${esc(regDomain)}</code> です。<b>なりすまし</b>の疑いが濃厚。`]);
-      }
-    });
-    if(/-/.test(parts[parts.length-2]||'') && BRANDS.some(b=>host.toLowerCase().includes(b))){ score+=10; out.push(['mid','➖',`ブランド名＋ハイフンのドメインは偽装に多い形です。`]); }
-    if(u.protocol!=='https:'){ score+=10; out.push(['mid','🔓',`暗号化されていない通信（http）です。`]); }
-  }catch(e){
-    if(url.trim()){ score+=10; out.push(['mid','❓','URLとして正しく読み取れませんでした。手入力・短縮URLの可能性があります。']); }
-  }
-  // 短縮URL
-  if(/(bit\.ly|tinyurl|t\.co|is\.gd|goo\.gl|ow\.ly|cutt\.ly|rb\.gy)/i.test(url)){ score+=15; out.push(['mid','🔗','短縮URLです。本当の飛び先が隠されています。展開してから確認を。']); }
-  return {score,findings:out,host};
-}
-function analyzeText(text){
-  const out=[]; let score=0;
-  if(URGENT.some(re=>re.test(text))){ score+=20; out.push(['high','⏰','「至急・24時間以内・停止されました」などの<b>あおり文句</b>。あわてさせて判断を奪う典型手口。']); }
-  if(ASK.some(re=>re.test(text))){ score+=30; out.push(['high','🔑','<b>パスワード・カード番号・認証コードなどの入力</b>を求めています。正規はメール/SMSから直接要求しません。']); }
-  if(LURE.some(re=>re.test(text))){ score+=20; out.push(['mid','🎁','「当選・還付金・未納・副業」などの<b>うま過ぎる/不安をあおる</b>話題。']); }
-  if(/(http|www\.|\.com|\.jp|リンク|下記|こちら)/i.test(text) && /(確認|手続|ログイン|更新|再登録)/.test(text)){ score+=10; out.push(['mid','👉','リンクを踏ませてログイン/手続きさせようとしています。']); }
-  if(/(お客様各位|ユーザー様|会員様)/.test(text) && !/様\s*$/.test(text)){ out.push(['low','🙇','宛名があなたの名前でなく「お客様」など一般的。ばらまき型の可能性。']); score+=5; }
-  return {score,findings:out};
-}
-function runPhish(){
-  const url=$('phish-url').value.trim();
-  const text=$('phish-text').value.trim();
-  if(!url && !text){ showEmpty('phish-res','URL か 本文のどちらかを入れてください。'); return; }
-  const u=analyzeUrl(url);
-  const t=analyzeText(text);
-  let score=Math.min(100, u.score + t.score);
-  const findings=[...u.findings,...t.findings];
-  if(!findings.length) findings.push(['ok','✅','分かりやすい危険サインは見つかりませんでした。ただし油断は禁物です。']);
-  findings.sort((a,b)=>({high:0,mid:1,low:2,ok:3}[a[0]]-{high:0,mid:1,low:2,ok:3}[b[0]]));
-
-  let html=verdictBlock(score,{ok:[0,'🟢 危険サインは少なめ','ただし100%安全の保証はありません'],warn:[30,'🟡 あやしい','フィッシングの疑いあり。リンクは踏まないで'],danger:[55,'🔴 フィッシングの疑い大','絶対にリンクを開かず、情報を入力しないで']});
-  if(u.host) html+=`<p class="hint">本当の飛び先ドメイン：<code class="ip">${esc(u.host)}</code></p>`;
-  html+=`<ul class="findings">${findings.map(f=>findingLi(f[0],f[1],f[2])).join('')}</ul>`;
-  const recs = score>=30
-    ? ['メール/SMS内の<b>リンクは踏まない</b>。公式アプリや、自分でブックマークした公式サイトから確認する','<b>パスワードやカード情報を入力しない</b>','本物か不安なら、カード裏面やサービス公式の問い合わせ先に電話で確認','docomo/au/SoftBankの迷惑SMS報告、フィッシング対策協議会への報告も有効','もう入力してしまったら、すぐパスワード変更・カード会社へ連絡・2FA設定']
-    : ['それでもリンクは<b>公式アプリ/ブックマーク経由</b>で開く習慣を','送信元アドレスのドメインが公式と一致するか確認する'];
-  html+=actionsBlock('どうすればいい？', recs);
-  show('phish-res',html);
-}
-
 /* ============ 出力ヘルパ ============ */
 function show(id,html){ const e=$(id); e.innerHTML=html; e.classList.add('show'); e.scrollIntoView({behavior:'smooth',block:'nearest'}); }
 function showEmpty(id,msg){ show(id,`<div class="empty">${esc(msg)}</div>`); }
@@ -442,6 +445,43 @@ function copyBox(id){
   navigator.clipboard?.writeText(txt).then(()=>{ /* copied */ },()=>fallbackCopy(txt));
 }
 function fallbackCopy(txt){ const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); }
+/* ============ Tab 0: 届いたら自動でチェック（設定のテスト） ============ */
+// かんたん設定：管理者がスマホで作った iPhoneショートカットの共有リンク／MacroDroid の設定ファイルのURLを入れると、ボタンが表示される
+const EASY_SETUP={ ios:'', android:'' };
+['ios','android'].forEach(k=>{ if(EASY_SETUP[k]){ $('easy-'+k).href=EASY_SETUP[k]; $('easy-'+k).hidden=false; $('easy-setup').hidden=false; } });
+$('api-url').textContent=location.origin.startsWith('http')?location.origin+'/api/check':$('api-url').textContent;
+function demoIncoming(k){
+  $('in-text').value={
+    sms:'【佐川急便】お荷物のお届けにあがりましたが不在の為持ち帰りました。24時間以内に下記よりご確認ください。 https://sagawa-exp.delivery-check.top/track',
+    call:'+675 7012 3456',
+    mail:'差出人: Amazon.co.jp <account-update@gmail.com>\n件名: 【重要】お支払い方法の確認\n\nお客様のアカウントで異常なログインが検出されたため一時停止されました。本日中に下記より本人確認（パスワード・カード番号の再登録）を行ってください。\nhttps://amazon.co.jp.verify-account.xyz/login'
+  }[k];
+  testCheck();
+}
+function showAlert(r, note){
+  const box=$('auto-alert');
+  box.className='alert-box a-'+r.level; box.hidden=false;
+  box.innerHTML=`<div class="a-icon">${r.icon}</div><div><p class="a-title">${esc(r.title)}</p><p class="a-msg">${esc(r.reason)}</p><p class="a-msg">${esc(r.advice)}</p><p class="a-meta">${esc(note)}</p></div>`;
+  box.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+// 画面だけで判定する（サーバーにつながらないとき用）
+function localCheck(text){
+  const R=window.OmamoriRules, r=R.analyzeIncoming(text,'auto'), a=R.alertInfo(r.kind,r.score);
+  return {level:a.cls, icon:a.icon, title:a.title, reason:(r.findings[0]?.[2]||'').replace(/<[^>]+>/g,''), advice:a.msg};
+}
+async function testCheck(){
+  const text=$('in-text').value.trim();
+  if(!text){ $('auto-alert').hidden=true; return; }
+  const box=$('auto-alert'); box.className='alert-box'; box.hidden=false; box.innerHTML='<div class="a-icon">⏳</div><div><p class="a-msg">判定中…</p></div>';
+  try{
+    const res=await fetch('/api/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,format:'json'})});
+    const r=await res.json();
+    if(!res.ok){ showAlert({level:'warn',icon:'🔑',title:r.error||'判定できませんでした',reason:'',advice:''},''); return; }
+    showAlert(r, r.engine==='ai' ? '🤖 AI（Claude）が判定しました' : '🔍 詐欺のサインを自動でチェックしました');
+  }catch(e){
+    showAlert(localCheck(text),'📴 サーバーにつながらないため、この端末の中だけで判定しました');
+  }
+}
 </script>
 </body>
 </html>
