@@ -1,4 +1,4 @@
-package.json
+# 公開しないファイル（画面として公開するのは public/ の中だけ。api/ はサーバー側で動く）
 lib
 .env
 .env.example

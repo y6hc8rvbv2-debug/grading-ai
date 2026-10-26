@@ -6,6 +6,7 @@
     "check:pii": "pii-shield-check"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0",
     "pii-shield": "github:y6hc8rvbv2-debug/pii-shield"
   }
 }
