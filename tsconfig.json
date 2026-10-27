@@ -39,7 +39,8 @@
     "next-env.d.ts",
     ".next-vt/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    ".next-lite/dev/types/**/*.ts"
+    ".next-lite/dev/types/**/*.ts",
+    ".next-vt/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
