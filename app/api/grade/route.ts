@@ -20,6 +20,7 @@
 // サーバーに置くのは ANTHROPIC_API_KEY だけ（ブラウザ・応答・ログには出さない）。
 // ============================================================================
 import { targetedTest, mergeTargeted } from "@/lib/ai/targeted";
+import { decryptImage } from "@/lib/crypto/envelope";
 import { NextResponse } from "next/server";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { rubricFromRow } from "@/lib/db/rubric";
@@ -122,7 +123,8 @@ async function loadInputs(supabase: Supa, sub: { school_id: string; test_id: str
 
     const { data: blob, error } = await supabase.storage.from("answer-sheets").download(path);
     if (error || !blob) throw new GradingError("答案画像を読み込めませんでした。時間をおいて、もう一度お試しください。", 500);
-    let buf: Buffer = Buffer.from(await blob.arrayBuffer());
+    // 暗号化した写真（lib/crypto/envelope.ts）は復号してから使う。以前の写真はそのまま
+    let buf: Buffer = (await decryptImage(Buffer.from(await blob.arrayBuffer()), path)).data;
     if (mediaType === "pdf") {
       if (buf.length > MAX_PDF_BYTES) throw new GradingError("PDF が大きすぎます（25MBまで）。ページを分けて取り込んでください。", 400);
       pages.push({ kind: "pdf", data: buf.toString("base64") });

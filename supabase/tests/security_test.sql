@@ -102,7 +102,7 @@ do $$ declare v uuid; ok boolean := false; begin
 end $$;
 reset role;
 do $$ declare v uuid; ok boolean := false; begin
-  select id into v from public.student_account_invites where email = 'invited@example.com';
+  select id into v from public.student_account_invites where email_hash = public.invite_email_hash('invited@example.com');
   perform set_config('request.jwt.claims', '{"sub":"aaaaaaaa-0000-0000-0000-0000000000f2","role":"authenticated"}', false);
   set local role authenticated;
   begin perform public.accept_student_invite(v); exception when others then ok := true; end;
@@ -116,6 +116,13 @@ do $$ begin
   assert exists (select 1 from public.student_accounts where student_id = 'aaaaaaaa-0000-0000-0000-0000000001d8' and user_id = 'aaaaaaaa-0000-0000-0000-0000000000f1'), '本人が承認すると結び付く';
 end $$;
 reset role;
+
+-- 0023：招待のメールアドレスは、戻せない形（ハッシュ）だけ。平文の列は無い
+do $$ begin
+  assert not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'student_account_invites' and column_name = 'email'), 'FAIL: 招待の表にメールアドレスの平文の列がある';
+  assert not exists (select 1 from public.student_account_invites where email_hash !~ '^[0-9a-f]{64}$'), 'FAIL: ハッシュでない値がある';
+  assert (select count(*) from public.student_account_invites where email_hash = public.invite_email_hash(' INVITED@example.com ')) = 1, '大文字・空白をそろえて照合する';
+end $$;
 
 -- ---------------------------------------------------------------- 5. app_metadata の変更を profiles に反映（0022）
 update auth.users set raw_app_meta_data = '{"school_id":"aaaaaaaa-0000-0000-0000-000000000000","role":"admin"}' where id = 'aaaaaaaa-0000-0000-0000-00000000000e';

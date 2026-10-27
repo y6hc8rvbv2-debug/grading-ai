@@ -17,6 +17,7 @@
 // ANTHROPIC_API_KEY はサーバーの中だけで使い、応答・ログには出さない。
 // ============================================================================
 import { createHash } from "node:crypto";
+import { decryptImage } from "@/lib/crypto/envelope";
 import { DAILY_LIMIT, crossSite, dayAgo } from "@/lib/security";
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
@@ -101,7 +102,8 @@ export async function POST(request: Request) {
     const ext = f.path.split(".").pop()?.toLowerCase() ?? "";
     const { data: blob, error } = await supabase.storage.from("answer-sheets").download(f.path);
     if (error || !blob) return fail("資料を読み込めませんでした。もう一度選び直してください。", 400);
-    let buf: Buffer = Buffer.from(await blob.arrayBuffer());
+    // 暗号化した資料は復号してから（同じ資料の見分けも、復号した中身で行う）
+    let buf: Buffer = (await decryptImage(Buffer.from(await blob.arrayBuffer()), f.path)).data;
     hashes.push(`${f.kind}:${createHash("sha256").update(buf).digest("hex")}`);
     let mediaType: ImportSource["mediaType"] | null =
       ext === "pdf" ? "pdf" : ext === "png" ? "image/png" : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : null;

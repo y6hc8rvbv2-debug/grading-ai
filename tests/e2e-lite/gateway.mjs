@@ -61,6 +61,8 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   if (req.method === "OPTIONS") return send(res, 204);
   if (url.pathname === "/__requests") return send(res, 200, log);
+  // テスト用：保存された答案画像の一覧と先頭4バイト（暗号化されているかを確かめる）
+  if (url.pathname === "/__objects") return send(res, 200, [...objects].map(([path, o]) => ({ path, head: o.buf.subarray(0, 4).toString("latin1"), type: o.type })));
   log.push(`${req.method} ${url.pathname}`);
   const body = await readBody(req);
   const bearer = (req.headers.authorization || "").replace(/^Bearer /, "");

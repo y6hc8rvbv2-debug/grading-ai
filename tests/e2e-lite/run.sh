@@ -91,12 +91,14 @@ SERVICE=$(JWT_SECRET="$JWT_SECRET" node -e "
   const c = require('crypto'); const b = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
   const h = b({ alg: 'HS256', typ: 'JWT' }), p = b({ role: 'service_role', exp: Math.floor(Date.now() / 1000) + 86400 });
   console.log(h + '.' + p + '.' + c.createHmac('sha256', process.env.JWT_SECRET).update(h + '.' + p).digest('base64url'));")
+# 答案の写真の暗号化（lib/crypto/envelope.ts）：画面テストでは開発用の鍵で、全部の写真を暗号化して保存する
+IMAGE_ENC=(IMAGE_ENC_PROVIDER=local IMAGE_ENC_LOCAL_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")")
 CLEAN_ENV=(env -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u TUTOR_KEY_ENCRYPTION_KEY -u CRON_SECRET -u SUPABASE_SERVICE_ROLE_KEY -u TUTOR_INAPP -u TUTOR_FEATURE)
 # 公開の情報（ストアに出すときの設定と同じ形。値は架空）
 PUBLIC_INFO=(NEXT_PUBLIC_APP_PROVIDER="検証用の提供者" NEXT_PUBLIC_SUPPORT_EMAIL="support@example.com" NEXT_PUBLIC_APP_URL="https://saiten.example.com")
-"${CLEAN_ENV[@]}" "${PUBLIC_INFO[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
+"${CLEAN_ENV[@]}" "${PUBLIC_INFO[@]}" "${IMAGE_ENC[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
   node_modules/.bin/next build >/dev/null
-"${CLEAN_ENV[@]}" "${PUBLIC_INFO[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
+"${CLEAN_ENV[@]}" "${PUBLIC_INFO[@]}" "${IMAGE_ENC[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
   SUPABASE_SERVICE_ROLE_KEY="$SERVICE" ANTHROPIC_BASE_URL="http://127.0.0.1:$TRAP_PORT" TUTOR_OPENAI_BASE_URL="http://127.0.0.1:$TRAP_PORT/v1" \
   node_modules/.bin/next start -p "$APP_PORT" > "$WORK/app.log" 2>&1 &
 PIDS+=($!)
@@ -117,7 +119,7 @@ STRIPE_MOCK_PORT="$STRIPE_PORT" node --import tsx tests/e2e-lite/stripe-mock.mjs
 PIDS+=($!)
 # 決済のキーはテスト用の形（sk_test_）の架空の値。本物の Stripe には接続しない（STRIPE_API_BASE_URL は代役）。採点AI は罠
 WHSEC="whsec_lite_$(node -e "console.log(require('crypto').randomBytes(12).toString('hex'))")"
-"${CLEAN_ENV[@]}" "${PUBLIC_INFO[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
+"${CLEAN_ENV[@]}" "${PUBLIC_INFO[@]}" "${IMAGE_ENC[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
   SUPABASE_SERVICE_ROLE_KEY="$SERVICE" BILLING_ENABLED=on STRIPE_SECRET_KEY="sk_test_lite_placeholder" STRIPE_API_BASE_URL="http://127.0.0.1:$STRIPE_PORT" \
   STRIPE_WEBHOOK_SECRET="$WHSEC" STRIPE_SCHOOL_TAX_RATE_ID="txr_test_jp10" BILLING_APP_URL="https://saiten.example.com" \
   STRIPE_LEGACY_PLANS_JSON='[{"key":"legacy-lite-old","label":"旧ライト","mode":"test","priceIds":["price_LegacyLite01"],"monthlyYen":9800,"tax":"inclusive","limit":150,"audience":"personal","night":false,"source":"画面テストの架空の旧プラン"}]' \
@@ -136,7 +138,7 @@ echo "== ver6（tests/e2e-lite/ver6.mjs）：採点AI の代役と、ver6 の機
 MOCK_KEY="sk-ant-ver6-$(node -e "console.log(require('crypto').randomBytes(8).toString('hex'))")"
 MOCK_ANTHROPIC_PORT="$MOCK_PORT" EXPECTED_API_KEY="$MOCK_KEY" GRADE_DELAY_MS=1500 node tests/e2e/mock-anthropic.mjs > "$WORK/mock-ai.log" 2>&1 &
 PIDS+=($!)
-"${CLEAN_ENV[@]}" "${PUBLIC_INFO[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
+"${CLEAN_ENV[@]}" "${PUBLIC_INFO[@]}" "${IMAGE_ENC[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
   SUPABASE_SERVICE_ROLE_KEY="$SERVICE" ANTHROPIC_API_KEY="$MOCK_KEY" ANTHROPIC_BASE_URL="http://127.0.0.1:$MOCK_PORT" \
   node_modules/.bin/next start -p "$V6_PORT" > "$WORK/v6.log" 2>&1 &
 PIDS+=($!)

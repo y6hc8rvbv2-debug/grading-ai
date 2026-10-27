@@ -36,7 +36,7 @@ insert into public.questions(id, school_id, test_id, no, label, qtype, unit, poi
  ('eeeeeeee-0000-0000-0000-000000000092', '${SCHOOL}', '${TEST}', 2, '大問1-(2)', 'calc', '方程式', 5, 'x=3', '両辺を2でわる');`);
 
 // 答案の写真の代わり（PNG）。tEXt に「EXAM:受験番号|TITLEHEX:テスト名」を入れる（採点AIの代役が読む）
-function answerPng(examNo, shade = 0) {
+function answerPng(examNo, shade = 0, nameBox = "") {
   const w = 600, h = 800;
   const crcT = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
   const crc = (b) => { let c = 0xffffffff; for (const x of b) c = crcT[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
@@ -44,7 +44,7 @@ function answerPng(examNo, shade = 0) {
   const ih = Buffer.alloc(13); ih.writeUInt32BE(w, 0); ih.writeUInt32BE(h, 4); ih[8] = 8; ih[9] = 0;
   const raw = Buffer.alloc((w + 1) * h);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) raw[y * (w + 1) + 1 + x] = (x * 5 + y * 3 + shade) % 256;
-  const text = Buffer.from(`Comment\0EXAM:${examNo}|TITLEHEX:${Buffer.from(TITLE, "utf8").toString("hex")}`, "latin1");
+  const text = Buffer.from(`Comment\0EXAM:${examNo}|TITLEHEX:${Buffer.from(TITLE, "utf8").toString("hex")}${nameBox ? `|NAMEBOX:${nameBox}` : ""}`, "latin1");
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ih), chunk("tEXt", text), chunk("IDAT", zlib.deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
 }
 
@@ -282,10 +282,12 @@ insert into public.students(id, school_id, class_id, number, exam_no, anon_id)
 await page.goto(BASE + "/new");
 await page.getByText("おまかせモード").first().waitFor();
 const before = (await mockReq()).filter((r) => r.kind === "grade").length;
+// 氏名欄の塗りつぶし（D）：この120人分は、AI が見つけた氏名欄（上の帯）を塗りつぶしてから保存する
+await page.getByLabel("氏名欄を塗りつぶしてから保存する").check();
 const tBig = Date.now();
 await page.locator('input[type="file"]').first().setInputFiles(Array.from({ length: 120 }, (_, i) => {
   const no = `B${String(i + 1).padStart(3, "0")}`;
-  return { name: `scan_${no}.png`, mimeType: "image/png", buffer: answerPng(no, 40 + i) };
+  return { name: `scan_${no}.png`, mimeType: "image/png", buffer: answerPng(no, 40 + i, "0.05,0.02,0.3,0.06") };
 }));
 await page.getByText(/自動確認：120 人分の生徒の割り当て・ページ順に問題はありません/).waitFor({ timeout: 120000 });
 await shot("13-120-sheets-auto-checked");
@@ -299,6 +301,46 @@ ok(bigGrades === 120 && bigDone === "120", `120人分をすべて採点（AI へ
 // 手元のテストのサーバーは HTTP/1.1 なので、ブラウザは同じ宛先に同時に6本までしか送れない（本番の Vercel は HTTP/2 で、この上限は無い）
 ok(peak >= 6, `複数の答案を同時に採点（同時に最大 ${peak} 件。設定は8件、手元の HTTP/1.1 ではブラウザの上限6件）`);
 ok(bigSec < 120, `120人分（1件1.5秒の代役）が ${bigSec.toFixed(0)} 秒で終わった（順番に採点すると 180 秒以上）`);
+
+// 氏名欄の塗りつぶし：保存された写真（復号して表示）の氏名欄は塗りつぶされ、ほかの場所は元のまま
+ok((await text()).includes("氏名欄を塗りつぶして保存：120 枚"), "120人分の氏名欄を塗りつぶしてから保存した");
+const bigPath = sql(`select image_paths[1] from public.submissions where class_id = '${BIG}' order by id limit 1`);
+const px = await page.evaluate(async (p) => {
+  const bmp = await createImageBitmap(await (await fetch(`/api/image?path=${encodeURIComponent(p)}`)).blob());
+  const c = document.createElement("canvas"); c.width = bmp.width; c.height = bmp.height;
+  const g = c.getContext("2d"); g.drawImage(bmp, 0, 0);
+  const at = (fx, fy) => Array.from(g.getImageData(Math.floor(fx * bmp.width), Math.floor(fy * bmp.height), 1, 1).data.slice(0, 3));
+  return { name: at(0.2, 0.05), answer: at(0.5, 0.6) };
+}, bigPath);
+const gray = (v) => v.every((x) => Math.abs(x - 58) <= 6);
+ok(gray(px.name) && !gray(px.answer), `保存された写真の氏名欄は塗りつぶされ、解答の部分は元のまま（氏名欄 ${px.name}・解答 ${px.answer}）`);
+
+// ================================================================ 答案の写真の暗号化（lib/crypto/envelope.ts）
+const objs = await (await fetch(`${GW}/__objects`)).json();
+const sheets = objs.filter((o) => /^[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/\d+\./.test(o.path));
+ok(sheets.length >= 120 && sheets.every((o) => o.head === "TSE1"), `保存した答案の写真はすべて暗号化されている（${sheets.length} 枚。保存先には暗号文だけ）`);
+const one = sheets[0].path;
+const shown = await page.evaluate(async (p) => {
+  const r = await fetch(`/api/image?path=${encodeURIComponent(p)}`);
+  const b = new Uint8Array(await r.arrayBuffer());
+  return { status: r.status, type: r.headers.get("content-type"), head: String.fromCharCode(...b.slice(0, 4)) };
+}, one);
+ok(shown.status === 200 && /^image\//.test(shown.type ?? "") && shown.head !== "TSE1", "暗号化した写真を、ログインした先生には復号して表示する（AI採点・赤ペンも復号した写真で動いた）");
+const anon = await fetch(`${BASE}/api/image?path=${encodeURIComponent(one)}`, { redirect: "manual" });
+ok(anon.status !== 200, "ログインしていないと写真を読めない");
+// 以前の（暗号化していない）写真を、管理者があとから暗号化できる
+const plainPng = await (await fetch(`${GW}/storage/v1/object/sign/answer-sheets/none`)).arrayBuffer();
+await fetch(`${GW}/storage/v1/object/answer-sheets/${one}`, { method: "POST", headers: { authorization: `Bearer ${SERVICE}`, "content-type": "image/png" }, body: Buffer.from(plainPng) });
+ok((await (await fetch(`${GW}/__objects`)).json()).find((o) => o.path === one).head !== "TSE1", "（前提）暗号化していない以前の写真を置く");
+const mig = await page.evaluate(async () => {
+  let offset = 0, converted = 0, calls = 0;
+  while (offset !== null && calls < 100) {
+    const r = await fetch("/api/image/migrate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ offset }) });
+    const j = await r.json(); if (!r.ok) return { error: j.error }; converted += j.converted; offset = j.next; calls++;
+  }
+  return { converted, calls };
+});
+ok(!mig.error && mig.converted >= 1 && (await (await fetch(`${GW}/__objects`)).json()).find((o) => o.path === one).head === "TSE1", `管理者が「以前の写真を暗号化する」で暗号化できる（${mig.converted} 枚・${mig.calls} 回に分けて）`);
 
 ok(errors.length === 0, `コンソールのエラーが無い${errors.length ? "：" + errors.join(" / ") : ""}`);
 await browser.close();

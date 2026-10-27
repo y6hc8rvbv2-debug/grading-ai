@@ -1,5 +1,7 @@
 import type { Student } from "@/lib/types";
 export type PageInfo = {
+  /** 氏名欄の位置（画像に対する割合。ver6 の intake-v3 から。無ければ 0） */
+  nameBox?: { x: number; y: number; w: number; h: number };
   examNo: string;
   number: number;
   page: number;

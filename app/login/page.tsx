@@ -8,6 +8,7 @@ import { friendlyError } from "@/lib/errors";
 import { isSupabaseConfigured } from "@/lib/data/source";
 import { createClient } from "@/lib/supabase/client";
 import { APP_NAME } from "@/lib/app-info";
+import { PasskeySignIn } from "@/components/PasskeySettings";
 
 const T = THEME.light;
 
@@ -150,6 +151,10 @@ export default function LoginPage() {
               background: T.accent, color: "#fff", font: `700 14px ${FONT_UI}`,
               cursor: busy ? "wait" : "pointer", opacity: busy ? 0.7 : 1,
             }}>{busy ? "ログインしています…" : "ログイン"}</button>
+            <PasskeySignIn onError={setError} onSignedIn={async () => {
+              if (await needSecondStep()) return;
+              router.replace("/"); router.refresh();
+            }} />
             <div style={{ fontSize: 11.5, color: T.textFaint, marginTop: 14, lineHeight: 1.75 }}>
               アカウントは学校の管理者が発行します。パスワードを忘れた場合は管理者に再設定を依頼してください。
             </div>

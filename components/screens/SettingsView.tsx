@@ -4,6 +4,7 @@
 import { ReviewCopyCard, TutorAdminCard } from "@/components/tutor/TeacherTutor";
 import { AccountDeletion } from "@/components/AccountDeletion";
 import { MfaSettings } from "@/components/MfaSettings";
+import { PasskeySettings } from "@/components/PasskeySettings";
 import { AiEngineCard } from "@/components/AiEngineCard";
 import { hasAiConsent, setAiConsent } from "@/lib/ai-consent";
 import React, { useEffect, useState } from "react";
@@ -161,10 +162,12 @@ export default function SettingsView() {
           </div>
           <AccountDeletion kind="staff" onDeleted={() => { window.location.href = "/login?deleted=1"; }} />
           <MfaSettings isAdmin={isAdmin} />
+          <PasskeySettings />
         </Card>
       )}
 
       <ReadinessCard />
+      {!demo && isAdmin && <EncryptMigrationCard />}
 
       <AiEngineCard />
       {!demo && (
@@ -181,7 +184,7 @@ export default function SettingsView() {
 
 /* ------------------------------------------------------------ AI採点の準備状況 */
 type Health = { supabase: boolean; ai: boolean; migrations?: Record<string, boolean>; env: string;
-  server?: { accountDeletion: boolean; retention: boolean }; publicInfo?: string[] };
+  server?: { accountDeletion: boolean; retention: boolean; encryption?: { enabled: boolean; provider: string | null; recommended: boolean } }; publicInfo?: string[] };
 
 function ReadinessCard() {
   const { T, ds } = useUI();
@@ -212,6 +215,10 @@ function ReadinessCard() {
       { label: "公開の情報（提供者名・問い合わせ先・本番の URL）", ok: h.publicInfo ? h.publicInfo.length === 0 : null, fix: `未設定：${(h.publicInfo ?? []).join("、")}。Vercel の環境変数に設定して再デプロイしてください（docs/STORE-RELEASE.md）。` },
       { label: "ver6 の追加機能（0019_ver6.sql）", ok: h.migrations?.["0019"] ?? null, fix: "AIエンジンの切り替え・生徒のタブレット/スマホからの提出・前払いの支払いに必要です。0018 の後に、Supabase の SQL Editor で 0019_ver6.sql を実行してください。" },
       { label: "モデル比較試験の記録（0005_model_compare.sql）", ok: h.migrations?.["0005"] ?? null, fix: "管理者がモデル比較試験を使う場合だけ必要です。Supabase の SQL Editor で 0005_model_compare.sql を実行してください。" },
+      { label: "答案の写真の暗号化（鍵金庫）", ok: h.server?.encryption ? h.server.encryption.recommended : null,
+        fix: h.server?.encryption?.enabled
+          ? "いまは開発用の鍵（IMAGE_ENC_LOCAL_KEY）で暗号化しています。本番は AWS KMS（鍵は AWS の HSM の中）をおすすめします（docs/V6-SETUP.md「答案の写真の暗号化」）。"
+          : "答案の写真を暗号化して保存するには、Vercel の環境変数に IMAGE_ENC_PROVIDER=aws-kms と AWS KMS の鍵の設定を足して再デプロイしてください（docs/V6-SETUP.md「答案の写真の暗号化」）。設定するまでは、以前と同じく暗号化せずに保存します。" },
       { label: "iPhone の写真（HEIC）", ok: true, fix: "" },
     ] : [];
   const ready = h && h.supabase && h.ai && h.migrations?.["0004"] && h.migrations?.["0006"];
@@ -235,6 +242,41 @@ function ReadinessCard() {
           </div>
         ))}
       </div>
+    </Card>
+  );
+}
+
+/** 以前に保存した答案の写真を、あとから暗号化する（管理者。/api/image/migrate を10人分ずつ繰り返す） */
+function EncryptMigrationCard() {
+  const { T, toast } = useUI();
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<{ converted: number; already: number; missing: number } | null>(null);
+  const [error, setError] = useState("");
+  const run = async () => {
+    if (!window.confirm("以前に保存した答案の写真を暗号化します。枚数が多いと数分かかります。続けますか？")) return;
+    setBusy(true); setError(""); setDone(null);
+    let offset: number | null = 0;
+    const sum = { converted: 0, already: 0, missing: 0 };
+    try {
+      while (offset !== null) {
+        const res: Response = await fetch("/api/image/migrate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ offset }) });
+        const j = await res.json();
+        if (!res.ok) throw new Error(j.error || "暗号化できませんでした。");
+        sum.converted += j.converted; sum.already += j.already; sum.missing += j.missing;
+        setDone({ ...sum });
+        offset = j.next;
+      }
+      toast("以前の写真の暗号化が終わりました");
+    } catch (e) { setError(e instanceof Error ? e.message : "暗号化できませんでした。"); } finally { setBusy(false); }
+  };
+  return (
+    <Card title="答案の写真の暗号化" sub="鍵金庫（AWS KMS）を設定したあとに、以前の写真もまとめて暗号化できます">
+      <div style={{ fontSize: 12.5, color: T.textSub, lineHeight: 1.8, marginBottom: 8 }}>
+        新しく保存する写真は自動で暗号化します。ここでは、設定より前に保存した写真を暗号化します（何度押しても、暗号化済みの写真は飛ばします）。
+      </div>
+      <Btn size="sm" disabled={busy} onClick={run}>{busy ? "暗号化しています…" : "以前の写真を暗号化する"}</Btn>
+      {done && <div role="status" style={{ fontSize: 12.5, marginTop: 8 }}>暗号化した写真 {done.converted} 枚・暗号化済み {done.already} 枚{done.missing ? `・見つからない ${done.missing} 枚` : ""}</div>}
+      {error && <div role="alert" style={{ fontSize: 12.5, color: T.ng, marginTop: 8 }}>{error}</div>}
     </Card>
   );
 }

@@ -26,7 +26,10 @@ function intakeResult(body) {
   const img = (body.messages?.[0]?.content ?? []).find((c) => c.type === "image");
   const bytes = img?.source?.data ? Buffer.from(img.source.data, "base64").toString("latin1") : "";
   const m = /EXAM:([A-Za-z0-9]*)\|TITLEHEX:([0-9a-f]*)/.exec(bytes);
-  return { examNo: m ? m[1] : "", number: 0, page: 1, first: 1, last: 2, totalPages: 1, issues: [], title: m ? Buffer.from(m[2], "hex").toString("utf8") : "" };
+  // 氏名欄の位置（ver6：氏名欄の塗りつぶし）：印「NAMEBOX:x,y,w,h」（割合）。無ければ 0
+  const nb = /NAMEBOX:([0-9.]+),([0-9.]+),([0-9.]+),([0-9.]+)/.exec(bytes);
+  const nameBox = nb ? { x: +nb[1], y: +nb[2], w: +nb[3], h: +nb[4] } : { x: 0, y: 0, w: 0, h: 0 };
+  return { examNo: m ? m[1] : "", number: 0, page: 1, first: 1, last: 2, totalPages: 1, issues: [], title: m ? Buffer.from(m[2], "hex").toString("utf8") : "", nameBox };
 }
 // 同時に処理している採点の数（並列採点の確認用。GRADE_DELAY_MS で1件の応答を遅らせる）
 let inFlight = 0, maxInFlight = 0;

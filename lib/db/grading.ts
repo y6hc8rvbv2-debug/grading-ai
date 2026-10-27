@@ -438,12 +438,9 @@ export async function createTest(schoolId: string, userId: string, input: NewTes
 
 /** 自動入力の資料を Storage に置く（{school_id}/imports/{requestId}/{n}.{ext}） */
 export async function uploadImportFile(schoolId: string, requestId: string, index: number, file: File) {
-  const sb = createClient();
   const ext = (file.name.split(".").pop()?.toLowerCase() || "jpg").replace(/[^a-z0-9]/g, "");
   const path = `${schoolId}/imports/${requestId}/${index + 1}.${ext}`;
-  const { error } = await sb.storage.from("answer-sheets")
-    .upload(path, file, { upsert: true, contentType: file.type || undefined });
-  if (error) throw error;
+  await uploadThroughServer(path, file);
   return path;
 }
 
@@ -522,9 +519,10 @@ export async function listOpenImports() {
 
 /** 保存済みの資料を読み込む（読み取り結果から再開するとき） */
 export async function downloadImportFile(path: string) {
-  const { data, error } = await createClient().storage.from("answer-sheets").download(path);
-  if (error || !data) throw error ?? new Error("資料を読み込めませんでした。");
-  return data;
+  // 暗号化した資料はサーバーで復号して受け取る（/api/image）
+  const res = await fetch(imageUrl(path), { cache: "no-store" });
+  if (!res.ok) throw new Error("資料を読み込めませんでした。");
+  return await res.blob();
 }
 
 /** 読み取りの記録に、登録したテストを紐づける */
@@ -673,23 +671,29 @@ export async function needsReview(limit = 100): Promise<ReviewEntry[]> {
 export async function uploadAnswerImage(params: {
   schoolId: string; testId: string; submissionId: string; page: number; file: File;
 }) {
-  const sb = createClient();
   const ext = params.file.name.split(".").pop()?.toLowerCase() || "jpg";
   const path = `${params.schoolId}/${params.testId}/${params.submissionId}/${params.page}.${ext}`;
-  const { error } = await sb.storage
-    .from("answer-sheets")
-    .upload(path, params.file, { upsert: true, contentType: params.file.type || undefined });
-  if (error) throw error;
+  await uploadThroughServer(path, params.file);
   return path;
 }
 
-/** 原本画像を表示するための署名付きURL（既定10分） */
-export async function signedImageUrl(path: string, seconds = 600) {
-  const sb = createClient();
-  const { data, error } = await sb.storage
-    .from("answer-sheets").createSignedUrl(path, seconds);
-  if (error) throw error;
-  return data.signedUrl;
+/** 写真の保存はサーバー（/api/image/upload）を通す：鍵金庫の設定があれば暗号化してから保存する（2026-10-27） */
+async function uploadThroughServer(path: string, file: File) {
+  const fd = new FormData();
+  fd.append("path", path);
+  fd.append("file", file);
+  const res = await fetch("/api/image/upload", { method: "POST", body: fd });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j.error || "写真を保存できませんでした。時間をおいて、もう一度お試しください。");
+  }
+}
+/** 写真を表示する URL（同じサイトの /api/image。本人のログインで読み、暗号化した写真は復号して返す） */
+export const imageUrl = (path: string) => `/api/image?path=${encodeURIComponent(path)}`;
+
+/** 原本画像を表示する URL（以前は Storage の署名付きURL。いまは /api/image。呼び出し側は変えない） */
+export async function signedImageUrl(path: string, _seconds = 600) {
+  return imageUrl(path);
 }
 
 /* --------------------------------------------------------- 監査ログ */

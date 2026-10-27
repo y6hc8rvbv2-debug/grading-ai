@@ -10,6 +10,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { aiConfig } from "@/lib/ai/grade";
 import { missingAppInfo } from "@/lib/app-info";
+import { encryptionStatus } from "@/lib/crypto/envelope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,6 +58,8 @@ export async function GET() {
     server: {
       accountDeletion: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
       retention: !!process.env.SUPABASE_SERVICE_ROLE_KEY && !!process.env.CRON_SECRET,
+      // 答案の写真の暗号化（2026-10-27。lib/crypto/envelope.ts）：方式だけを返す（鍵の値は返さない）
+      encryption: encryptionStatus(),
     },
     // 公開に必要な情報（提供者名・問い合わせ先・本番の URL）のうち、未設定のもの
     publicInfo: missingAppInfo(),

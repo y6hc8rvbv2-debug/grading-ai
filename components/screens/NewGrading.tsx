@@ -17,6 +17,7 @@ import { FONT_MONO } from "@/lib/ui/theme";
 import { pct, uid } from "@/lib/util";
 import { PIPELINE, SOURCES, checkQuality, gradeSubmission } from "@/lib/grading/engine";
 import { isHeic, prepareImage } from "@/lib/image";
+import { redactNameBox, usableNameBox } from "@/lib/redact";
 import { MODE_LABEL, STAGE_LABEL } from "@/lib/grading/cost";
 import { GradingModePicker } from "@/components/GradingModePicker";
 import { friendlyError } from "@/lib/errors";
@@ -84,6 +85,8 @@ export default function NewGrading() {
   const [pagesPer, setPagesPer] = useState(1);
   // おまかせモード（自動振り分け・自動確認）と、準備がそろったら自動で採点を始めるか
   const [omakase, setOmakase] = useLocalFlag("omakase", true);
+  // 氏名欄を塗りつぶしてから保存する（2026-10-27。自動振り分けが見つけた氏名欄だけ。既定はオフ・端末に記憶）
+  const [redactName, setRedactName] = useLocalFlag("redactName", false);
   const [autoStart, setAutoStart] = useLocalFlag("autoStart", true);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [autoStartOff, setAutoStartOff] = useState(false);
@@ -371,13 +374,30 @@ export default function NewGrading() {
     const ids: (string | null)[] = new Array(groups.length).fill(null);
     let ng = 0, aiNg = 0, aiDone = 0;
     if (mode === "ai") { setAiProgress({ done: 0, total: groups.length }); addLog("AI採点", `採点方式：${MODE_LABEL[gradingMode]}・${concurrency} 人分ずつ同時に処理します`); }
+    // 氏名欄の塗りつぶし：自動振り分けで氏名欄が見つかった写真だけ、保存する前に塗りつぶす（位置が不自然なら塗りつぶさない）
+    let redacted = 0, notRedacted = 0;
+    const filesToSave = async (group: typeof files): Promise<File[]> => {
+      const out: File[] = [];
+      for (const g of group) {
+        if (!g.file) continue;
+        if (redactName && /^image\/(jpeg|png)$/.test(g.file.type)) {
+          const box = g.scan?.nameBox;
+          if (usableNameBox(box)) {
+            try { out.push(await redactNameBox(g.file, box)); redacted++; continue; } catch { /* 塗りつぶせなければ元の写真 */ }
+          }
+          notRedacted++;
+        }
+        out.push(g.file);
+      }
+      return out;
+    };
     const pipeline = runPool(groups, concurrency, async (group, i) => {
       const f = group[0];
       const name = who(f.studentId);
       let id: string;
       try {
         setCurrentWork(`${name}：答案画像を保存中`);
-        id = await ds.saveGrading(buildInput(group, i), group.flatMap((g) => (g.file ? [g.file] : [])));
+        id = await ds.saveGrading(buildInput(group, i), await filesToSave(group));
         ids[i] = id; setSavedCount((c) => c + 1);
         const what = group.length > 1 ? `${group.length} 枚（${group.map((g) => g.name).join("・")}）` : f.name;
         if (!grading) addLog("保存", `${name}：${what} を保存しました`);
@@ -411,6 +431,7 @@ export default function NewGrading() {
       setAiProgress((p) => (p ? { ...p, done: aiDone } : p));
     });
     await Promise.all([animation, pipeline]);
+    if (redactName) addLog("氏名欄", `氏名欄を塗りつぶして保存：${redacted} 枚${notRedacted ? `（氏名欄が見つからなかった ${notRedacted} 枚は塗りつぶしていません）` : ""}`);
     await refresh();
     setCreatedIds(ids.filter((x): x is string => !!x));
     notifyDone(mode === "ai" ? `${aiDone - aiNg} 人分のAI採点が終わりました${aiNg ? `（${aiNg} 人分は失敗）` : ""}` : `${groups.length - ng} 人分の答案を保存しました`);
@@ -601,6 +622,15 @@ export default function NewGrading() {
               <label style={{ display: "flex", gap: 8, alignItems: "flex-start", flex: "1 1 220px", cursor: "pointer" }}>
                 <input type="checkbox" checked={autoStart} onChange={(e) => setAutoStart(e.target.checked)} style={{ marginTop: 4 }} />
                 <span style={{ fontSize: 12.5, color: T.text }}>準備がそろったら、5秒後に自動で採点を始める</span>
+              </label>
+            )}
+            {omakase && (
+              <label style={{ display: "flex", gap: 8, alignItems: "flex-start", flex: "1 1 260px", cursor: "pointer" }}>
+                <input type="checkbox" checked={redactName} onChange={(e) => setRedactName(e.target.checked)} style={{ marginTop: 4 }} aria-label="氏名欄を塗りつぶしてから保存する" />
+                <span style={{ fontSize: 12.5, color: T.text }}>
+                  氏名欄を塗りつぶしてから保存する
+                  <span style={{ display: "block", fontSize: 11.5, color: T.textSub, lineHeight: 1.6 }}>AI が見つけた氏名欄だけを塗りつぶします（写真にも採点AIにも氏名を残さない）。見つからない答案はそのまま保存します。</span>
+                </span>
               </label>
             )}
           </div>

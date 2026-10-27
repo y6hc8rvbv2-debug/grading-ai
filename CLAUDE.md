@@ -43,6 +43,16 @@
   二段階認証の画面 `components/MfaSettings.tsx`・ログインの2段階目（`app/login`）・proxy.ts（旧 middleware.ts）の aal2 への誘導。再認証 `verifyPassword`（アカウント削除・/api/billing・/api/billing/prepaid。`password` が要る）。
   verify-db は `VERIFY_DB_URL`（検証用 DB だけの接続文字列。ref・リージョンを照合）を優先（ユーザーが Secret を入れ替えるまでは SUPABASE_ACCESS_TOKEN で動く）。二段階認証は必須にしていない（未設定の管理者が締め出されるため）
 
+### 漏れても使えないようにする対策（2026-10-27。ユーザーの指示で A〜D をすべて。`docs/SECURITY-REVIEW.md` 3回目）
+
+- **A 写真の暗号化**：`lib/crypto/envelope.ts`（AES-256-GCM・データ鍵を AWS KMS か IMAGE_ENC_LOCAL_KEY で包む・保存先を AAD に結び付け・先頭 'TSE1'・平文の以前の写真はそのまま読む）。
+  答案画像の読み書きはすべて `/api/image`（本人のログインで Storage から読み、復号）・`/api/image/upload`（暗号化して本人のログインで保存）を通す（`lib/db/grading.ts` の uploadAnswerImage・uploadImportFile・signedImageUrl・downloadImportFile、生徒の画面）。
+  サーバー側は grade・test-import が復号、submit が暗号化。管理者の「以前の写真を暗号化する」＝ `/api/image/migrate`。パスの検査 `lib/image-paths.ts`。環境変数 IMAGE_ENC_PROVIDER=aws-kms|local・AWS_KMS_KEY_ID・AWS_REGION・AWS_ACCESS_KEY_ID/SECRET。未設定なら暗号化しない（ユーザーの AWS 設定待ち。`docs/V6-SETUP.md` 任意5）
+- **B** `0023_invite_email_hash.sql`（student_account_invites.email を消して email_hash だけ。invite_email_hash()・my_email_hash()）
+- **C パスキー**：`components/PasskeySettings.tsx`（auth.registerPasskey・passkey.list/delete・signInWithPasskey）。`NEXT_PUBLIC_PASSKEY_ENABLED=1` のときだけ表示（Supabase で有効化が必要）
+- **D 氏名欄の塗りつぶし**：intake-v3 が nameBox を返す → `lib/redact.ts`（usableNameBox で不自然な位置は除外）→ 新規採点のチェック「氏名欄を塗りつぶしてから保存する」（既定オフ・端末に記憶）。代役の印は NAMEBOX:x,y,w,h
+- 画面テストは全アプリを IMAGE_ENC_PROVIDER=local で動かす（gateway の `/__objects` で保存先が暗号文だけかを確かめる）
+
 ### ver6（2026-10-19。ブランチ claude/test-scoring-v6-app-ii46ie）
 
 ver5（コミット 578d949）を土台に、ユーザーの改善要望①〜13を実装。先生の設定は `docs/V6-SETUP.md`、検証の記録は `docs/V6-VERIFICATION.md`、画面の写真は `docs/screenshots/ver6/`。

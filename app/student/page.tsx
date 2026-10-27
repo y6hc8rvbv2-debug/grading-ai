@@ -10,6 +10,7 @@ import { TutorPanel, type EphemeralKey, type TutorStatus } from "@/components/tu
 import { TutorSettings } from "@/components/tutor/TutorSettings";
 import { ReviewCopyPanel } from "@/components/tutor/ReviewCopyPanel";
 import { AccountDeletion } from "@/components/AccountDeletion";
+import { PasskeySettings, PasskeySignIn } from "@/components/PasskeySettings";
 import type { ReleasedItem as TutorItem } from "@/lib/tutor/prompt";
 import type { Submission, Test, Item, MarkPos } from "@/lib/types";
 type ReleasedItem = Item & { big: number };
@@ -47,11 +48,8 @@ function ReleasedAnswer({ r, tutor }: { r: Release; tutor?: React.ReactNode }) {
           info: Awaited<ReturnType<typeof analyzePage>>;
         }[] = [];
         for (const path of r.image_paths) {
-          const { data, error } = await createClient()
-            .storage.from("answer-sheets")
-            .createSignedUrl(path, 600);
-          if (error) throw error;
-          const url = await displayableUrl(path, data.signedUrl);
+          // 返却された答案の写真：本人のログインでサーバーから受け取る（暗号化した写真は復号される。/api/image）
+          const url = await displayableUrl(path, `/api/image?path=${encodeURIComponent(path)}`);
           urls.push(url);
           loaded.push({ url, info: await analyzePage(url) });
         }
@@ -353,6 +351,7 @@ export default function StudentPage() {
           >
             初めて：アカウント登録
           </button>
+          <PasskeySignIn onError={setMessage} onSignedIn={async () => { await load(); await loadStatus(); }} />
           <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13.5, margin: "12px 0", lineHeight: 1.7 }}>
             <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ width: 20, height: 20, flex: "none" }} />
             <span>
@@ -388,6 +387,7 @@ export default function StudentPage() {
               <p style={{ margin: "4px 0" }}>
                 <a href="/privacy">プライバシーポリシー</a>　<a href="/terms">利用規約</a>　<a href="/support">お問い合わせ</a>
               </p>
+              <PasskeySettings />
               <h3 style={{ fontSize: 16, marginTop: 16 }}>アカウントの削除</h3>
               <AccountDeletion kind="student" onDeleted={async () => {
                 await logout();

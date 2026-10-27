@@ -10,6 +10,7 @@
 // 先生がすでに取り込んだ答案・採点が始まった答案は上書きしない。画像は学校専用の保管場所（非公開）に置く。
 // ============================================================================
 import { NextResponse } from "next/server";
+import { encryptImage } from "@/lib/crypto/envelope";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -115,7 +116,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
     for (let i = 0; i < pages.length; i++) {
       const path = `${c.school_id}/${c.test_id}/${c.submission_id}/${i + 1}.${pages[i].ext}`;
       const type = pages[i].ext === "jpg" ? "image/jpeg" : `image/${pages[i].ext}`;
-      const { error: e } = await admin.storage.from("answer-sheets").upload(path, pages[i].buf, { upsert: true, contentType: type });
+      // 写真は暗号化して保存する（鍵金庫の設定があるとき。lib/crypto/envelope.ts）
+      const enc = await encryptImage(pages[i].buf, type, path);
+      const { error: e } = await admin.storage.from("answer-sheets").upload(path, enc.data, { upsert: true, contentType: enc.encrypted ? "application/octet-stream" : type });
       if (e) throw e;
       paths.push(path);
     }
