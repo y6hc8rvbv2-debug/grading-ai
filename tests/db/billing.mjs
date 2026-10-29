@@ -19,7 +19,7 @@ try {
     insert into students(id,school_id,class_id,number,exam_no,anon_id) values('eeeeeeee-0000-0000-0000-000000000003','eeeeeeee-0000-0000-0000-000000000000','eeeeeeee-0000-0000-0000-000000000002',1,'B1','B1');
     insert into tests(id,school_id,name,subject,grade) values('eeeeeeee-0000-0000-0000-000000000004','eeeeeeee-0000-0000-0000-000000000000','Test','数学',1);
     insert into questions(school_id,test_id,no,label,qtype,points) values('eeeeeeee-0000-0000-0000-000000000000','eeeeeeee-0000-0000-0000-000000000004',1,'1','calc',10);
-    insert into submissions(id,school_id,test_id,class_id,student_id,image_paths) values('eeeeeeee-0000-0000-0000-000000000005','eeeeeeee-0000-0000-0000-000000000000','eeeeeeee-0000-0000-0000-000000000004','eeeeeeee-0000-0000-0000-000000000002','eeeeeeee-0000-0000-0000-000000000003',array['test.jpg']);
+    insert into submissions(id,school_id,test_id,class_id,student_id,image_paths) values('eeeeeeee-0000-0000-0000-000000000005','eeeeeeee-0000-0000-0000-000000000000','eeeeeeee-0000-0000-0000-000000000004','eeeeeeee-0000-0000-0000-000000000002','eeeeeeee-0000-0000-0000-000000000003',array['eeeeeeee-0000-0000-0000-000000000000/test.jpg']);
     update billing_config set enabled=true;
   `);
   const start=(req,mode='cascade',consent=false)=>`select billing_start_job('eeeeeeee-0000-0000-0000-000000000000','eeeeeeee-0000-0000-0000-000000000001','eeeeeeee-0000-0000-0000-000000000005','eeeeeeee-0000-0000-0000-${String(req).padStart(12,'0')}','${mode}',true,${consent})`;
@@ -55,11 +55,11 @@ try {
   await deny("delete from grading_jobs where status='running'");
   await db.exec('set role app_owner');
   await db.exec("update grading_jobs set status='failed' where status='running'");
-  await db.exec("update submissions set image_paths=array['a.jpg','b.jpg','c.jpg']");
+  await db.exec("update submissions set image_paths=array['eeeeeeee-0000-0000-0000-000000000000/a.jpg','eeeeeeee-0000-0000-0000-000000000000/b.jpg','eeeeeeee-0000-0000-0000-000000000000/c.jpg']");
   await deny(start(15));
-  await db.exec("update submissions set image_paths=array['answer.pdf']");
+  await db.exec("update submissions set image_paths=array['eeeeeeee-0000-0000-0000-000000000000/answer.pdf']");
   await deny(start(16));
-  await db.exec("update submissions set image_paths=array['answer.jpg']; update billing_accounts set status='payment_pending'");
+  await db.exec("update submissions set image_paths=array['eeeeeeee-0000-0000-0000-000000000000/answer.jpg']; update billing_accounts set status='payment_pending'");
   await deny(start(17));
   await db.exec("update billing_accounts set status='free',quota=30,period_start=now()-interval '2 months',period_end=now()-interval '1 month'");
   await db.exec(start(18));
