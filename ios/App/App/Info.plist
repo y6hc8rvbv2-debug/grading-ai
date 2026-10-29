@@ -10,6 +10,10 @@
 	<string>答案を撮影して採点するためにカメラを使います。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>保存してある答案の写真を選んで取り込むために使います。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>先生が赤ペンのコメントを声で入力するときに、マイクを使います。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>声で入力したコメントを文字にするために、音声認識を使います。</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>CFBundleDisplayName</key>

@@ -102,8 +102,8 @@ insert into public.tests(id, school_id, name, subject, grade, max_score) values
  ('dddddddd-0000-0000-0000-000000000031', 'dddddddd-0000-0000-0000-000000000000', 'R1', '数学', 1, 10),
  ('dddddddd-0000-0000-0000-000000000032', 'dddddddd-0000-0000-0000-000000000000', 'R2', '数学', 1, 10);
 insert into public.submissions(id, school_id, test_id, student_id, class_id, status, progress, image_paths, uploaded_at) values
- ('dddddddd-0000-0000-0000-000000000051', 'dddddddd-0000-0000-0000-000000000000', 'dddddddd-0000-0000-0000-000000000031', 'dddddddd-0000-0000-0000-000000000021', 'dddddddd-0000-0000-0000-000000000011', 'uploaded', 0, array['d/old.jpg'], now() - interval '40 days'),
- ('dddddddd-0000-0000-0000-000000000052', 'dddddddd-0000-0000-0000-000000000000', 'dddddddd-0000-0000-0000-000000000032', 'dddddddd-0000-0000-0000-000000000021', 'dddddddd-0000-0000-0000-000000000011', 'uploaded', 0, array['d/new.jpg'], now() - interval '10 days');
+ ('dddddddd-0000-0000-0000-000000000051', 'dddddddd-0000-0000-0000-000000000000', 'dddddddd-0000-0000-0000-000000000031', 'dddddddd-0000-0000-0000-000000000021', 'dddddddd-0000-0000-0000-000000000011', 'uploaded', 0, array['dddddddd-0000-0000-0000-000000000000/old.jpg'], now() - interval '40 days'),
+ ('dddddddd-0000-0000-0000-000000000052', 'dddddddd-0000-0000-0000-000000000000', 'dddddddd-0000-0000-0000-000000000032', 'dddddddd-0000-0000-0000-000000000021', 'dddddddd-0000-0000-0000-000000000011', 'uploaded', 0, array['dddddddd-0000-0000-0000-000000000000/new.jpg'], now() - interval '10 days');
 do $$ begin
   assert not has_function_privilege('authenticated', 'public.purge_submissions(uuid[])', 'execute'), '先生・生徒は呼べない';
   assert not has_function_privilege('anon', 'public.purge_submissions(uuid[])', 'execute');
@@ -117,6 +117,6 @@ end $$;
 reset role;
 do $$ begin
   assert (select deleted_at is not null and image_paths = '{}' from public.submissions where id = 'dddddddd-0000-0000-0000-000000000051'), '期限切れは削除済み・画像の参照を空に';
-  assert (select deleted_at is null and image_paths = array['d/new.jpg'] from public.submissions where id = 'dddddddd-0000-0000-0000-000000000052'), '期限前は変えない';
+  assert (select deleted_at is null and image_paths = array['dddddddd-0000-0000-0000-000000000000/new.jpg'] from public.submissions where id = 'dddddddd-0000-0000-0000-000000000052'), '期限前は変えない';
 end $$;
 select 'OK: account_deletion_test（最後の管理者は不可・先生と生徒の削除・返却内容は変えない・学校の記録は残る・保存期間の削除）' as result;

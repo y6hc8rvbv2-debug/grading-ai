@@ -4,7 +4,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { decryptImage } from "@/lib/crypto/envelope";
-import { isImagePath, mimeOfPath } from "@/lib/image-paths";
+import { ALLOWED_MIME, isImagePath, mimeOfPath, sniffMime } from "@/lib/image-paths";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,12 +19,17 @@ export async function GET(req: Request) {
   if (error || !blob) return NextResponse.json({ error: "画像が見つからないか、見る権限がありません。" }, { status: 404 });
   try {
     const out = await decryptImage(Buffer.from(await blob.arrayBuffer()), path, mimeOfPath(path));
+    // 返す種類は中身で確かめ、写真・PDF 以外（HTML・SVG など）は表示させずにダウンロード扱いにする（同じサイトの上でスクリプトを動かさせない）
+    const mime = sniffMime(out.data);
+    const ok = !!mime && ALLOWED_MIME.has(mime);
     return new NextResponse(new Uint8Array(out.data), {
       headers: {
-        "content-type": out.mime === "application/octet-stream" ? mimeOfPath(path) : out.mime,
+        "content-type": ok ? mime! : "application/octet-stream",
         "cache-control": "private, no-store",
         "x-content-type-options": "nosniff",
-        "content-disposition": "inline",
+        "content-disposition": ok ? "inline" : "attachment",
+        // 写真：スクリプト・読み込みを一切させない。PDF：ブラウザの PDF 表示を壊さないよう sandbox は付けない（PDF は同じサイトのスクリプトを動かせない）
+        "content-security-policy": mime === "application/pdf" ? "frame-ancestors 'self'" : "default-src 'none'; sandbox; frame-ancestors 'self'",
       },
     });
   } catch {

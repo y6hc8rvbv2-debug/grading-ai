@@ -70,7 +70,7 @@ PIDS+=($!)
 for _ in $(seq 1 30); do curl -sf -o /dev/null "http://127.0.0.1:$REST_PORT/" && break; sleep 1; done
 
 echo "== ログイン・画像の代役と、AI の宛先の罠を起動"
-LITE_USERS='{"admin@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000001","password":"pass-lite-123"},"stu-a@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000002","password":"pass-lite-123"},"stu-b@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000003","password":"pass-lite-123"}}'
+LITE_USERS='{"admin@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000001","password":"pass-lite-123"},"stu-a@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000002","password":"pass-lite-123"},"stu-b@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000003","password":"pass-lite-123"},"acc-x-teacher@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000a1","password":"pass-lite-123"},"acc-y-teacher@lite.example":{"id":"acce55ed-0000-0000-000b-0000000000a1","password":"pass-lite-123"},"acc-x-stu1@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000b1","password":"pass-lite-123"},"acc-x-stu2@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000b2","password":"pass-lite-123"}}'
 GATEWAY_PORT="$GW_PORT" POSTGREST_URL="http://127.0.0.1:$REST_PORT" JWT_SECRET="$JWT_SECRET" LITE_USERS="$LITE_USERS" \
   PG_URL="postgresql://postgres@127.0.0.1:$PG_PORT/lite" \
   node tests/e2e-lite/gateway.mjs > "$WORK/gateway.log" 2>&1 &
@@ -146,3 +146,8 @@ for _ in $(seq 1 40); do curl -sf -o /dev/null "http://localhost:$V6_PORT/login"
 V6_SHOT_DIR="${V6_SHOT_DIR:-}" V6_URL="http://localhost:$V6_PORT" MOCK_URL="http://127.0.0.1:$MOCK_PORT" GATEWAY_URL="http://127.0.0.1:$GW_PORT" SERVICE_JWT="$SERVICE" \
   PG_URL="postgresql://postgres@127.0.0.1:$PG_PORT/lite" \
   node tests/e2e-lite/ver6.mjs || { echo "--- v6.log"; tail -60 "$WORK/v6.log"; echo "--- mock-ai.log"; tail -20 "$WORK/mock-ai.log"; echo "--- gateway.log"; tail -20 "$WORK/gateway.log"; exit 1; }
+
+echo "== アクセス制限（tests/e2e-lite/access.mjs）：未ログイン・学校間・生徒間を、直接の URL・API・画像・REST・Storage で"
+V6_URL="http://localhost:$V6_PORT" MOCK_URL="http://127.0.0.1:$MOCK_PORT" GATEWAY_URL="http://127.0.0.1:$GW_PORT" ANON_JWT="$ANON" \
+  PG_URL="postgresql://postgres@127.0.0.1:$PG_PORT/lite" \
+  node tests/e2e-lite/access.mjs || { echo "--- v6.log"; tail -60 "$WORK/v6.log"; echo "--- gateway.log"; tail -20 "$WORK/gateway.log"; exit 1; }

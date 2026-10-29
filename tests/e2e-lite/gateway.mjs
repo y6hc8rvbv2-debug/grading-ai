@@ -2,6 +2,8 @@
 //   /rest/v1/*     → 本物の PostgREST（素の PostgreSQL＋全マイグレーション。RLS は本物）へ中継
 //   /auth/v1/*     → ログイン（パスワード）・利用者の取得・ログアウトだけを再現（JWT は PostgREST と同じ秘密で署名）
 //   /storage/v1/*  → 署名付きURLの発行と、答案画像の代わりの白い PNG。ver6：アップロードされた画像はメモリに置き、読むときに返す
+//                    2026-10-29：本物の Storage と同じく、読み書きは storage.objects の RLS（本人のトークン）で決め、
+//                    保存は保存先（storage.buckets）の許可形式・大きさの上限で断る（学校をまたぐ読み書き・許可形式の設定漏れを画面テストで捉える）
 // 受けた要求はすべて記録し、GET /__requests で返す（AI への要求が無いことの確認に使う）。
 // 本番・検証環境では使わない。
 import http from "node:http";
@@ -47,6 +49,38 @@ const PAGE = png(800, 1100);
 // アップロードされた画像（パス → 中身）。無いパスは白い PNG を返す
 const objects = new Map();
 const objectPath = (pathname) => decodeURIComponent(pathname.replace(/^\/storage\/v1\/object\/(?:sign\/|authenticated\/|public\/)?[^/]+\//, "").split("?")[0]);
+
+// storage.objects の RLS を、本人のトークンのまま本物の PostgreSQL で確かめる（service_role は RLS を越える。本物と同じ）
+function psqlRun(sql, vars) {
+  const args = [process.env.PG_URL, "-X", "-At", "-q", "-v", "ON_ERROR_STOP=1"];
+  for (const [k, v] of Object.entries(vars)) args.push("-v", `${k}=${v}`);
+  return execFileSync("psql", args, { input: sql, stdio: ["pipe", "pipe", "pipe"] }).toString();
+}
+const bucketOf = (pathname) => decodeURIComponent(pathname.replace(/^\/storage\/v1\/object\/(?:sign\/|authenticated\/|public\/)?/, "").split("/")[0]);
+function canRead(claims, bucket, name) {
+  if (claims?.role === "service_role") return true;
+  // まだ行の無い（シードの）画像も、行があるものとして規則を当てる（確かめたら取り消す）
+  const out = psqlRun(`begin;
+insert into storage.objects (bucket_id, name) select :'b', :'n' where not exists (select 1 from storage.objects where bucket_id = :'b' and name = :'n');
+select set_config('request.jwt.claims', :'c', true) is null;
+set local role ${claims?.role === "anon" ? "anon" : "authenticated"};
+select 'RESULT:' || count(*) from storage.objects where bucket_id = :'b' and name = :'n';
+rollback;`, { b: bucket, n: name, c: JSON.stringify(claims) });
+  return /RESULT:1/.test(out);
+}
+function storeRow(claims, bucket, name) {
+  const asUser = claims?.role === "service_role" ? "" : `set local role ${claims?.role === "anon" ? "anon" : "authenticated"};`;
+  psqlRun(`begin;
+select set_config('request.jwt.claims', :'c', true) is null;
+${asUser}
+update storage.objects set owner = owner where bucket_id = :'b' and name = :'n';
+insert into storage.objects (bucket_id, name) select :'b', :'n' where not exists (select 1 from storage.objects where bucket_id = :'b' and name = :'n');
+commit;`, { b: bucket, n: name, c: JSON.stringify(claims) });
+}
+function bucketRule(bucket) {
+  const [types, limit] = psqlRun(`select coalesce(array_to_string(allowed_mime_types, ','), '*') || '|' || coalesce(file_size_limit::text, '') from storage.buckets where id = :'b';`, { b: bucket }).trim().split("|");
+  return { types: types === "*" ? null : types.split(","), limit: limit ? Number(limit) : null };
+}
 
 const log = [];
 const cors = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "GET,POST,PATCH,PUT,DELETE,OPTIONS,HEAD", "access-control-expose-headers": "*" };
@@ -107,9 +141,15 @@ http.createServer(async (req, res) => {
       const fd = await new Request("http://x", { method: "POST", headers: { "content-type": type }, body }).formData();
       for (const [, v] of fd) if (typeof v !== "string") { buf = Buffer.from(await v.arrayBuffer()); type = v.type || "application/octet-stream"; }
     }
-    const path = objectPath(url.pathname);
+    const path = objectPath(url.pathname), bucket = bucketOf(url.pathname);
+    const rule = bucketRule(bucket);
+    const bare = type.split(";")[0].trim();
+    if (rule.types && !rule.types.includes(bare)) return send(res, 415, { statusCode: "415", error: "invalid_mime_type", message: `mime type ${bare} is not supported` });
+    if (rule.limit && buf.length > rule.limit) return send(res, 413, { statusCode: "413", error: "Payload too large", message: "The object exceeded the maximum allowed size" });
+    try { storeRow(verify(bearer), bucket, path); }
+    catch { return send(res, 400, { statusCode: "403", error: "Unauthorized", message: "new row violates row-level security policy" }); }
     objects.set(path, { buf, type });
-    return send(res, 200, { Key: `answer-sheets/${path}`, Id: crypto.randomUUID() });
+    return send(res, 200, { Key: `${bucket}/${path}`, Id: crypto.randomUUID() });
   }
   if (url.pathname.startsWith("/storage/v1/object/") && req.method === "DELETE") {
     try { for (const p of JSON.parse(body.toString() || "{}").prefixes ?? []) objects.delete(p); } catch { /* 無視 */ }
@@ -117,7 +157,9 @@ http.createServer(async (req, res) => {
   }
   // サーバー（採点の API・service_role）が答案画像を読む（料金の画面テスト tests/e2e-lite/billing.mjs で使う）
   if (url.pathname.startsWith("/storage/v1/object/") && req.method === "GET") {
-    if (!verify(bearer)) return send(res, 400, { statusCode: "403", error: "Unauthorized", message: "invalid token" });
+    const claims = verify(bearer);
+    if (!claims) return send(res, 400, { statusCode: "403", error: "Unauthorized", message: "invalid token" });
+    if (!canRead(claims, bucketOf(url.pathname), objectPath(url.pathname))) return send(res, 400, { statusCode: "404", error: "not_found", message: "Object not found" });
     const o = objects.get(objectPath(url.pathname));
     return send(res, 200, o ? o.buf : PAGE, { "content-type": o ? o.type : "image/png" });
   }

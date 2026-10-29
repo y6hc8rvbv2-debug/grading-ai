@@ -685,7 +685,8 @@ async function uploadThroughServer(path: string, file: File) {
   const res = await fetch("/api/image/upload", { method: "POST", body: fd });
   if (!res.ok) {
     const j = await res.json().catch(() => ({}));
-    throw new Error(j.error || "写真を保存できませんでした。時間をおいて、もう一度お試しください。");
+    // 原因の種類（code）も添える。問い合わせのときに、どこで止まったかが分かる（秘密は含まない）
+    throw new Error(`${j.error || "写真を保存できませんでした。時間をおいて、もう一度お試しください。"}${j.code ? `（原因：${j.code}）` : ""}`);
   }
 }
 /** 写真を表示する URL（同じサイトの /api/image。本人のログインで読み、暗号化した写真は復号して返す） */

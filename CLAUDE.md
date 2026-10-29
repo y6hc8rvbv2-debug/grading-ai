@@ -33,6 +33,14 @@
 
 ## 現在地
 
+### App Store 申請前の点検（2026-10-29。`docs/APPSTORE-PRECHECK.md` が点検表。状態・環境・証拠・残作業）
+
+- アクセス制限：**0024_tenant_integrity.sql**（他校の ID・画像のパスを指す書き込みを断る。30表・返却された画像の規則に学校の一致・保存先の許可形式に octet-stream）。
+  `/api/image/upload` は中身で写真・PDF か確かめる（`sniffMime`）、`/api/image` は CSP sandbox（next.config の CSP は /api/image に付けない）。保存の失敗は `lib/storage-errors.ts` で原因ごと
+- テスト：`supabase/tests/access_test.sql`（run.sh の最後）・`tests/e2e-lite/access.mjs`（ver6.mjs の後。修正→確認→返却の画面の流れも）。e2e-lite の Storage の代役は RLS と許可形式で読み書きを決める
+- iOS：Info.plist にマイク・音声認識の説明を追加（コメントの 🎤）。`mobile/www` と STORE-RELEASE の名前を ver6 に。プライバシーポリシーに AWS KMS・暗号資産の決済代行・音声入力・写真の暗号化
+- 申請を止める問題：本番の DB（0004〜0024）と独自ドメイン、個人・塾の有料プランと Apple 3.1.3 の方針、iOS のビルド・実機・TestFlight、審査用アカウント
+
 ### セキュリティの点検（2026-10-22。`docs/SECURITY-REVIEW.md`）
 
 - **Next.js を 14.2.35 → 15.5.28 に更新**（遠隔からのコード実行などの公開済みの脆弱性の修正。params は Promise → クライアントは `useParams`、route は `await ctx.params`。`serverExternalPackages`）。postcss は overrides で最新。`npm audit --omit=dev` は 0 件
@@ -479,7 +487,7 @@ Supabaseスキーマの変更は `supabase/migrations/` に新しい連番SQLを
 14. **モデル比較試験は未実行** — Preview で管理者が実行する準備まで完了（代役サーバーでの E2E のみ検証済み）
 3. **生徒モバイル提出・複合機スキャン連携は未実装** — 画面からは外した（複合機は PDF に保存して「PDF一括」）
 4. **（解決）保存期間による自動削除で Storage の画像が消えない** — 0016 と `app/api/retention/purge`（Vercel Cron）で画像も消す
-5. **他校のIDを外部キーに指定できる** — 例: 学校Aの教員が学校Bの `test_id` を参照する `submissions` を作れる。読み取りはRLSで防がれるが整合性は崩れる。複合外部キー `(school_id, id)` で塞ぐのが本筋（未対応）。AI採点の保存（0004）は設問ID を DB 側で決めるので影響しない
+5. **（解決 2026-10-29。0024）他校のIDを外部キーに指定できる** — 例: 学校Aの教員が学校Bの `test_id` を参照する `submissions` を作れる。読み取りはRLSで防がれるが整合性は崩れる。0024 のトリガーで、書き込みのたびに指す行の学校を確かめる（返却を通じて他校の写真・正答が見えた手口を修正前の DB で再現し、塞いだ）。AI採点の保存（0004）は設問ID を DB 側で決めるので影響しない
 6. **役割（role）の変更・教職員の招待画面がない** — 招待は SUPABASE-SETUP.md のサーバー側コード、役割変更は SQL で行う
 7. **クラス・生徒の登録画面がない** — 名簿は SQL で登録する（SUPABASE-SETUP.md ステップ4）。テストは画面から登録できる
 8. **フィードバック・模範解答はテンプレート文面** — 生成AIへの置き換えは未実装（`buildFeedback` / `buildModelAnswers`）

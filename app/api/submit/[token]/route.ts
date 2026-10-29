@@ -10,6 +10,7 @@
 // 先生がすでに取り込んだ答案・採点が始まった答案は上書きしない。画像は学校専用の保管場所（非公開）に置く。
 // ============================================================================
 import { NextResponse } from "next/server";
+import { classifyStorageError, storageLogLine } from "@/lib/storage-errors";
 import { encryptImage } from "@/lib/crypto/envelope";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 
@@ -124,7 +125,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
     }
     const { error: e2 } = await admin.rpc("submit_link_finish", { p_upload: c.upload_id, p_paths: paths });
     if (e2) throw e2;
-  } catch {
+  } catch (e) {
+    console.error(storageLogLine("submit", classifyStorageError(e), e));
     await admin.rpc("submit_link_finish", { p_upload: c.upload_id, p_paths: [] });
     return fail("写真を保存できませんでした。通信のよい場所で、もう一度送ってください。", 500);
   }

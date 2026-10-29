@@ -38,6 +38,8 @@ echo "== supabase/tests/account_deletion_test.sql"
 echo "== supabase/tests/billing_test.sql"
 "${PSQL_APP[@]}" -o /dev/null -f supabase/tests/billing_test.sql
 echo " OK: billing_test（課金の無効/有効・サーバーでの採点の確定・失敗の枠戻し・Opus の支払い前は実行しない・返金待ち・アカウントの削除）"
+echo "== supabase/tests/access_test.sql"
+"${PSQL_APP[@]}" -f supabase/tests/access_test.sql
 echo "== supabase/tests/upgrade_test.sh（本番と同じ順の適用）"
 bash supabase/tests/upgrade_test.sh
 echo "== supabase/tests/verify_db_test.sh（検証用 DB への適用スクリプト）"
