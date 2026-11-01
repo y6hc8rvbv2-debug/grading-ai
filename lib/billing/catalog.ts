@@ -1,8 +1,8 @@
 // 決済で使うプランの一覧。値は lib/subscription-plans.ts の COURSES（一元表）から作り、ここでは独自の金額・上限を持たない。
 import { COURSES, courseByKey, type Course } from "@/lib/subscription-plans";
 
-/** 無料プランの月間の採点回数（0020 の billing_accounts.quota の既定と同じ） */
-export const FREE_QUOTA = 30;
+/** 無料プランの月間の採点回数（0025 の billing_accounts.quota の既定と同じ。2026-11-01 に 30 → 10） */
+export const FREE_QUOTA = 10;
 
 export type BillingPlan = {
   id: string; name: string;
