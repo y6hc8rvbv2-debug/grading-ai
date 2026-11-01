@@ -149,23 +149,37 @@ export function analyze(_test: Test, result: { items: Item[] }) {
 /** 生徒向けフィードバック / 教師向け指導提案（採点結果と単元から、定型文で作る） */
 export function buildFeedback(test: Test, result: { items: Item[]; total: number }, ana: ReturnType<typeof analyze>) {
   const rate = pct(result.total, test.maxScore);
-  const weakest = ana.units[0];
-  const strongest = ana.units[ana.units.length - 1];
+  // この答案だけで確認できる事実を使い、クラス全体や授業の良否は推測しない。
+  const units = ana.units.filter((u) => u.unit?.trim() && u.points > 0);
+  const weakest = units.find((u) => u.rate < 100);
+  const strongest = [...units].reverse().find((u) => u.rate >= 80);
+  const weakType = ana.types.find((t) => t.points > 0 && t.rate < 100);
+  const scored = result.items.filter((i) => i.points > 0);
+  const fullMarks = scored.length > 0 && scored.every((i) => i.earned >= i.points);
+  const pending = result.items.some((i) => i.needReview);
   const student = [
     `今回の得点は ${result.total} / ${test.maxScore} 点（得点率 ${rate}%）でした。`,
-    strongest ? `${strongest.unit} は ${strongest.rate}% と安定しています。この解き方は続けてください。` : "",
-    weakest ? `いちばん伸びしろがあるのは ${weakest.unit}（${weakest.rate}%）です。まず教科書の例題を3問、途中式まで書き直してみましょう。` : "",
-    ana.topMistakes[0] ? `ミスの傾向は「${ana.topMistakes[0].reason}」が ${ana.topMistakes[0].count} 回。見直しのときはここだけを重点的に確認します。` : "",
+    fullMarks
+      ? "今回の答案は全問満点でした。解答の根拠や手順も、自分の言葉で説明できるか確かめてみましょう。"
+      : strongest ? `${strongest.unit}の得点率は${strongest.rate}%でした。正解した問題の考え方を振り返りましょう。` : "",
+    !fullMarks && weakest ? `${weakest.unit}の得点率は${weakest.rate}%でした。満点でなかった問題を選び、模範解答と比べて、どの手順や説明を直せばよいか確認しましょう。`
+      : !fullMarks && scored.length ? "満点でなかった問題について、答案と模範解答を比べて復習しましょう。" : "",
+    !scored.length ? "採点対象の設問がないため、学習内容への助言はまだ作成できません。" : "",
+    pending ? "先生の確認が必要な設問があります。確認後の得点・コメントをもとに復習してください。" : "",
   ].filter(Boolean);
   const teacher = [
-    weakest ? `${weakest.unit} の定着が不十分（クラス平均比で要確認）。導入の言い換えを1時間分追加することを推奨します。` : "",
-    ana.types[0] ? `設問形式では「${ana.types[0].type}」の得点率が ${ana.types[0].rate}% と最も低く、解答手順の型を示す指導が有効です。` : "",
-    ana.topMistakes.length ? `頻出ミス：${ana.topMistakes.slice(0, 3).map((m) => `${m.reason}(${m.count})`).join(" / ")}` : "",
-    result.items.some((i) => i.needReview) ? `認識信頼度の低い設問があります。返却前に「要確認一覧」で目視確認してください。` : "",
+    "この提案は、この生徒の今回の答案に基づく参考です。クラス全体の理解度や授業の効果は、この答案だけでは判断できません。",
+    fullMarks ? "今回の答案は全問満点です。この結果から補習が必要とは判断できません。発展学習の案として、解法の理由を説明させる、別解を比較する、条件を変えた問題を考えさせる活動が考えられます。"
+      : weakest ? `この答案では「${weakest.unit}」の得点率が${weakest.rate}%でした。満点でなかった設問の解答を確認し、理解の不足・計算や記述の誤り・設問の読み違いのどれに当たるか、生徒の説明と照らして確かめてください。`
+      : scored.length ? "満点でなかった設問の答案と採点基準を確認し、生徒に解き方を説明してもらって、つまずいた箇所を確かめてください。" : "採点対象の設問がないため、指導提案を作成する材料がありません。",
+    !fullMarks && weakType ? `「${weakType.type}」形式の得点率は${weakType.rate}%（${weakType.n}問）でした。個別の誤答を確認したうえで、必要な手順を一緒に整理する指導を検討してください。` : "",
+    units.length < ana.units.length ? "単元が未登録の設問があります。単元別に分析する場合は、テストの設問に単元を登録してください。" : "",
+    "授業改善を検討するときは、クラス全体の設問別結果と授業中の様子を確認し、共通するつまずきがあれば説明や練習方法を見直してください。",
+    pending ? "未確認の設問が残っています。返却前に「要確認一覧」で答案を目視確認してください。" : "",
   ].filter(Boolean);
-  const nextStep = weakest
-    ? [`${weakest.unit} の基礎問題 5 問`, `${weakest.unit} の応用問題 2 問`, "誤答ノートに「なぜ間違えたか」を1行で記録"]
-    : ["現状維持で応用問題に挑戦"];
+  const nextStep = !scored.length ? ["設問と採点結果を確認する"]
+    : fullMarks ? ["正解した問題を1問選び、解法の理由を説明する", "別の解き方や、条件を変えた問題に挑戦する"]
+    : [weakest ? `${weakest.unit}で満点でなかった問題を1問選び、解き直す` : "満点でなかった問題を1問選び、解き直す", "模範解答と比べ、直した箇所とその理由を記録する"];
   return { student, teacher, nextStep, rate };
 }
 
