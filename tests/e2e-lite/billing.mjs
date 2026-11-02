@@ -124,7 +124,7 @@ ok(usedNow() === 99, "採点に失敗した回は枠を戻す（使用済みは 
 sql(`insert into public.billing_usage(id, school_id, submission_id, period_start, status) values (gen_random_uuid(), '${SCHOOL}', 'eeeeeeee-0000-0000-0000-000000000051', '${period}', 'done')`);
 const hits1 = await trapHits();
 g = await api("/api/grade", { submissionId: "eeeeeeee-0000-0000-0000-000000000051", mode: "cascade", requestId: randomUUID() });
-ok(g.status === 409 && /月間採点上限/.test(g.json?.error || ""), "101回目（100 / 100 のあと）は断る");
+ok(g.status === 409 && g.json?.code === "quota_overage_off" && /上限に達しました/.test(g.json?.error || ""), "101回目（100 / 100 のあと）は断る（従量課金が無効なので止まり、管理者が有効にする方法を案内）");
 ok((await trapHits()) === hits1, "上限で断った採点では AI を呼ばない（費用がかからない）");
 ok((await api("/api/billing")).json.used === 100, "画面の今期の採点は 100");
 

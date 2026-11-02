@@ -46,6 +46,14 @@ export const limitLabel = (x: Course) => `月${yen(x.limit)}${x.audience === "pe
 export const courseLabel = (x: Course) => `${x.audience === "personal" ? "個人・塾 " : ""}${x.name}（${x.night ? "夜間採点" : "通常採点"}）`;
 
 export const PERSONAL_OPUS_SURCHARGE = 55;
+/** 学校の Opus単独の追加料金（1答案・税別。翌月の請求に加算。2026-11-02。0026 の billing_config と同じ値） */
+export const SCHOOL_OPUS_SURCHARGE = 50;
+/** 上限を超えた分の従量課金（1答案。管理者が有効にした月額契約だけ。0026 の billing_config と同じ値） */
+export const OVERAGE_PERSONAL_YEN = 22;   // 税込
+export const OVERAGE_SCHOOL_YEN = 20;     // 税別
+/** 料金の説明（画面・利用規約・特商法の表記で同じ文） */
+export const OVERAGE_TEXT = `月の上限を超えた分は、管理者が「従量課金」を有効にした場合だけ、1答案 個人・塾 ${OVERAGE_PERSONAL_YEN}円（税込）／学校 ${OVERAGE_SCHOOL_YEN}円（税別）で採点できます。上限に達すると警告と単価を表示し、先生が同意してから採点します。採点が終わった答案だけを翌月の請求に加え（失敗したものは請求しません）、管理者が決めた月の上限額を超えて請求することはありません。無料プラン・前払いでは使えません。`;
+export const NIGHT_TEXT = "夜間採点は、日本時間22時から答案をまとめて処理します（一括処理で費用を抑えるため、結果は多くは翌朝までに、遅くとも24時間以内に採点履歴に保存します）。";
 
 /** 学校プランの説明（コースの段階ごと） */
 export const SCHOOL_DESCRIPTIONS: Record<Course["tier"], string> = {

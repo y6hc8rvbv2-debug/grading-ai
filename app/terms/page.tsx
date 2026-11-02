@@ -2,6 +2,7 @@
 import type { Metadata } from "next";
 import { APP_INFO } from "@/lib/app-info";
 import { FREE_QUOTA } from "@/lib/billing/catalog";
+import { OVERAGE_TEXT, SCHOOL_OPUS_SURCHARGE } from "@/lib/subscription-plans";
 import { H2, Missing, PublicPage } from "@/components/PublicPage";
 
 export const metadata: Metadata = { title: `利用規約｜${APP_INFO.name}` };
@@ -39,8 +40,10 @@ export default function TermsPage() {
         <li>無料プランは、月{FREE_QUOTA}答案まで、3モデル併用で採点できます。有料プランの料金・月の採点回数は、<a href="/tokushoho">特定商取引法に基づく表記</a>と申し込みの画面に示します。</li>
         <li>有料プランは、学校・塾の管理者が Web ブラウザから申し込み、決済サービス（Stripe）で支払います。ストア用のアプリの中では、購入・支払いはできません。</li>
         <li>月額料金は契約期間ごとに自動で更新され、更新のときに請求します。解約は「契約・支払い管理」からいつでもでき、その契約期間の終わりまで使えます。支払い済みの月額料金は、法令で必要な場合を除き、日割りで返金しません。</li>
-        <li>1回の採点（再採点を含む）で1回分を使います。採点に失敗したときは回数を戻します。月の回数を使い切ると、次の契約期間まで新しい採点はできません（超過分を自動で請求することはありません）。</li>
+        <li>1回の採点（再採点を含む）で1回分を使います。採点に失敗したときは回数を戻します。月の回数を使い切ると、従量課金を有効にしていない限り、次の契約期間まで新しい採点はできません。</li>
+        <li>{OVERAGE_TEXT}</li>
         <li>個人・塾プランで「Opus 単独」を選ぶと、1回につき55円（税込）を、その都度の決済画面で支払います。採点に失敗したときは返金します。</li>
+        <li>学校プランで「Opus 単独」を選ぶと、1回（1枚）につき{SCHOOL_OPUS_SURCHARGE}円（税別）を、採点が終わった分だけ翌月の請求に加えます。</li>
       </ul>
       <H2>第8条（サービスの変更・停止）</H2>
       <p>保守や障害のため、予告なく一時的に止めることがあります。大きな変更は、事前にアプリの中またはこのページでお知らせします。</p>

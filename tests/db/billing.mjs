@@ -106,6 +106,63 @@ try {
   await db.exec("update billing_accounts set period_start=period_start+interval '1 month',period_end=period_end+interval '1 month'");
   await db.exec(start(42)); // 翌月はまた受け付ける
   await db.exec("update grading_jobs set status='failed' where status='running'");
+  // ---------------------------------------------------------------- 0026：上限を超えた分の従量課金・学校の Opus単独の追加料金
+  const start2=(req,{mode='cascade',consent=false,overage=false}={})=>`select billing_start_job('eeeeeeee-0000-0000-0000-000000000000','eeeeeeee-0000-0000-0000-000000000001','eeeeeeee-0000-0000-0000-000000000005','eeeeeeee-0000-0000-0000-${String(req).padStart(12,'0')}','${mode}',true,${consent},${overage})`;
+  const denyMsg=async(sql,re)=>{await assert.rejects(db.exec(sql),(e)=>re.test(e.message));checks++;};
+  const asAdmin=async(sql)=>{await db.exec("set role authenticated; select set_config('request.jwt.claims','{\"sub\":\"eeeeeeee-0000-0000-0000-000000000001\",\"role\":\"authenticated\"}',false)");try{return await db.query(sql);}finally{await db.exec('set role app_owner');}};
+  const done=async()=>db.exec("update grading_jobs set status='done' where status='running'");
+  const failRunning=async()=>db.exec("update grading_jobs set status='failed' where status='running'");
+  // 無料プラン：上限で止まる（従量課金は無い）
+  await db.exec(`delete from billing_usage; update billing_accounts set plan_id='free',status='free',quota=1,subscription_id=null,personal=false,
+    period_start=date_trunc('month',now() at time zone 'Asia/Tokyo') at time zone 'Asia/Tokyo',
+    period_end=(date_trunc('month',now() at time zone 'Asia/Tokyo')+interval '1 month') at time zone 'Asia/Tokyo'`);
+  await db.exec(start2(50)); await done();
+  await denyMsg(start2(51,{overage:true}),/月間採点上限/);
+  await assert.rejects(asAdmin("select set_overage_settings(true, 1000)"), /有料の月額契約/); checks++;
+  // 学校の月額契約（上限2）：上限に達したら、管理者が有効にするまで止まる
+  await db.exec("delete from billing_usage; update billing_accounts set plan_id='school-mini',status='active',quota=2,subscription_id='sub_overage_fixture',personal=false");
+  await db.exec(start2(52)); await done(); await db.exec(start2(53)); await done();
+  await denyMsg(start2(54,{overage:true}),/月間採点上限/);
+  // 先生は設定を変えられない（管理者だけ）
+  await db.exec("insert into auth.users(id,email,raw_app_meta_data) values('eeeeeeee-0000-0000-0000-0000000000b7','teacher-bill@example.test','{\"school_id\":\"eeeeeeee-0000-0000-0000-000000000000\",\"role\":\"teacher\"}')");
+  await db.exec("set role authenticated; select set_config('request.jwt.claims','{\"sub\":\"eeeeeeee-0000-0000-0000-0000000000b7\",\"role\":\"authenticated\"}',false)");
+  await assert.rejects(db.query("select set_overage_settings(true, 1000)"), /管理者/); checks++;
+  await db.exec('set role app_owner');
+  await assert.rejects(asAdmin("select set_overage_settings(true, 50)"), /100円以上/); checks++;
+  await asAdmin("select set_overage_settings(true, 100)");
+  await ok("select overage_enabled::text||'/'||overage_cap_yen as v from billing_accounts",'true/100');
+  await ok("select count(*)::int as v from audit_logs where action='billing.overage'",1);
+  // 同意が無ければ断る → 同意すれば 20円（税別）の従量課金で受け付ける
+  await denyMsg(start2(54),/従量課金への同意/);
+  await db.exec(start2(55,{overage:true}));
+  await ok("select kind||'/'||overage_yen||'/'||charge_status as v from billing_usage where id=(select id from grading_jobs where request_id='eeeeeeee-0000-0000-0000-000000000055')",'overage/20/none');
+  await done();
+  await ok("select charge_status as v from billing_usage where id=(select id from grading_jobs where request_id='eeeeeeee-0000-0000-0000-000000000055')",'pending'); // 終わったものだけ請求待ち
+  // 失敗した採点は請求しない
+  await db.exec(start2(56,{overage:true})); await failRunning();
+  await ok("select charge_status as v from billing_usage where id=(select id from grading_jobs where request_id='eeeeeeee-0000-0000-0000-000000000056')",'void');
+  for (const r of [57, 63, 64, 65]) { await db.exec(start2(r,{overage:true})); await done(); }   // 20円×5＝100円（上限100円まで）
+  await ok("select sum(overage_yen)::int as v from billing_usage where status in ('reserved','done')",100);
+  await denyMsg(start2(58,{overage:true}),/月の上限額/);      // 120円になるので断る
+  // 同意の印は後から書き換えられない
+  await assert.rejects(db.exec("set role service_role; update grading_jobs set overage_accepted=false where request_id='eeeeeeee-0000-0000-0000-000000000057'")); checks++;
+  await db.exec('set role app_owner');
+  // 学校の Opus単独：同意が無ければ断る・同意すれば 50円（税別）を請求に加える
+  await db.exec("delete from billing_usage; update billing_accounts set quota=100");
+  await denyMsg(start2(59,{mode:'opus'}),/Opus単独の追加料金への同意/);
+  await db.exec(start2(60,{mode:'opus',consent:true}));
+  await ok("select opus_yen||'/'||amount||'/'||kind as v from billing_usage where id=(select id from grading_jobs where request_id='eeeeeeee-0000-0000-0000-000000000060')",'50/0/quota');
+  await ok("select count(*)::int as v from billing_orders where id=(select id from grading_jobs where request_id='eeeeeeee-0000-0000-0000-000000000060')",0); // 学校はその場の支払いではない
+  await done();
+  await ok("select charge_status as v from billing_usage where id=(select id from grading_jobs where request_id='eeeeeeee-0000-0000-0000-000000000060')",'pending');
+  // 個人・塾の従量課金は 22円（税込）
+  await db.exec("delete from billing_usage; update billing_accounts set personal=true,plan_id='personal-mini',quota=1");
+  await db.exec(start2(61)); await done();
+  await db.exec(start2(62,{overage:true})); await done();
+  await ok("select overage_yen as v from billing_usage where kind='overage'",22);
+  // 先生の画面向けの料金（誰でも読める）
+  await ok("select (billing_prices()->>'school_opus_yen')::int as v",50);
+  await db.exec("delete from billing_usage; update billing_accounts set overage_enabled=false,overage_cap_yen=0,subscription_id=null,plan_id='free',status='free',quota=10,personal=true");
   // 先生は前払いの注文を書き換えられない・反映の関数を呼べない
   await db.exec('set role authenticated');
   await db.exec("select set_config('request.jwt.claims','{\"sub\":\"eeeeeeee-0000-0000-0000-000000000001\",\"role\":\"authenticated\"}',false)");

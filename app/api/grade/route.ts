@@ -7,6 +7,9 @@
 //        保存済みの答案を AI で採点する。1回の要求で呼ぶモデルは1つだけ（Vercel の関数の時間制限のため）。
 //        3モデル併用で上の段階に回すときは { done: false, next } を返し、画面が同じ requestId で続きを要求する。
 //        終わったら { done: true, ... } を返す。
+//        2026-11-02（0026）：上限を超えた分の従量課金・学校の Opus単独の追加料金は、同意が無ければ 402 と単価を返す（画面が警告して同意をたずねる）。
+//        夜間の Batch 採点（定期処理だけ）：{ batch: "prepare" } で次の段階の要求の中身を返し（AI は呼ばない）、
+//        { batch: "apply", stageId, result } で Batch の結果をその段階に当てはめる（すぐに呼ぶときと同じ後処理・保存）
 //
 // 二重課金を防ぐ仕組み（supabase/migrations/0006_grading_modes.sql）
 //   - requestId ごとに採点の記録（grading_jobs）を1つ作る。同じ requestId の再送（連打・通信の再送）は同じ採点の続きとして扱う
@@ -26,7 +29,7 @@ import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { rubricFromRow } from "@/lib/db/rubric";
 import { typeLabelOf } from "@/lib/grading/engine";
 import {
-  aiConfig, callClaude, normalizeResult, GradingError,
+  aiConfig, callClaude, gradingRequestBody, normalizeResult, readGradingResponse, GradingError,
   type AnswerPage, type GradeTest, type NormalizedItem, type NormalizedQuality,
 } from "@/lib/ai/grade";
 import {
@@ -36,6 +39,8 @@ import {
 import { heicToJpeg, looksLikeHeic } from "@/lib/ai/heic";
 import { costOfStage, type GradingMode, type GradingStage } from "@/lib/grading/cost";
 import { billingEnabled, nightEnabled, sameOrigin, workerAuthorized } from "@/lib/billing/server";
+import { BATCH_DISCOUNT } from "@/lib/grading/batch";
+import { isNativeUserAgent } from "@/lib/native";
 import type { QType, Rubric } from "@/lib/types";
 import { loadSchoolAi } from "@/lib/ai/settings";
 
@@ -81,7 +86,7 @@ export async function GET() {
 
 /* ------------------------------------------------------------------ 入力（答案・設問・採点基準・画像） */
 
-async function loadInputs(supabase: Supa, sub: { school_id: string; test_id: string; image_paths: string[] | null }) {
+async function loadInputs(supabase: Supa, sub: { school_id: string; test_id: string; image_paths: string[] | null }, opt: { images?: boolean } = {}) {
   const paths: string[] = sub.image_paths ?? [];
   if (!paths.length) {
     throw new GradingError("この答案には原本画像がないため、AI採点できません。「新規採点」で答案画像を取り込み直してください。", 400);
@@ -108,9 +113,9 @@ async function loadInputs(supabase: Supa, sub: { school_id: string; test_id: str
     })),
   };
 
-  // 原本画像（全ページ）。HEIC のまま保存された答案は JPEG に変換してから送る
+  // 原本画像（全ページ）。HEIC のまま保存された答案は JPEG に変換してから送る（Batch の結果の当てはめでは画像は要らない）
   const pages: AnswerPage[] = [];
-  for (const path of paths) {
+  for (const path of opt.images === false ? [] : paths) {
     const ext = path.split(".").pop()?.toLowerCase() ?? "";
     const heicExt = ext === "heic" || ext === "heif";
     const mediaType =
@@ -150,7 +155,10 @@ async function loadInputs(supabase: Supa, sub: { school_id: string; test_id: str
 /* ------------------------------------------------------------------ 採点 */
 
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => null) as { submissionId?: unknown; mode?: unknown; requestId?: unknown; opusConsent?: unknown } | null;
+  const body = await request.json().catch(() => null) as {
+    submissionId?: unknown; mode?: unknown; requestId?: unknown; opusConsent?: unknown; overageConsent?: unknown;
+    batch?: unknown; stageId?: unknown; result?: BatchResult;
+  } | null;
   const submissionId = typeof body?.submissionId === "string" ? body.submissionId : "";
   const mode: GradingMode = body?.mode === "cascade" ? "cascade" : "opus";
   if (body?.mode !== "cascade" && body?.mode !== "opus") return fail("採点方式を選んでください。", 400);
@@ -160,6 +168,10 @@ export async function POST(request: Request) {
 
   const internal = workerAuthorized(request);
   if (!internal && !sameOrigin(request)) return fail("操作元を確認できません。", 403);
+  // 夜間の Batch 採点は、定期処理（合言葉つき）からだけ
+  const batchMode = internal && (body?.batch === "prepare" || body?.batch === "apply") ? body.batch : null;
+  // ストア用のアプリの中からは、追加料金がかかる同意（従量課金・Opus単独）を受け付けない（App Store 3.1.1。lib/native.ts）
+  const fromApp = !internal && isNativeUserAgent(request.headers.get("user-agent"));
   const authDb = internal ? createAdminClient() : await createClient();
   const supabase = internal || billingEnabled() ? createAdminClient() : authDb;
   const { data: { user: sessionUser } } = internal ? { data: { user: null } } : await authDb.auth.getUser();
@@ -209,8 +221,11 @@ export async function POST(request: Request) {
         const { data: worker } = await admin.from("billing_worker_state").select("last_seen").eq("id", true).single();
         if (!worker?.last_seen || Date.parse(worker.last_seen) < Date.now() - 3 * 60_000) return fail("予約採点の定期処理を確認中です。後ほどお試しください。", 503);
       }
-      const { data: created, error } = await admin.rpc("billing_start_job", { p_school: sub.school_id, p_user: user.id, p_submission: submissionId, p_request: requestId, p_mode: mode, p_enforced: true, p_consent: body?.opusConsent === true });
-      if (error || !created) return fail(error?.code === "23505" ? "この答案には進行中の採点・予約があります。採点履歴を確認してください。" : error?.message || "採点枠を確保できませんでした。", 409);
+      const { data: created, error } = await admin.rpc("billing_start_job", { p_school: sub.school_id, p_user: user.id, p_submission: submissionId, p_request: requestId, p_mode: mode, p_enforced: true, p_consent: body?.opusConsent === true && !fromApp, p_overage: body?.overageConsent === true && !fromApp });
+      if (error || !created) {
+        if (error?.code === "23505") return fail("この答案には進行中の採点・予約があります。採点履歴を確認してください。", 409);
+        return billingRefusal(admin, sub.school_id as string, error?.details ?? "", error?.message ?? "");
+      }
       job = created as JobRow;
     } else {
     const { data: created, error } = await supabase.from("grading_jobs").insert({
@@ -236,6 +251,29 @@ export async function POST(request: Request) {
     if (order && order.status !== "paid") return fail("Opus単独の追加55円の支払いが必要です。", 402, { jobId: theJob.id, requiresPayment: true });
     const { data: queue } = await supabase.from("night_queue").select("id,night,due_at").eq("id", theJob.id).maybeSingle();
     if (queue && !internal) return NextResponse.json({ ok: true, done: false, queued: true, dueAt: queue.due_at, jobId: theJob.id });
+  }
+
+  /* ------------------------------------------------ 夜間の Batch：結果をその段階に当てはめる */
+  if (batchMode === "apply") {
+    const all = await stageRows(supabase, theJob.id);
+    const target = all.find((r) => r.id === body?.stageId && r.status === "calling");
+    if (!target) return NextResponse.json({ ok: true, applied: false });
+    const idx = PLAN[theJob.mode].indexOf(target.stage);
+    let applyInputs: Awaited<ReturnType<typeof loadInputs>>;
+    try { applyInputs = await loadInputs(supabase, sub, { images: false }); } catch (e) {
+      await supabase.rpc("fail_grading_job", { p_job_id: theJob.id, p_error: e instanceof Error ? e.message : "入力の読み込みに失敗" });
+      return errorResponse(e);
+    }
+    const ctxA = { schoolId: sub.school_id as string, userId: user.id };
+    return runStage(supabase, theJob, ctxA, {
+      claimedId: target.id, nextIndex: idx, stage: target.stage, rows: all.filter((r) => r.id !== target.id), inputs: applyInputs,
+      model: target.model_id, startedAt: Date.parse(target.started_at), discount: BATCH_DISCOUNT,
+      call: async () => {
+        const r = body?.result;
+        if (r?.type === "succeeded" && r.message) return readGradingResponse(r.message);
+        throw new GradingError(`夜間の一括採点を完了できませんでした（${r?.type ?? "結果なし"}）。もう一度お申し込みください。`, 502);
+      },
+    });
   }
 
   /* ------------------------------------------------ 次の段階を決める */
@@ -271,11 +309,32 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, done: false, pending: true, stage }, { status: 202 });
   }
 
-  const t0 = Date.now();
+  // 夜間の Batch：この段階の要求の中身を返す（AI は呼ばない。定期処理がまとめて送る）
+  if (batchMode === "prepare") {
+    const previous = [...rows].reverse().find((r) => r.status === "done" && r.items);
+    const selectedTest = targetedTest(inputs.gradeTest, previous?.items ?? null, previous?.quality?.ok === true);
+    return NextResponse.json({ ok: true, done: false, batch: { stageId: claimed.id, params: gradingRequestBody({ pages: inputs.pages, test: selectedTest, rubric: inputs.rubric }, opts, { batch: true }) } });
+  }
+  return runStage(supabase, theJob, ctx, {
+    claimedId: claimed.id, nextIndex, stage, rows, inputs, model: opts.model ?? "", startedAt: Date.now(), discount: 1,
+    call: (selectedTest) => callClaude({ pages: inputs!.pages, test: selectedTest, rubric: inputs!.rubric }, opts),
+  });
+}
+
+type BatchResult = { type: "succeeded" | "errored" | "canceled" | "expired"; message?: Parameters<typeof readGradingResponse>[0] };
+
+/** 1つの段階の結果を整えて保存し、上の段階に回すか・確定するかを決める（すぐに呼ぶとき・Batch の結果のどちらでも同じ） */
+async function runStage(supabase: Supa, theJob: JobRow, ctx: { schoolId: string; userId: string }, a: {
+  claimedId: string; nextIndex: number; stage: GradingStage; rows: StageRow[];
+  inputs: { gradeTest: GradeTest; rubric: Rubric }; model: string; startedAt: number; discount: number;
+  call: (selectedTest: GradeTest) => Promise<{ parsed: unknown; model: string; usage: { input_tokens?: number | null; output_tokens?: number | null; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null }; stopReason: string | null }>;
+}) {
+  const { claimedId, nextIndex, stage, rows, inputs } = a;
+  const plan = PLAN[theJob.mode];
   try {
     const previous = [...rows].reverse().find(r=>r.status === "done" && r.items);
     const selectedTest = targetedTest(inputs.gradeTest, previous?.items ?? null, previous?.quality?.ok === true);
-    const { parsed, model, usage, stopReason } = await callClaude({ pages: inputs.pages, test: selectedTest, rubric: inputs.rubric }, opts);
+    const { parsed, model, usage, stopReason } = await a.call(selectedTest);
     const tokens = {
       input: usage.input_tokens ?? 0, output: usage.output_tokens ?? 0,
       cacheWrite: usage.cache_creation_input_tokens ?? 0, cacheRead: usage.cache_read_input_tokens ?? 0,
@@ -293,8 +352,8 @@ export async function POST(request: Request) {
     const escalate = !isLast && reasons.length > 0;
     await supabase.from("grading_stages").update({
       status: "done", escalate, reasons, items, quality, served_model: model, stop_reason: stopReason,
-      usage: tokens, cost_usd: costOfStage(stage, tokens, opts.model), elapsed_ms: Date.now() - t0, finished_at: new Date().toISOString(),
-    }).eq("id", claimed.id);
+      usage: tokens, cost_usd: costOfStage(stage, tokens, a.model || undefined) * a.discount, elapsed_ms: Date.now() - a.startedAt, finished_at: new Date().toISOString(),
+    }).eq("id", claimedId);
     if (escalate) {
       return NextResponse.json({ ok: true, done: false, stage, next: plan[nextIndex + 1], reasons: reasons.map((r) => r.msg) });
     }
@@ -309,9 +368,9 @@ export async function POST(request: Request) {
     await supabase.from("grading_stages").update({
       status: "error", escalate, error: message.slice(0, 500), served_model: err.model ?? null, stop_reason: err.stopReason ?? null,
       reasons: escalate ? [{ code: "unusable", msg: `答案全体：${FLAG_MESSAGE.unusable}（${message}）` }] : [],
-      usage: tokens, cost_usd: tokens ? costOfStage(stage, tokens, opts.model) : null,
-      elapsed_ms: Date.now() - t0, finished_at: new Date().toISOString(),
-    }).eq("id", claimed.id);
+      usage: tokens, cost_usd: tokens ? costOfStage(stage, tokens, a.model || undefined) * a.discount : null,
+      elapsed_ms: Date.now() - a.startedAt, finished_at: new Date().toISOString(),
+    }).eq("id", claimedId);
     if (escalate) {
       return NextResponse.json({ ok: true, done: false, stage, next: plan[nextIndex + 1], reasons: [FLAG_MESSAGE.unusable] });
     }
@@ -319,6 +378,28 @@ export async function POST(request: Request) {
     if (!(e instanceof GradingError)) console.error("AI採点で予期しないエラー", e instanceof Error ? e.name : "unknown");
     return errorResponse(e);
   }
+}
+
+/** 採点の受付を断った理由を、画面が案内できる形で返す（0026）。従量課金・学校の Opus単独は同意が要る＝402 と単価・残りの額 */
+async function billingRefusal(admin: Supa, schoolId: string, code: string, message: string) {
+  const { data: prices } = await admin.rpc("billing_prices");
+  const p = (prices ?? {}) as { overage_personal_yen?: number; overage_school_yen?: number; school_opus_yen?: number };
+  const { data: account } = await admin.from("billing_accounts").select("personal,quota,period_start,overage_cap_yen").eq("school_id", schoolId).maybeSingle();
+  const personal = account?.personal !== false;
+  if (code === "overage_consent" || code === "overage_cap") {
+    const { data: usage } = await admin.from("billing_usage").select("overage_yen").eq("school_id", schoolId).eq("period_start", account?.period_start ?? new Date(0).toISOString()).in("status", ["reserved", "done"]);
+    const spent = (usage ?? []).reduce((n, u) => n + (u.overage_yen ?? 0), 0);
+    const unit = personal ? p.overage_personal_yen ?? 22 : p.overage_school_yen ?? 20;
+    const info = { code, unitYen: unit, tax: personal ? "税込" : "税別", quota: account?.quota ?? 0, capYen: account?.overage_cap_yen ?? 0, spentYen: spent };
+    if (code === "overage_cap") return fail(`今月の従量課金が、管理者が決めた上限額（${info.capYen.toLocaleString("ja-JP")}円）に達しました。管理者に上限額の変更を依頼するか、来月までお待ちください。`, 409, info);
+    return fail(`今月の上限（${info.quota.toLocaleString("ja-JP")}答案）に達しました。超えた分は1答案${unit}円（${info.tax}）の従量課金です。`, 402, info);
+  }
+  if (code === "school_opus_consent") return fail(`Opus単独は1答案${p.school_opus_yen ?? 50}円（税別）の追加料金です。`, 402, { code, unitYen: p.school_opus_yen ?? 50, tax: "税別" });
+  if (code === "opus_consent") return fail(message, 402, { code });
+  if (code === "quota_overage_off") return fail("今月の上限に達しました。管理者がダッシュボードの「サブスクリプション」で従量課金を有効にすると、超えた分も採点できます（1答案ごとの料金）。", 409, { code });
+  if (code === "quota_free") return fail("無料プランの今月の上限に達しました。来月まで待つか、有料プランをお申し込みください。", 409, { code });
+  if (code === "quota_prepaid") return fail("今月の上限に達しました。前払いの契約では従量課金は使えません。来月まで待つか、月額のコースに切り替えてください。", 409, { code });
+  return fail(message || "採点枠を確保できませんでした。", 409);
 }
 
 /* ------------------------------------------------------------------ 補助 */

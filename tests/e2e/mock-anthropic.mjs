@@ -116,12 +116,17 @@ function compareResult(model) {
 //   claude-sonnet-5-5 … adaptive thinking・effort medium、fallbacks なし（3モデル併用の2段目）
 //   claude-haiku-5-5  … adaptive thinking・effort low、fallbacks なし（3モデル併用の1段目）
 //   claude-haiku-4-5  … thinking・effort なし（学校が Haiku 4.5 を選んだとき）
-function problems(req, body) {
+function problems(req, body, opt = {}) {
   const p = [];
   if (req.headers["x-api-key"] !== process.env.EXPECTED_API_KEY) p.push("x-api-key が違う");
-  const beta = String(req.headers["anthropic-beta"] || "");
+  const beta = opt.batch ? "" : String(req.headers["anthropic-beta"] || "");
   const noFallback = (who) => { if ("fallbacks" in body || beta.includes("server-side-fallback")) p.push(`3モデル併用の ${who} に fallbacks を付けている`); };
-  if (body.model === TOP) {
+  if (body.model === TOP && opt.batch) {
+    // Batch（夜間の割引）では fallbacks は使えない（付けると断られる）
+    if ("fallbacks" in body || "betas" in body) p.push("Batch の要求に fallbacks を付けている");
+    if (body.thinking?.type !== "adaptive") p.push("thinking が adaptive でない");
+    if (body.output_config?.effort !== "high") p.push("effort が high でない");
+  } else if (body.model === TOP) {
     if (!beta.includes("server-side-fallback-2026-07-01")) p.push("fallback の beta ヘッダーが無い");
     if (body.fallbacks !== "default") p.push("fallbacks が default でない");
     if (body.thinking?.type !== "adaptive") p.push("thinking が adaptive でない");
@@ -159,6 +164,25 @@ function questionsFrom(body) {
   return m ? JSON.parse(m[1]) : [];
 }
 
+const batches = new Map();
+function batchObject(req, id, status, n) {
+  return { id, type: "message_batch", processing_status: status, created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 86400_000).toISOString(),
+    ended_at: status === "ended" ? new Date().toISOString() : null, archived_at: null, cancel_initiated_at: null,
+    request_counts: { processing: status === "ended" ? 0 : n, succeeded: status === "ended" ? n : 0, errored: 0, canceled: 0, expired: 0 },
+    results_url: status === "ended" ? `http://${req.headers.host}/v1/messages/batches/${id}/results` : null };
+}
+/** 採点の応答（すぐの採点と Batch で同じ形） */
+function gradeMessage(body, mode = "clean") {
+  const qs = questionsFrom(body);
+  const items = qs.map((q, i) => ({ qno: q.qno, detected: q.correct || "（記述：要点を満たす解答）", is_blank: false, mark: "○", earned: q.points,
+    confidence: 0.95, reason: "", comment: "よくできました", bbox: { page: 1, x: 0.12, y: 0.18 + i * 0.12, w: 0.45, h: 0.08 } }));
+  const keyed = items.findIndex((_, i) => qs[i].correct);
+  if (mode === "contradict" && keyed >= 0) Object.assign(items[keyed], { mark: "×", earned: 0, reason: "計算ミス" });
+  const result = { quality: { tilt: 92, brightness: 90, blur: 94, shadow: 88, coverage: 96, contrast: 91, issues: [] }, items };
+  return { id: "msg_mock_batch", type: "message", role: "assistant", model: body.model, content: [{ type: "text", text: JSON.stringify(result) }],
+    stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1200, output_tokens: 300 } };
+}
+
 const server = http.createServer((req, res) => {
   let raw = "";
   req.on("data", (c) => { raw += c; });
@@ -177,6 +201,34 @@ const server = http.createServer((req, res) => {
     if (req.method === "GET" && req.url.startsWith("/v1/models")) {
       requests.push({ url: req.url, kind: "models", problems: req.headers["x-api-key"] === process.env.EXPECTED_API_KEY ? [] : ["x-api-key が違う"] });
       return send(200, { data: MODELS, has_more: false, first_id: MODELS[0].id, last_id: MODELS.at(-1).id });
+    }
+    // ---------------------------------------------------------------- Message Batches（夜間の割引の採点。2026-11-02）
+    if (req.url.startsWith("/v1/messages/batches")) {
+      const path = req.url.split("?")[0];
+      if (req.method === "POST" && path === "/v1/messages/batches") {
+        const { requests: list } = JSON.parse(raw || "{}");
+        const id = `msgbatch_mock_${batches.size + 1}`;
+        const results = list.map(({ custom_id, params }) => {
+          const bad = problems(req, params, { batch: true });
+          const mode = scripts[params.model]?.shift() ?? "clean";
+          requests.push({ url: req.url, kind: "batch-grade", model: params.model, mode, problems: bad, batch: id, questions: questionsFrom(params) });
+          if (bad.length || mode === "error500") return { custom_id, result: { type: "errored", error: { type: "invalid_request_error", message: bad.join(" / ") || "mock error" } } };
+          return { custom_id, result: { type: "succeeded", message: gradeMessage(params, mode) } };
+        });
+        batches.set(id, { results, polls: 0 });
+        requests.push({ url: req.url, kind: "batch-create", batch: id, count: list.length });
+        return send(200, batchObject(req, id, "in_progress", list.length));
+      }
+      const m = path.match(/^\/v1\/messages\/batches\/([^/]+)(\/results)?$/);
+      const b = m && batches.get(m[1]);
+      if (!b) return send(404, { type: "error", error: { type: "not_found_error", message: "batch not found" } });
+      if (m[2]) {
+        res.writeHead(200, { "content-type": "application/binary" });
+        return res.end(b.results.map((r) => JSON.stringify(r)).join("\n"));
+      }
+      // 1回目の確認では処理中、2回目からは終わったことにする（定期処理が次の回で結果を読むことを確かめる）
+      const ended = ++b.polls > 1;
+      return send(200, batchObject(req, m[1], ended ? "ended" : "in_progress", b.results.length));
     }
     if (req.method !== "POST" || !req.url.startsWith("/v1/messages")) return send(404, { type: "error", error: { type: "not_found_error", message: "not found" } });
 

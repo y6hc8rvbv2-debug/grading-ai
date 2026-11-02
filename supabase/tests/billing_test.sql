@@ -42,7 +42,7 @@ update public.billing_config set enabled = true where id = true;
 set role authenticated;
 select pg_temp.login('ffffffff-0000-0000-0000-000000000004');
 do $$ begin
-  assert not has_function_privilege('authenticated', 'public.billing_start_job(uuid,uuid,uuid,uuid,text,boolean,boolean)', 'execute'), '先生は枠の確保を直接呼べない';
+  assert not has_function_privilege('authenticated', 'public.billing_start_job(uuid,uuid,uuid,uuid,text,boolean,boolean,boolean)', 'execute'), '先生は枠の確保を直接呼べない';
   begin
     insert into public.grading_jobs(school_id, submission_id, created_by, request_id, mode, billing_enforced)
     values ('ffffffff-0000-0000-0000-000000000000', 'ffffffff-0000-0000-0000-000000000041', 'ffffffff-0000-0000-0000-000000000004',

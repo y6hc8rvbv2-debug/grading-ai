@@ -22,7 +22,9 @@ BILL_PORT=${LITE_BILL_PORT:-3301}
 STRIPE_PORT=${LITE_STRIPE_PORT:-54396}
 V6_PORT=${LITE_V6_PORT:-3302}
 MOCK_PORT=${LITE_MOCK_AI_PORT:-54395}
-for p in "$PG_PORT" "$REST_PORT" "$GW_PORT" "$TRAP_PORT" "$APP_PORT" "$BILL_PORT" "$STRIPE_PORT" "$V6_PORT" "$MOCK_PORT"; do
+NIGHT_PORT=${LITE_NIGHT_PORT:-3303}
+NIGHT_MOCK_PORT=${LITE_NIGHT_MOCK_PORT:-54394}
+for p in "$PG_PORT" "$REST_PORT" "$GW_PORT" "$TRAP_PORT" "$APP_PORT" "$BILL_PORT" "$STRIPE_PORT" "$V6_PORT" "$MOCK_PORT" "$NIGHT_PORT" "$NIGHT_MOCK_PORT"; do
   if (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then echo "✗ ポート $p が使用中です"; exit 1; fi
 done
 
@@ -70,7 +72,7 @@ PIDS+=($!)
 for _ in $(seq 1 30); do curl -sf -o /dev/null "http://127.0.0.1:$REST_PORT/" && break; sleep 1; done
 
 echo "== ログイン・画像の代役と、AI の宛先の罠を起動"
-LITE_USERS='{"admin@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000001","password":"pass-lite-123"},"stu-a@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000002","password":"pass-lite-123"},"stu-b@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000003","password":"pass-lite-123"},"acc-x-teacher@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000a1","password":"pass-lite-123"},"acc-y-teacher@lite.example":{"id":"acce55ed-0000-0000-000b-0000000000a1","password":"pass-lite-123"},"acc-x-stu1@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000b1","password":"pass-lite-123"},"acc-x-stu2@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000b2","password":"pass-lite-123"}}'
+LITE_USERS='{"admin@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000001","password":"pass-lite-123"},"stu-a@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000002","password":"pass-lite-123"},"stu-b@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000003","password":"pass-lite-123"},"acc-x-teacher@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000a1","password":"pass-lite-123"},"acc-y-teacher@lite.example":{"id":"acce55ed-0000-0000-000b-0000000000a1","password":"pass-lite-123"},"acc-x-stu1@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000b1","password":"pass-lite-123"},"acc-x-stu2@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000b2","password":"pass-lite-123"},"night-admin@lite.example":{"id":"b1ab1ab1-0000-0000-0000-0000000000a1","password":"pass-lite-123"}}'
 GATEWAY_PORT="$GW_PORT" POSTGREST_URL="http://127.0.0.1:$REST_PORT" JWT_SECRET="$JWT_SECRET" LITE_USERS="$LITE_USERS" \
   PG_URL="postgresql://postgres@127.0.0.1:$PG_PORT/lite" \
   node tests/e2e-lite/gateway.mjs > "$WORK/gateway.log" 2>&1 &
@@ -108,9 +110,11 @@ for _ in $(seq 1 40); do curl -sf -o /dev/null "http://localhost:$APP_PORT/login
 if [ "${LITE_ONLY:-}" != "ver6" ]; then
 echo "== シナリオ（tests/e2e-lite/review-copy.mjs）"
 # STORE_SHOT_DIR（例 $PWD/store/screenshots）を指定すると、ストア用の生徒の画面の写真も撮る
+[ "${LITE_ONLY:-}" = "night" ] ||
 BASE_URL="http://localhost:$APP_PORT" GATEWAY_URL="http://127.0.0.1:$GW_PORT" TRAP_URL="http://127.0.0.1:$TRAP_PORT" \
   node tests/e2e-lite/review-copy.mjs || { echo "--- app.log"; tail -40 "$WORK/app.log"; echo "--- postgrest.log"; tail -20 "$WORK/postgrest.log"; exit 1; }
 echo "== シナリオ（tests/e2e-lite/store.mjs：ストアの要件）"
+[ "${LITE_ONLY:-}" = "night" ] ||
 BASE_URL="http://localhost:$APP_PORT" GATEWAY_URL="http://127.0.0.1:$GW_PORT" TRAP_URL="http://127.0.0.1:$TRAP_PORT" \
   node tests/e2e-lite/store.mjs || { echo "--- app.log"; tail -40 "$WORK/app.log"; echo "--- gateway.log"; tail -20 "$WORK/gateway.log"; exit 1; }
 
@@ -127,12 +131,31 @@ WHSEC="whsec_lite_$(node -e "console.log(require('crypto').randomBytes(12).toStr
   node_modules/.bin/next start -p "$BILL_PORT" > "$WORK/bill.log" 2>&1 &
 PIDS+=($!)
 for _ in $(seq 1 40); do curl -sf -o /dev/null "http://localhost:$BILL_PORT/login" && curl -sf -o /dev/null "http://127.0.0.1:$STRIPE_PORT/__log" && break; sleep 1; done
+[ "${LITE_ONLY:-}" = "night" ] ||
 BILL_URL="http://localhost:$BILL_PORT" STRIPE_MOCK_URL="http://127.0.0.1:$STRIPE_PORT" TRAP_URL="http://127.0.0.1:$TRAP_PORT" \
   PG_URL="postgresql://postgres@127.0.0.1:$PG_PORT/lite" STRIPE_WEBHOOK_SECRET="$WHSEC" \
   node --import tsx tests/e2e-lite/billing.mjs || { echo "--- bill.log"; tail -40 "$WORK/bill.log"; echo "--- stripe.log"; tail -20 "$WORK/stripe.log"; exit 1; }
 
+echo "== 夜間の Batch 採点・従量課金・学校の Opus単独（tests/e2e-lite/night-batch.mjs）：課金と夜間採点を有効にした4つ目のアプリ（同じビルド）"
+NIGHT_MOCK_KEY="sk-ant-night-$(node -e "console.log(require('crypto').randomBytes(8).toString('hex'))")"
+MOCK_ANTHROPIC_PORT="$NIGHT_MOCK_PORT" EXPECTED_API_KEY="$NIGHT_MOCK_KEY" node tests/e2e/mock-anthropic.mjs > "$WORK/night-ai.log" 2>&1 &
+PIDS+=($!)
+WORKER_SECRET="$(node -e "console.log(require('crypto').randomBytes(24).toString('hex'))")"
+"${CLEAN_ENV[@]}" "${PUBLIC_INFO[@]}" "${IMAGE_ENC[@]}" NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:$GW_PORT" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" NEXT_TELEMETRY_DISABLED=1 NEXT_DIST_DIR=.next-lite \
+  SUPABASE_SERVICE_ROLE_KEY="$SERVICE" BILLING_ENABLED=on NIGHT_GRADING_ENABLED=on BILLING_WORKER_SECRET="$WORKER_SECRET" \
+  STRIPE_SECRET_KEY="sk_test_lite_placeholder" STRIPE_API_BASE_URL="http://127.0.0.1:$STRIPE_PORT" STRIPE_WEBHOOK_SECRET="$WHSEC" STRIPE_SCHOOL_TAX_RATE_ID="txr_test_jp10" \
+  BILLING_APP_URL="https://saiten.example.com" ANTHROPIC_API_KEY="$NIGHT_MOCK_KEY" ANTHROPIC_BASE_URL="http://127.0.0.1:$NIGHT_MOCK_PORT" \
+  node_modules/.bin/next start -p "$NIGHT_PORT" > "$WORK/night.log" 2>&1 &
+PIDS+=($!)
+for _ in $(seq 1 40); do curl -sf -o /dev/null "http://localhost:$NIGHT_PORT/login" && curl -sf -o /dev/null "http://127.0.0.1:$NIGHT_MOCK_PORT/__requests" && break; sleep 1; done
+NIGHT_URL="http://localhost:$NIGHT_PORT" MOCK_URL="http://127.0.0.1:$NIGHT_MOCK_PORT" STRIPE_MOCK_URL="http://127.0.0.1:$STRIPE_PORT" WORKER_SECRET="$WORKER_SECRET" \
+  PG_URL="postgresql://postgres@127.0.0.1:$PG_PORT/lite" \
+  node tests/e2e-lite/night-batch.mjs || { echo "--- night.log"; tail -60 "$WORK/night.log"; echo "--- night-ai.log"; tail -20 "$WORK/night-ai.log"; exit 1; }
+
 fi
 
+# LITE_ONLY=night のときは夜間の Batch のテストまでで終わる
+[ "${LITE_ONLY:-}" = "night" ] && { echo "OK: 夜間の Batch のテストまで"; exit 0; }
 echo "== ver6（tests/e2e-lite/ver6.mjs）：採点AI の代役と、ver6 の機能を確かめる3つ目のアプリ（同じビルド）"
 # 採点AI の代役（本物の API には接続しない）。1件の採点を1.5秒遅らせて、同時に採点していることを確かめる
 MOCK_KEY="sk-ant-ver6-$(node -e "console.log(require('crypto').randomBytes(8).toString('hex'))")"

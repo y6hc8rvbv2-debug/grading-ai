@@ -15,8 +15,22 @@ export async function GET() {
     let { data: account, error } = await db.from("billing_accounts").select("plan_id,status,quota,period_start,period_end,night,personal,prepaid_until").eq("school_id", schoolId).maybeSingle();
     if (error) ({ data: account, error } = await db.from("billing_accounts").select("plan_id,status,quota,period_start,period_end,night,personal").eq("school_id", schoolId).maybeSingle());
     if (error) throw Error("契約台帳の準備が完了していません。");
-    const { data: usage, error: e } = await db.from("billing_usage").select("status,amount").eq("school_id", schoolId).eq("period_start", account?.period_start || new Date(0).toISOString()).in("status", ["reserved", "done"]);
-    if (e) throw Error("利用量を確認できません。");
+    // 0026 の列（従量課金・学校の Opus単独）。0026 の前の DB では無いので、無ければ元の列だけで読み直す
+    const period = account?.period_start || new Date(0).toISOString();
+    type UsageRow = { amount: number; kind?: string; overage_yen?: number; opus_yen?: number };
+    let usage: UsageRow[] | null;
+    const u1 = await db.from("billing_usage").select("amount,kind,overage_yen,opus_yen").eq("school_id", schoolId).eq("period_start", period).in("status", ["reserved", "done"]);
+    if (u1.error) {
+      const u2 = await db.from("billing_usage").select("amount").eq("school_id", schoolId).eq("period_start", period).in("status", ["reserved", "done"]);
+      if (u2.error) throw Error("利用量を確認できません。");
+      usage = u2.data;
+    } else usage = u1.data;
+    // 0026：上限を超えた分の従量課金（管理者の設定・今月の額）と料金。0026 の前の DB では無いので、無ければ出さない
+    const { data: ov } = await db.from("billing_accounts").select("overage_enabled,overage_cap_yen").eq("school_id", schoolId).maybeSingle();
+    const { data: prices } = await db.rpc("billing_prices");
+    const rows = usage ?? [];
+    const overage = ov ? { enabled: !!ov.overage_enabled, capYen: ov.overage_cap_yen ?? 0, count: rows.filter((u) => u.kind === "overage").length,
+      spentYen: rows.reduce((n, u) => n + (u.overage_yen ?? 0), 0), schoolOpusYen: rows.reduce((n, u) => n + (u.opus_yen ?? 0), 0) } : null;
     const { data: profile } = await db.from("profiles").select("role").eq("id", user.id).single();
     const { data: jobs } = await db.from("grading_jobs").select("id").eq("created_by", user.id).eq("status", "running");
     const { data: orders } = jobs?.length ? await db.from("billing_orders").select("id").in("id", jobs.map(j => j.id)).eq("status", "pending") : { data: [] };
@@ -27,7 +41,7 @@ export async function GET() {
     const canManage = profile?.role === "admin";
     const review = rv?.review_at ? { at: rv.review_at, reason: canManage ? rv.review_reason : null } : null;
     return NextResponse.json({ enabled: true, nightEnabled: nightEnabled(), canManage, pendingOrders: orders || [], account, planLabel: contractLabel(account?.plan_id), review,
-      used: usage?.length || 0, opusAmount: usage?.reduce((n, x) => n + x.amount, 0) || 0, availability });
+      used: rows.filter((u) => u.kind !== "overage").length, opusAmount: rows.reduce((n, x) => n + x.amount, 0), availability, overage, prices: prices ?? null });
   } catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : "契約情報を確認できません。" }, { status: 503 }); }
 }
 export async function POST(req: Request) {
@@ -36,11 +50,20 @@ export async function POST(req: Request) {
   if (isNativeUserAgent(req.headers.get("user-agent"))) return NextResponse.json({ error: "アプリでは、お申し込み・お支払いはできません。" }, { status: 403 });
   try {
     if (!billingEnabled()) throw Error("決済の設定が完了していません。");
-    const { user, schoolId } = await billingUser(true);
+    const { user, schoolId, db: userDb } = await billingUser(true);
     const body = await req.json();
     // 再認証（2026-10-22）：申し込み・契約の管理の前に管理者のパスワードを確かめる（「契約を再確認」は読むだけなので不要）
     if (body?.action !== "resync" && !(await verifyPassword(user.email, body?.password)))
       return NextResponse.json({ error: REAUTH_ERROR, code: "reauth" }, { status: 401 });
+    // 0026：上限を超えた分の従量課金の設定（管理者・パスワードの確認のあと。DB の関数が管理者だけ・有料の月額契約だけを確かめ、監査ログに残す）
+    if (body?.action === "overage") {
+      const enabled = body?.enabled === true;
+      const cap = Math.round(Number(body?.capYen));
+      if (!Number.isFinite(cap)) throw Error("月の上限額を数字で入れてください。");
+      const { data, error } = await userDb.rpc("set_overage_settings", { p_enabled: enabled, p_cap_yen: cap });
+      if (error) throw Error(/[ぁ-んァ-ン一-龥]/.test(error.message) ? error.message : "従量課金の設定を保存できませんでした。");
+      return NextResponse.json({ ok: true, overage: data });
+    }
     const db = createAdminClient();
     let { data: account } = await db.from("billing_accounts").select("*").eq("school_id", schoolId).maybeSingle();
     if (!account) {

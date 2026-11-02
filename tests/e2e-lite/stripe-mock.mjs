@@ -15,6 +15,7 @@ import { COURSES } from "../../lib/subscription-plans.ts";
 
 const PORT = Number(process.env.STRIPE_MOCK_PORT || 54396);
 const BASE = `http://127.0.0.1:${PORT}`;
+const invoiceItems = new Map();
 const log = [];
 const sessions = new Map(), subs = new Map();
 let n = 0;
@@ -50,6 +51,13 @@ http.createServer(async (req, res) => {
       ? send(200, { id: "txr_test_jp10", object: "tax_rate", active: true, inclusive: false, percentage: 10, country: "JP", livemode: false, display_name: "消費税" })
       : send(404, { error: { type: "invalid_request_error", message: "No such tax rate" } });
   }
+  // 次回の請求に加える項目（上限を超えた分・学校の Opus単独。2026-11-02）。同じ冪等キーなら同じ項目を返す（二重の請求をしない）
+  if (url.pathname === "/v1/invoiceitems" && req.method === "POST") {
+    const key = req.headers["idempotency-key"] || `nokey_${++n}`;
+    if (!invoiceItems.has(key)) invoiceItems.set(key, { id: `ii_test_${invoiceItems.size + 1}`, object: "invoiceitem", ...form(body) });
+    return send(200, invoiceItems.get(key));
+  }
+  if (url.pathname === "/__invoiceitems") return send(200, [...invoiceItems.values()]);
   if (url.pathname === "/v1/customers" && req.method === "POST") return send(200, { id: `cus_test_${++n}`, object: "customer" });
   if (url.pathname === "/v1/billing_portal/sessions" && req.method === "POST") return send(200, { id: `bps_${++n}`, object: "billing_portal.session", url: `${BASE}/portal` });
   if (url.pathname === "/v1/checkout/sessions" && req.method === "POST") {

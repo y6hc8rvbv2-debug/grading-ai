@@ -10,13 +10,16 @@ import { FREE_QUOTA, billingPlan } from "@/lib/billing/catalog";
 import { PAYMENT_METHODS, PREPAID_MONTHS, prepaidTotal, type PrepaidMonths } from "@/lib/billing/prepaid";
 import {
   coursesOf, currentPlanLabel, limitLabel, priceLabel, PERSONAL_FEATURES, PERSONAL_OPUS_SURCHARGE, SCHOOL_DESCRIPTIONS, SCHOOL_FEATURES,
+  SCHOOL_OPUS_SURCHARGE, OVERAGE_PERSONAL_YEN, OVERAGE_SCHOOL_YEN, OVERAGE_TEXT, NIGHT_TEXT,
   type Audience, type Course,
 } from "@/lib/subscription-plans";
 
 type Availability = Record<string, { ok: boolean; reason?: string }>;
 type BillingInfo = {
   enabled?: boolean; nightEnabled?: boolean; canManage?: boolean; used?: number; opusAmount?: number; error?: string;
-  account?: { plan_id?: string; status?: string; quota?: number; prepaid_until?: string | null } | null;
+  overage?: { enabled: boolean; capYen: number; count: number; spentYen: number; schoolOpusYen: number } | null;
+  prices?: { overage_personal_yen?: number; overage_school_yen?: number; school_opus_yen?: number } | null;
+  account?: { plan_id?: string; status?: string; quota?: number; prepaid_until?: string | null; personal?: boolean } | null;
   pendingOrders?: { id: string }[]; availability?: Availability;
   /** 契約の表示名（確認済みの旧プランを含む。サーバーが決める） */
   planLabel?: string;
@@ -58,6 +61,8 @@ export default function SubscriptionPlans() {
     try {
       const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const info = await r.json();
+      // 決済画面へ進む操作は url、設定の保存（従量課金）は ok を返す
+      if (r.ok && info.ok && !info.url) { setMessage("保存しました。"); setBilling(await (await fetch("/api/billing")).json()); return; }
       if (!r.ok || !info.url) throw Error(info.error || "決済画面を開けません。");
       window.location.assign(info.url);
     } catch (e) { setMessage(e instanceof Error ? e.message : "決済を開始できません。"); } finally { setBusy(false); }
@@ -95,7 +100,7 @@ export default function SubscriptionPlans() {
     return <div key={`${audience}-${night}`} style={{ marginTop: 12 }}>
       <div style={{ fontWeight: 700, marginBottom: 6 }}>{night ? "夜間採点" : "通常採点"}</div>
       {night && <p style={{ fontSize: 12, color: T.textSub, margin: "0 0 6px", lineHeight: 1.7 }}>
-        採点の予約を、日本時間22時〜翌6時の間に順に処理します。結果は採点履歴に保存します。終わる時刻は答案の量や混み具合で変わり、お約束できません。
+        {NIGHT_TEXT}終わる時刻は答案の量や混み具合で変わり、お約束できません。
       </p>}
       <div role="radiogroup" aria-label={`${audience === "personal" ? "個人・塾" : "学校"}の${night ? "夜間採点" : "通常採点"}のコース`} style={{ display: "grid", gap: 6 }}>
         {list.map((x: Course) => {
@@ -150,8 +155,11 @@ export default function SubscriptionPlans() {
     {billing?.enabled && <p style={{ fontSize: 13 }}>
       契約状況：{STATUS_LABEL[billing.account?.status || "free"] ?? "契約内容をご確認ください"}{prepaidUntil ? `（前払い：${prepaidUntil.toLocaleDateString("ja-JP")} まで）` : ""} ／ 今期の採点：{billing.used || 0} / {quota}回
       {(billing.opusAmount || 0) > 0 && ` ／ Opus 単独の追加料金：${(billing.opusAmount || 0).toLocaleString("ja-JP")}円`}
+      {(billing.overage?.schoolOpusYen || 0) > 0 && ` ／ Opus 単独の追加料金（翌月の請求）：${(billing.overage?.schoolOpusYen || 0).toLocaleString("ja-JP")}円（税別）`}
+      {(billing.overage?.count || 0) > 0 && ` ／ 上限を超えた分：${billing.overage!.count}答案・${billing.overage!.spentYen.toLocaleString("ja-JP")}円`}
       {billing.canManage && <><br /><Btn onClick={() => post("/api/billing", { action: "portal" })} disabled={busy}>契約・支払い管理</Btn></>}
     </p>}
+    {billing?.enabled && billing.overage && <OverageSettings billing={billing} busy={busy} onSave={(enabled, capYen) => post("/api/billing", { action: "overage", enabled, capYen })} />}
     {billing?.review && <div role="status" style={{ border: `1px solid ${T.warn}`, borderRadius: 10, padding: 12, margin: "8px 0", fontSize: 13, lineHeight: 1.7 }}>
       <b>契約の内容を確認しています</b>（{new Date(billing.review.at).toLocaleString("ja-JP")} から）。いまの契約の状況・採点の回数は変えていません。
       {billing.canManage && <>
@@ -189,13 +197,17 @@ export default function SubscriptionPlans() {
       <article style={panel}>
         <Badge>学校</Badge>
         <h3>学校プラン</h3>
-        <p style={{ color: T.textSub, fontSize: 13, lineHeight: 1.7 }}>月額は税別です（お支払いのときに消費税を加えます）。Opus 単独の採点を基本料金に含みます。3モデル併用も選べます。</p>
+        <p style={{ color: T.textSub, fontSize: 13, lineHeight: 1.7 }}>月額は税別です（お支払いのときに消費税を加えます）。基本料金に3モデル併用の採点を含みます。</p>
         {group("school", false)}
         {group("school", true)}
         {applyButton("school")}
         <ul style={{ paddingInlineStart: 20, color: T.textSub, fontSize: 12.5, lineHeight: 1.8 }}>
           {(["mini", "light", "standard", "pro"] as const).map((t) => <li key={t}><b>{coursesOf("school", false).find((x) => x.tier === t)?.name}</b>：{SCHOOL_DESCRIPTIONS[t]}</li>)}
         </ul>
+        <div style={{ background: T.accentSoft, borderRadius: 10, padding: 12, marginTop: 12 }}>
+          <div style={{ fontWeight: 700 }}>Opus 単独：1答案につき追加 {SCHOOL_OPUS_SURCHARGE}円（税別）</div>
+          <p style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 0 }}>Opus 単独を選ぶときに先生の画面で金額を示して同意をたずね、採点が終わった答案だけを翌月の請求に加えます（失敗したものは請求しません）。3モデル併用の中の自動の点検には、追加料金はかかりません。</p>
+        </div>
         {featureList(SCHOOL_FEATURES)}
       </article>
     </div>
@@ -203,6 +215,7 @@ export default function SubscriptionPlans() {
     <p style={{ fontSize: 12, color: T.textSub, lineHeight: 1.8 }}>
       1答案（学校は1枚）＝生徒1人分の答案で、2ページ・20問までです。これを超える答案と PDF の答案は採点できません（写真・画像で取り込んでください）。
       1回の採点（再採点も含む）で1回分を使い、失敗したときは戻します。月の回数は契約期間ごとに数え直します。
+      {OVERAGE_TEXT}
       <Btn size="sm" variant="ghost" onClick={() => setNotes(true)}>契約前の確認事項</Btn>
     </p>
     <p style={{ fontSize: 13, color: T.textSub, lineHeight: 1.8, marginBottom: 0 }}>生徒の復習は、生徒本人の ChatGPT で行います（「ChatGPT で復習」）。ChatGPT の契約・利用料はこのアプリの料金に含まれず、生徒本人または保護者が負担します。アプリの中で AI と会話する機能は含みません。</p>
@@ -231,3 +244,31 @@ export default function SubscriptionPlans() {
     </Modal>
   </Card>;
 }
+
+/** 上限を超えた分の従量課金（0026）。説明はだれにでも、設定（有効・月の上限額）は管理者だけ。保存の前にパスワードを聞き直す */
+function OverageSettings({ billing, busy, onSave }: { billing: BillingInfo; busy: boolean; onSave: (enabled: boolean, capYen: number) => void }) {
+  const { T } = useUI();
+  const ov = billing.overage!;
+  const personal = billing.account?.personal !== false;
+  const unit = personal ? billing.prices?.overage_personal_yen ?? OVERAGE_PERSONAL_YEN : billing.prices?.overage_school_yen ?? OVERAGE_SCHOOL_YEN;
+  const [enabled, setEnabled] = useState(ov.enabled);
+  const [cap, setCap] = useState(String(ov.capYen || (personal ? 1100 : 10000)));
+  const monthly = billing.account?.status === "active";
+  return <section aria-label="上限を超えた分の従量課金" style={{ border: `1px solid ${T.line}`, borderRadius: 12, padding: 12, margin: "8px 0 14px", fontSize: 13, lineHeight: 1.8 }}>
+    <div style={{ fontWeight: 700 }}>上限を超えた分の従量課金：{ov.enabled ? `有効（月の上限額 ${ov.capYen.toLocaleString("ja-JP")}円）` : "無効（上限に達したら採点を止めます）"}</div>
+    <div style={{ color: T.textSub }}>
+      1答案 {unit}円（{personal ? "税込" : "税別"}）。上限に達すると、先生の画面に警告と単価を出し、同意してから採点します。採点が終わった答案だけを翌月の請求に加えます（失敗したものは請求しません）。
+      {!personal && ` 学校の Opus 単独は、1答案 ${billing.prices?.school_opus_yen ?? SCHOOL_OPUS_SURCHARGE}円（税別）の追加料金です。`}
+    </div>
+    {billing.canManage && (monthly
+      ? <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+          <label style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />従量課金を有効にする</label>
+          <label style={{ display: "flex", gap: 6, alignItems: "center" }}>月の上限額
+            <input type="number" min={100} step={100} value={cap} onChange={(e) => setCap(e.target.value)} aria-label="従量課金の月の上限額（円）" style={{ width: 110, padding: "4px 6px" }} />円</label>
+          <Btn size="sm" disabled={busy || (enabled && Number(cap) < 100)} onClick={() => onSave(enabled, Number(cap) || 0)}>保存</Btn>
+          <span style={{ fontSize: 12, color: T.textSub, flexBasis: "100%" }}>上限額に達すると、その月は従量課金でも採点を止めます（上限額より多く請求することはありません）。</span>
+        </div>
+      : <div style={{ fontSize: 12, color: T.textSub }}>従量課金は、有料の月額契約で使えます（無料プラン・前払いでは使えません）。</div>)}
+  </section>;
+}
+

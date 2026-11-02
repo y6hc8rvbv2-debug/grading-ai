@@ -241,6 +241,30 @@ export type CallOptions = {
   fallbacks?: boolean;
 };
 
+/** 採点の要求の中身（すぐに呼ぶときと、夜間の Batch でまとめて送るときで同じものを使う）。
+ *  Batch（夜間の割引）では、拒否されたときの自動再実行（fallbacks）は使えないので付けない */
+export function gradingRequestBody(params: { pages: AnswerPage[]; test: GradeTest; rubric: Rubric }, opts: CallOptions = {}, mode: { batch?: boolean } = {}) {
+  const cfg = aiConfig();
+  const model = opts.model ?? cfg.model;
+  const traits = traitsOf(model);
+  const thinking = (opts.thinking ?? true) && traits.adaptive;
+  // fallbacks は対応するモデルだけ（対応しないモデルに付けると 400 になる）
+  const fallbacks = !mode.batch && (opts.fallbacks ?? cfg.fallbacks) && traits.fallbacks;
+  const { system, content } = buildCachedGradingPrompt(params);
+  return {
+    model,
+    max_tokens: 16000,
+    ...(thinking ? { thinking: { type: "adaptive" as const } } : {}),
+    output_config: {
+      ...(traits.effort ? { effort: opts.effort ?? "high" } : {}),
+      format: { type: "json_schema" as const, schema: OUTPUT_SCHEMA as unknown as Record<string, unknown> },
+    },
+    system,
+    messages: [{ role: "user" as const, content }],
+    ...(fallbacks ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
+  };
+}
+
 export async function callClaude(params: {
   pages: AnswerPage[];
   test: GradeTest;
@@ -250,31 +274,11 @@ export async function callClaude(params: {
   if (!cfg.enabled) {
     throw new GradingError("採点AIが設定されていません。サーバーの環境変数 ANTHROPIC_API_KEY を設定してください。", 503);
   }
-  const model = opts.model ?? cfg.model;
-  const traits = traitsOf(model);
-  const thinking = (opts.thinking ?? true) && traits.adaptive;
-  // fallbacks は対応するモデルだけ（対応しないモデルに付けると 400 になる）
-  const fallbacks = (opts.fallbacks ?? cfg.fallbacks) && traits.fallbacks;
   // 混み合い（429）・一時的な障害（5xx）は SDK が待ってから自動で再試行する。並列採点で混み合っても途中で止めないため多めにする
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 4 });
-  const { system, content } = buildCachedGradingPrompt(params);
-
   let response: Anthropic.Beta.BetaMessage;
   try {
-    response = await client.beta.messages.create({
-      model,
-      max_tokens: 16000,
-      ...(thinking ? { thinking: { type: "adaptive" as const } } : {}),
-      output_config: {
-        ...(traits.effort ? { effort: opts.effort ?? "high" } : {}),
-        format: { type: "json_schema", schema: OUTPUT_SCHEMA as unknown as Record<string, unknown> },
-      },
-      system,
-      messages: [{ role: "user", content }],
-      ...(fallbacks
-        ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
-        : {}),
-    });
+    response = await client.beta.messages.create(gradingRequestBody(params, opts) as Anthropic.Beta.MessageCreateParamsNonStreaming);
   } catch (e) {
     throw toGradingError(e);
   }

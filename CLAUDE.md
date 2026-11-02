@@ -33,6 +33,14 @@
 
 ## 現在地
 
+### 夜間の Batch・学校の Opus単独の追加料金・従量課金（2026-11-02。**0026_batch_overage.sql**。`docs/BILLING-NIGHT.md`）
+
+- Batch：定期処理が夜間の予約をまとめて送る（`/api/grade` の `batch: "prepare" | "apply"`・`ai_batches`・`grading_stages.batch_id`・`lib/grading/batch.ts`）。費用は半額で記録
+- 学校の Opus単独：1答案50円（税別・同意して翌月の請求）。個人・塾は今までどおり55円（税込）をその場で
+- 上限を超えた分：個人22円（税込）／学校20円（税別）。管理者が有効にした月額契約だけ・月の上限額・先生が警告を見て同意（402 `overage_consent`）。採点が終わった分だけ Stripe の次回の請求に（`billing_usage.charge_status`）
+- 料金は `billing_config` と `lib/subscription-plans.ts`（OVERAGE_*・SCHOOL_OPUS_SURCHARGE）の両方。アプリの中では追加料金の同意を出さず、サーバーも受け付けない
+- 検証：`tests/db/billing.mjs`・`tests/e2e-lite/night-batch.mjs`（`LITE_ONLY=night`）・`tests/unit/batch.test.ts`
+
 ### App Store 申請前の点検（2026-10-29。`docs/APPSTORE-PRECHECK.md` が点検表。状態・環境・証拠・残作業）
 
 - アクセス制限：**0024_tenant_integrity.sql**（他校の ID・画像のパスを指す書き込みを断る。30表・返却された画像の規則に学校の一致・保存先の許可形式に octet-stream）。
@@ -105,7 +113,7 @@ ver6 のブランチで Next.js 15.5 に更新済み（2026-10-22）だったも
 承認済みの個人・塾・学校料金、Stripe Checkout / Webhook、採点枠の原子的確保、個人・塾のOpus追加55円の支払いと失敗時返金、夜間キュー。マイグレーションは **0017_billing_night.sql**（PR では 0016 だったがアカウントの削除と重なるため改番）。導入と停止は docs/BILLING-NIGHT.md。
 既存データとschools.planを上書きしない。課金のDB設定とBILLING_ENABLEDは既定で停止、NIGHT_GRADING_ENABLEDも既定で停止。Stripe・Supabase・定期処理の設定とsandbox実接続確認が済むまでは本番利用完了と扱わない。
 採点の新しい端末既定は3モデル併用。課金中の採点はサーバーservice_roleで行い、入口で認証・教職員の所属校を確認する（通常の旧経路は従来のRLS）。service_roleをブラウザへ出さない。
-夜間処理は日本時間22時〜翌6時の通常API呼出し。Batch割引は未実装。予約は採点履歴へ保存し、返却は教師確認後の既存操作。自動通知・自動返却はしない。
+夜間処理は日本時間22時〜翌6時。**2026-11-02 から Message Batches API（AI の費用が半分）**でまとめて送る（`docs/BILLING-NIGHT.md`。`NIGHT_BATCH=off` で従来の1件ずつ）。予約は採点履歴へ保存し、返却は教師確認後の既存操作。自動通知・自動返却はしない。
 **ストア用のアプリの中では料金の案内・申し込み・支払いを出さない**（`lib/native.ts`。capacitor.config.ts の appendUserAgent `TestSaitenApp/1` と Capacitor の橋渡しで判定。サーバーもアプリからの申し込み・支払いを 403）。契約は Web だけ。特定商取引法に基づく表記は `/tokushoho`。
 課金を有効にした環境では、1答案2ページ・20問まで・PDF の答案は採点できない（0017 の billing_reserve）。
 **無料プランは「月10答案まで・3モデル併用で採点」**（2026-11-01 ユーザーの指示。**0025_free_quota_10.sql**：quota の既定 10・いまの無料の契約（quota=30）を 10 に・前払いの期限切れで 10）。それ以前（2026-10-20）は月30答案（以前は月20回。**0020_free_quota_30.sql**：quota の既定 30・いまの無料の契約（quota=20）を 30 に・billing_reserve を置き換え＝前払いの期限切れで 30、無料の Opus単独を学校でも断る）。数え方は変えない（1答案の採点1回＝1枠）。表示は `FREE_QUOTA`（`lib/billing/catalog.ts`）

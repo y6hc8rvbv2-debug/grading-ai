@@ -2,7 +2,7 @@
 import type { Metadata } from "next";
 import { APP_INFO } from "@/lib/app-info";
 import { FREE_QUOTA } from "@/lib/billing/catalog";
-import { PERSONAL_OPUS_SURCHARGE, coursesOf, limitLabel, priceLabel } from "@/lib/subscription-plans";
+import { NIGHT_TEXT, OVERAGE_PERSONAL_YEN, OVERAGE_SCHOOL_YEN, PERSONAL_OPUS_SURCHARGE, SCHOOL_OPUS_SURCHARGE, coursesOf, limitLabel, priceLabel } from "@/lib/subscription-plans";
 import { H2, Missing, PublicPage } from "@/components/PublicPage";
 import { PAYMENT_METHODS } from "@/lib/billing/prepaid";
 
@@ -34,17 +34,19 @@ export default function TokushohoPage() {
               </div>
             )))}
             <div>個人・塾プランの「Opus 単独」の採点：1回につき {yen(PERSONAL_OPUS_SURCHARGE)}（税込）</div>
+            <div>学校プランの「Opus 単独」の採点：1回（1枚）につき {yen(SCHOOL_OPUS_SURCHARGE)}（税別）</div>
+            <div>月の上限を超えた分（管理者が従量課金を有効にした月額契約だけ）：1回につき 個人・塾 {yen(OVERAGE_PERSONAL_YEN)}（税込）／学校 {yen(OVERAGE_SCHOOL_YEN)}（税別）。管理者が決めた月の上限額を超えて請求しません。</div>
             <div>学校プランの消費税：お支払いのときに、税別の月額に消費税（10%）を加えて請求します。</div>
             <div>1回（学校は1枚）＝生徒1人分の答案（2ページ・20問まで）の採点1回です（再採点も1回）。</div>
           </>)}
           {row("商品代金以外の必要料金", "インターネットの接続・通信の料金はお客様のご負担です。")}
           {row("お支払い方法", `月額（自動更新）：${PAYMENT_METHODS.monthly}（決済サービス Stripe）。前払い（1・3・6・12か月分）：${PAYMENT_METHODS.prepaid}、および${PAYMENT_METHODS.crypto}。いずれも Web ブラウザから申し込みます（ストア用のアプリの中では購入できません）。`)}
-          {row("お支払いの時期", "月額料金は申し込みのときに初回を、以後は契約期間ごとの更新日に自動でお支払いいただきます。前払いは申し込みのときに、選んだ月数分をまとめてお支払いいただきます（コンビニ払い・銀行振込は表示された期限までに）。「Opus 単独」の追加料金は、その採点を申し込むときにお支払いいただきます。")}
-          {row("提供の時期", "お支払いの確認後、すぐに使えます。夜間採点のコースは、採点の予約を日本時間22時〜翌6時の間に順に処理します（終わる時刻はお約束できません）。")}
+          {row("お支払いの時期", "月額料金は申し込みのときに初回を、以後は契約期間ごとの更新日に自動でお支払いいただきます。前払いは申し込みのときに、選んだ月数分をまとめてお支払いいただきます（コンビニ払い・銀行振込は表示された期限までに）。個人・塾プランの「Opus 単独」の追加料金は、その採点を申し込むときにお支払いいただきます。学校プランの「Opus 単独」の追加料金と、上限を超えた分の従量課金は、採点が終わった分を翌月の請求に加えてお支払いいただきます。")}
+          {row("提供の時期", `お支払いの確認後、すぐに使えます。${NIGHT_TEXT}（終わる時刻はお約束できません）`)}
           {row("解約・返金", <>
             <div>解約は「契約・支払い管理」からいつでもでき、その契約期間の終わりまで使えます。次の更新から請求されません。</div>
             <div>デジタルのサービスのため、支払い済みの月額料金は、法令で必要な場合を除き、日割りで返金しません。</div>
-            <div>「Opus 単独」の採点に失敗したときは、その追加料金を返金します。採点に失敗した回は、月の回数に数えません。</div>
+            <div>「Opus 単独」の採点に失敗したときは、その追加料金を返金します（学校プランは請求しません）。採点に失敗した回は、月の回数・従量課金に数えません。</div>
           </>)}
           {row("動作環境", "最新の Safari・Chrome・Edge（パソコン・タブレット・スマートフォン）")}
         </tbody>
