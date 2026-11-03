@@ -8,3 +8,11 @@ security-guard/.env
 security-guard/.env.example
 security-guard/.gitignore
 security-guard/CLAUDE.md
+
+# robot-shop: サーバー専用ファイルは公開しない（lib/pii-shield.js は /api から使うので除外しない）
+robot-shop/package.json
+robot-shop/.github
+robot-shop/.env
+robot-shop/.env.example
+robot-shop/.gitignore
+robot-shop/CLAUDE.md
