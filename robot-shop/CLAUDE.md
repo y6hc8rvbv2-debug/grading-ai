@@ -28,3 +28,9 @@
 - サーバー: `/api/robot-agent.js`。Vercel の環境変数 `ANTHROPIC_API_KEY` が無いときは 503 を返し、画面は内蔵の簡易版（`app.js` の `localAgent`）に自動で切り替わる
 - 会話は保存しない。個人情報は画面とサーバーの両方で伏せ字にしてから Claude に送る
 - 製品の提案はカタログ（`data.js`）にある id だけ。サーバーで存在チェックしてから画面に返す
+
+## セキュリティ（詳細は SECURITY.md）
+- `/api/robot-*` は必ず最初に `lib/security.js` の `guardRequest()` を通す（送信元・署名トークン・回数・サイズの確認）
+- 画面から API を呼ぶときは `app.js` の `apiPost()` を使う（トークンを自動で付ける）
+- HTTP セキュリティヘッダー（CSP など）は `vercel.json`。外部スクリプトや外部への通信を追加するときは CSP も見直す
+- localStorage から読んだ値は必ず検査してから使う（`cleanCart` など）

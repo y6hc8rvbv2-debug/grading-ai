@@ -5,16 +5,7 @@
 // ・個人情報はログに出さない
 import { randomBytes } from 'node:crypto';
 import { calcTotals, findProduct } from '../robot-shop/data.js';
-
-// 同じ接続元からの連続注文を簡易的に制限（1分に5件まで）
-const recent = new Map();
-function rateLimited(key) {
-  const now = Date.now();
-  const list = (recent.get(key) || []).filter((t) => now - t < 60_000);
-  list.push(now);
-  recent.set(key, list);
-  return list.length > 5;
-}
+import { guardRequest, securityLog } from '../robot-shop/lib/security.js';
 
 // PII Shield を読み込む。鍵が未設定などで読み込めない場合は null
 let shieldPromise;
@@ -46,20 +37,21 @@ function validate(c) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Cache-Control', 'no-store');
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ error: 'POST で送信してください' });
-  }
-
-  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0] || 'unknown';
-  if (rateLimited(ip)) return res.status(429).json({ error: '短時間に注文が集中しています。1分ほど待ってからお試しください' });
+  // 送信元・トークン・回数・サイズの確認（注文は画面を開いて3秒未満の送信を受け付けない）
+  const blocked = guardRequest(req, res, { name: 'order', perMinute: 5, globalPerMinute: 300, minAgeMs: 3000, maxBytes: 20_000 });
+  if (blocked) return res.status(blocked.status).json(blocked);
 
   let body = req.body;
   if (typeof body === 'string') {
     try { body = JSON.parse(body); } catch { body = null; }
   }
   if (!body || typeof body !== 'object') return res.status(400).json({ error: '注文データが読み取れません' });
+
+  // おとり入力欄（人には見えない）に入力があればボットとみなす
+  if (body.website) {
+    securityLog('honeypot', req, 'order');
+    return res.status(400).json({ error: '注文を受け付けできませんでした' });
+  }
 
   // ── 注文内容（個人情報ではない項目）──
   const rawItems = Array.isArray(body.items) ? body.items.slice(0, 30) : [];

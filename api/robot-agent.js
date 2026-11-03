@@ -4,6 +4,7 @@
 // ・会話内容は保存しない／ログに出さない
 import Anthropic from '@anthropic-ai/sdk';
 import { CATEGORIES, PRODUCTS, findProduct } from '../robot-shop/data.js';
+import { guardRequest } from '../robot-shop/lib/security.js';
 
 // 費用を抑えるため、最も安い現行モデル（Claude Haiku 5.5）を使う
 const MODEL = 'claude-haiku-5-5';
@@ -65,29 +66,15 @@ function redact(text) {
     .replace(/\b(?:\d[ -]?){13,19}\b/g, '［番号省略］');
 }
 
-// 接続元ごとの簡易回数制限（1分に15回まで）
-const recent = new Map();
-function rateLimited(key) {
-  const now = Date.now();
-  const list = (recent.get(key) || []).filter((t) => now - t < 60_000);
-  list.push(now);
-  recent.set(key, list);
-  return list.length > 15;
-}
-
 let client;
 
 export default async function handler(req, res) {
-  res.setHeader('Cache-Control', 'no-store');
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ error: 'POST で送信してください' });
-  }
+  // 送信元・トークン・回数・サイズの確認（AIの利用料を守るため全体の上限も設ける）
+  const blocked = guardRequest(req, res, { name: 'agent', perMinute: 15, globalPerMinute: 200, maxBytes: 16_000 });
+  if (blocked) return res.status(blocked.status).json({ ...blocked, fallback: blocked.status !== 401 });
   if (!process.env.ANTHROPIC_API_KEY) {
     return res.status(503).json({ error: 'AI（Claude）が未設定です', fallback: true });
   }
-  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0] || 'unknown';
-  if (rateLimited(ip)) return res.status(429).json({ error: '少し時間をおいてからお試しください', fallback: true });
 
   let body = req.body;
   if (typeof body === 'string') {

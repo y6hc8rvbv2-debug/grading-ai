@@ -18,15 +18,72 @@ const store = {
   },
 };
 
+// ブラウザに保存されたデータは書き換えられている可能性があるので、読み込み時に形と値を検査する（改ざん対策）
+const isStr = (v, max = 200) => typeof v === 'string' && v.length <= max;
+const OPTION_IDS = new Set(OPTIONS.map((o) => o.id));
+function cleanCart(list) {
+  return (Array.isArray(list) ? list : []).slice(0, 50)
+    .filter((i) => i && findProduct(i.id))
+    .map((i) => ({ id: i.id, qty: Math.max(1, Math.min(99, Math.floor(Number(i.qty)) || 1)), plan: i.plan === 'rental' ? 'rental' : 'buy', options: (Array.isArray(i.options) ? i.options : []).filter((o) => OPTION_IDS.has(o)) }));
+}
+function cleanIds(list, max) {
+  return [...new Set((Array.isArray(list) ? list : []).filter((id) => findProduct(id)))].slice(0, max);
+}
+function cleanOrders(list) {
+  return (Array.isArray(list) ? list : []).slice(0, 100).filter((o) => o && /^RB-\d{8}-[0-9A-F]{6}$/.test(o.orderId) && !Number.isNaN(Date.parse(o.createdAt)) && o.totals && typeof o.totals.total === 'number')
+    .map((o) => ({
+      ...o,
+      customer: Object.fromEntries(['name', 'email', 'phone', 'postal', 'address'].map((k) => [k, isStr(o.customer?.[k]) ? o.customer[k] : '***'])),
+      company: isStr(o.company, 100) ? o.company : '',
+      items: cleanCart(o.items),
+      leadWeeks: Math.max(1, Math.min(104, Number(o.leadWeeks) || 4)),
+    }));
+}
+
 const state = {
   cat: 'all', avail: 'all', budget: 0, sort: 'rec', q: '',
-  favs: new Set(store.get('favs', [])),
-  cart: store.get('cart', []),
+  favs: new Set(cleanIds(store.get('favs', []), 100)),
+  cart: cleanCart(store.get('cart', [])),
   compare: [],
-  recent: store.get('recent', []),
-  orders: store.get('orders', []), // マスク済みの値のみ
+  recent: cleanIds(store.get('recent', []), 8),
+  orders: cleanOrders(store.get('orders', [])), // マスク済みの値のみ
   lastRecs: [],
 };
+
+// ───────── API 通信（署名付きトークンを付けて送る＝App Attest の Web 版）─────────
+let apiToken = null;
+let apiTokenAt = 0;
+let tokenProtected = false;
+async function getToken(force = false) {
+  if (!force && apiToken && Date.now() - apiTokenAt < 90 * 60 * 1000) return apiToken;
+  try {
+    const r = await fetch('/api/robot-session', { credentials: 'same-origin', cache: 'no-store' });
+    const d = await r.json();
+    apiToken = d.token || '';
+    tokenProtected = Boolean(d.protected);
+    apiTokenAt = Date.now();
+  } catch {
+    apiToken = '';
+  }
+  return apiToken;
+}
+async function apiPost(url, payload, { minWaitMs = 0 } = {}) {
+  const send = async () => fetch(url, {
+    method: 'POST',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', 'X-Robo-Token': await getToken() },
+    body: JSON.stringify(payload),
+  });
+  let res = await send();
+  if (res.status === 401) {
+    // トークン切れ → 取り直して1回だけ再送（注文は発行直後の送信を受け付けないので少し待つ）
+    await getToken(true);
+    if (minWaitMs) await new Promise((r) => setTimeout(r, minWaitMs));
+    res = await send();
+  }
+  return res;
+}
 const save = () => {
   store.set('favs', [...state.favs]);
   store.set('cart', state.cart);
@@ -353,6 +410,7 @@ function openCart() {
 const STEPS = ['カート確認', '注文フォーム', '確認・発注', '購入完了'];
 // 個人情報はこの変数（メモリ）にだけ置き、保存しない。送信後すぐ消す
 let piiDraft = {};
+let honeypotValue = ''; // 人には見えないおとり欄の値（ボット検知用）
 // 個人情報以外の入力（下書き保存OK）
 let orderDraft = store.get('orderDraft', { customerType: 'business', company: '', department: '', site: 'factory', deliveryDate: '', payment: 'invoice', subsidy: false, note: '' });
 
@@ -396,6 +454,7 @@ function checkoutStep2() {
       <div class="field full"><label><input type="checkbox" name="subsidy" ${orderDraft.subsidy ? 'checked' : ''}/> 補助金・助成金の活用について相談したい</label></div>
       <div class="field full"><label for="f-note">ご要望・備考</label><textarea id="f-note" name="note" rows="3" placeholder="搬入経路、既存設備との連携、デモ希望など（個人情報は書かないでください）">${esc(orderDraft.note)}</textarea></div>
     </div>
+    <div class="hp" aria-hidden="true"><label>ウェブサイト（入力しないでください）<input name="website" tabindex="-1" autocomplete="off" value=""/></label></div>
     <div class="pii-note">🔒 お名前・メール・電話・住所は、送信後にサーバーで <b>PII Shield</b> により暗号化・伏せ字化されます。このブラウザには保存されません（会社名などそれ以外の入力だけ下書き保存されます）。カード番号はこのフォームでは受け付けません。</div>
     <div class="actions"><button type="button" class="btn sub" id="back-step1">戻る</button><button type="submit" class="btn">確認画面へ</button></div></form></div>`);
 }
@@ -403,6 +462,7 @@ function checkoutStep2() {
 function readForm() {
   const f = $('#order-form');
   const fd = new FormData(f);
+  honeypotValue = String(fd.get('website') || '');
   piiDraft = { name: fd.get('name').trim(), email: fd.get('email').trim(), phone: fd.get('phone').trim(), postal: fd.get('postal').trim(), address: fd.get('address').trim() };
   orderDraft = {
     customerType: fd.get('customerType') || 'business', company: fd.get('company').trim(), department: fd.get('department').trim(),
@@ -462,11 +522,7 @@ async function placeOrder() {
   btn.disabled = true;
   btn.textContent = '発注処理中…';
   try {
-    const res = await fetch('/api/robot-order', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: state.cart, customer: piiDraft, order: orderDraft }),
-    });
+    const res = await apiPost('/api/robot-order', { items: state.cart, customer: piiDraft, order: orderDraft, website: honeypotValue }, { minWaitMs: 3200 });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       if (data.fields) { checkoutStep2(); showErrors(data.fields); }
@@ -687,11 +743,7 @@ async function agent(input) {
   $('#chat-log').scrollTop = 1e9;
   $('#chat-text').disabled = true;
   try {
-    const res = await fetch('/api/robot-agent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: chatHistory, cart: state.cart.map((i) => ({ id: i.id, qty: i.qty })) }),
-    });
+    const res = await apiPost('/api/robot-agent', { messages: chatHistory, cart: state.cart.map((i) => ({ id: i.id, qty: i.qty })) });
     const r = await res.json().catch(() => ({}));
     typing.remove();
     if (!res.ok || typeof r.reply !== 'string') {
@@ -839,6 +891,7 @@ document.addEventListener('click', (e) => {
     case 'fab': openChat(); break;
     case 'chat-close': $('#chat').classList.remove('open'); $('#fab').hidden = false; break;
     case 'home-link': break;
+    case 'btn-security': openSecurity(); break;
   }
 });
 
@@ -877,7 +930,46 @@ function openChat() {
   $('#chat-text').focus();
 }
 
+// ───────── 個人情報の自動消去・プライバシー画面（スマホアプリの自動ロック／画面スナップショット保護に相当）─────────
+const AUTO_LOCK_MS = 10 * 60 * 1000;
+let lastActive = Date.now();
+const hasPiiOnScreen = () => Boolean($('#modal.open #order-form') || $('#modal.open .confirm-list'));
+function wipePii(reason) {
+  const had = Object.values(piiDraft).some(Boolean) || hasPiiOnScreen();
+  piiDraft = {};
+  honeypotValue = '';
+  if (hasPiiOnScreen()) closeAll();
+  if ($('#order-form') || $('.confirm-list')) $('#modal-body').innerHTML = ''; // 画面の中からも消す
+  if (had && reason) toast(reason);
+}
+['pointerdown', 'keydown', 'scroll', 'touchstart'].forEach((ev) => addEventListener(ev, () => { lastActive = Date.now(); }, { passive: true }));
+setInterval(() => {
+  if (Date.now() - lastActive > AUTO_LOCK_MS) { lastActive = Date.now(); wipePii('安全のため、しばらく操作がなかったので入力中の個人情報を消去しました'); }
+}, 30_000);
+// タブを切り替えたり、アプリ切替画面に出たりしたとき、入力中の個人情報をぼかして隠す
+document.addEventListener('visibilitychange', () => {
+  document.body.classList.toggle('privacy-blur', document.hidden && hasPiiOnScreen());
+});
+addEventListener('pagehide', () => { piiDraft = {}; });
+
+function openSecurity() {
+  const https = location.protocol === 'https:';
+  const row = (ok, title, text) => `<div class="sec-row"><span>${ok ? '✅' : '⚠️'}</span><div><b>${title}</b><br><small>${text}</small></div></div>`;
+  openDrawer(`<h2>🔒 セキュリティとプライバシー</h2><div class="inner">
+    <p class="disclaimer">スマホアプリ（App Store）で一般的に使われている防御機能を、このWebサイト向けに取り入れています。</p>
+    ${row(https, '通信の暗号化（HTTPS／HSTS）', https ? '通信は暗号化されています。暗号化されていない接続にはブラウザが自動で切り替えません。' : 'この接続は暗号化されていません。')}
+    ${row(tokenProtected, '正規の画面からの通信か確認', tokenProtected ? '注文・AIへの送信には、このサイトが発行した期限付きの署名を付けています。偽装した通信は受け付けません。' : '署名の確認は現在オフです（サーバー設定待ち）。')}
+    ${row(true, '個人情報の保護（PII Shield）', 'お名前・連絡先はサーバーで暗号化・伏せ字化。このブラウザには伏せ字の情報だけを保存します。')}
+    ${row(true, '自動ロック', '10分間操作がないと、入力中の個人情報を消去します。タブを離れると入力画面をぼかします。')}
+    ${row(true, '改ざん・なりすまし対策', '外部スクリプトの読み込み禁止、他サイトへの埋め込み禁止、カメラ・マイク・位置情報は使いません。保存データは読み込み時に検査します。')}
+    ${row(true, 'ボット・大量アクセス対策', '短時間の連続送信の制限、機械的な高速入力の検知、おとり入力欄で自動送信を防ぎます。')}
+    ${row(true, 'AIへの情報送信', 'メール・電話番号などは伏せ字にしてからAIに送ります。会話は保存しません。')}
+    <p class="disclaimer">トラッキング（追跡）や広告用の外部サービスは使っていません。</p>
+  </div>`);
+}
+
 // ───────── 起動 ─────────
+getToken();
 const savedTheme = store.get('theme', null);
 if (savedTheme) document.documentElement.dataset.theme = savedTheme;
 renderStats();

@@ -308,3 +308,9 @@ footer { color: var(--muted); font-size: 12px; padding: 20px 0 90px; border-top:
 .detail .pic .fav { top: auto; bottom: 10px; }
 
 .msg.typing { color: var(--muted); font-style: italic; }
+
+/* セキュリティ関連 */
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+body.privacy-blur #modal { filter: blur(14px); }
+.sec-row { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.sec-row small { color: var(--muted); }

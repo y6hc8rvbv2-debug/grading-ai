@@ -16,3 +16,4 @@ robot-shop/.env
 robot-shop/.env.example
 robot-shop/.gitignore
 robot-shop/CLAUDE.md
+robot-shop/SECURITY.md
