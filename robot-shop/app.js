@@ -646,15 +646,80 @@ function meSay(text) {
   $('#chat-log').appendChild(div);
 }
 
-function agent(input) {
+// ── Claude 接続版。使えないとき（未設定・エラー）は下の localAgent に自動で切り替える ──
+const chatHistory = []; // 会話はメモリだけに置く（保存しない）
+let aiMode = 'unknown'; // unknown | claude | local
+
+function setChatMode(mode) {
+  aiMode = mode;
+  $('#chat-mode').textContent = mode === 'claude' ? 'Claude（AI）で応答中' : mode === 'local' ? '簡易モード（内蔵ルール）で応答中' : '用途・予算から最適なロボットをご提案';
+}
+
+function runAction(r) {
+  const ids = r.product_ids || [];
+  if (r.product_ids?.length) state.lastRecs = ids;
+  switch (r.action) {
+    case 'add_to_cart': if (r.action_product_id) addToCart(r.action_product_id); break;
+    case 'compare': if (ids.length >= 2) openCompare(ids.slice(0, 3)); break;
+    case 'open_cart': openCart(); break;
+    case 'checkout': if (state.cart.length) checkoutStep1(); else openCart(); break;
+    case 'open_orders': openOrders(); break;
+    case 'filter_category': if (r.action_category) { state.cat = r.action_category; renderAll(); } break;
+  }
+}
+
+async function agent(input) {
   const text = input.trim();
   if (!text) return;
-  // 個人情報らしきものが入力されたら注意（チャット内容はどこにも送信・保存しない）
+  // 個人情報らしきものが入力されたら注意（AIにも送らない・保存しない）
   if (/[^\s@]+@[^\s@]+\.[^\s@]+/.test(text) || /0\d{1,4}-?\d{1,4}-?\d{3,4}/.test(text)) {
     meSay(text.replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, '＊＊＊').replace(/0\d{1,4}-?\d{1,4}-?\d{3,4}/g, '＊＊＊'));
     return botSay('個人情報（メールアドレス・電話番号など）はチャットに入力しないでください。ご連絡先は注文フォームで安全に（暗号化して）お預かりします。');
   }
   meSay(text);
+  if (aiMode === 'local') return localAgent(text);
+
+  chatHistory.push({ role: 'user', text });
+  const typing = document.createElement('div');
+  typing.className = 'msg bot typing';
+  typing.textContent = '考え中…';
+  $('#chat-log').appendChild(typing);
+  $('#chat-log').scrollTop = 1e9;
+  $('#chat-text').disabled = true;
+  try {
+    const res = await fetch('/api/robot-agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: chatHistory, cart: state.cart.map((i) => ({ id: i.id, qty: i.qty })) }),
+    });
+    const r = await res.json().catch(() => ({}));
+    typing.remove();
+    if (!res.ok || typeof r.reply !== 'string') {
+      chatHistory.pop();
+      if (res.status === 503 || res.status === 404 || res.status === 405) setChatMode('local');
+      return localAgent(text);
+    }
+    if (aiMode !== 'claude') setChatMode('claude');
+    chatHistory.push({ role: 'assistant', text: r.reply });
+    const recs = (r.product_ids || []).map(findProduct).filter(Boolean);
+    const quick = [];
+    if (recs.length >= 2) quick.push(['上のおすすめを比較', '上のおすすめを比較して']);
+    if (recs.length) quick.push([`「${recs[0].name}」をカートへ`, `${recs[0].name}をカートに入れて`]);
+    if (state.cart.length) quick.push(['注文へ進む', '注文へ進みたい']);
+    botSay(r.reply, recs, quick);
+    runAction(r);
+  } catch {
+    typing.remove();
+    chatHistory.pop();
+    localAgent(text);
+  } finally {
+    $('#chat-text').disabled = false;
+    $('#chat-text').focus();
+  }
+}
+
+// ── 内蔵の簡易コンシェルジュ（ルールベース。Claude が使えないときの予備）──
+function localAgent(text) {
 
   // 操作系のコマンド
   if (/カート.*(見|確認|開)|^カート$/.test(text)) { botSay('カートを開きます。'); return openCart(); }

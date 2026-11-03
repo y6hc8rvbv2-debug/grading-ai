@@ -6,6 +6,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "pii-shield": "github:y6hc8rvbv2-debug/pii-shield"
+    "pii-shield": "github:y6hc8rvbv2-debug/pii-shield",
+    "@anthropic-ai/sdk": "^1.4.0"
   }
 }

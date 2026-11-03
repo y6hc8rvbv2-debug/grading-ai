@@ -306,3 +306,5 @@ footer { color: var(--muted); font-size: 12px; padding: 20px 0 90px; border-top:
   .checkout { padding: 14px; }
 }
 .detail .pic .fav { top: auto; bottom: 10px; }
+
+.msg.typing { color: var(--muted); font-style: italic; }
