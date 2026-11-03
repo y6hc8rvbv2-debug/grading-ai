@@ -1,0 +1,15 @@
+{
+  "framework": null,
+  "installCommand": "npm install --no-audit --no-fund",
+  "buildCommand": "rm -rf public && mkdir -p public && cp index.html public/ && cp -r robot-shop public/robot-shop && rm -rf public/robot-shop/lib",
+  "outputDirectory": "public",
+  "headers": [
+    {
+      "source": "/robot-shop/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+      ]
+    }
+  ]
+}
