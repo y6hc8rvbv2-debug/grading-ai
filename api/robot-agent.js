@@ -5,7 +5,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { CATEGORIES, PRODUCTS, findProduct } from '../robot-shop/data.js';
 
-const MODEL = 'claude-opus-5-5';
+// 費用を抑えるため、最も安い現行モデル（Claude Haiku 5.5）を使う
+const MODEL = 'claude-haiku-5-5';
 
 // ── 製品カタログを Claude に渡す形（毎回同じ文字列になるので、プロンプトキャッシュが効く）──
 const CATALOG = PRODUCTS.map((p) => {
@@ -107,11 +108,10 @@ export default async function handler(req, res) {
 
   client ??= new Anthropic();
   try {
-    const response = await client.beta.messages.create({
+    // Haiku 5.5 にはサーバー側の自動切替（fallbacks）が無いため、断られた場合は下で丁寧な定型文を返す
+    const response = await client.messages.create({
       model: MODEL,
       max_tokens: 4000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default', // 安全フィルターで断られたとき、サーバー側で推奨モデルに自動で切り替える
       output_config: { effort: 'low', format: { type: 'json_schema', schema: OUTPUT_SCHEMA } },
       system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
       messages,
