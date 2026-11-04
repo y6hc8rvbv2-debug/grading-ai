@@ -84,6 +84,15 @@ input[type=text]{width:100%;padding:12px;border-radius:10px;border:1px solid var
 .dots{display:flex;gap:6px;justify-content:center;margin-top:10px}
 .dots span{width:8px;height:8px;border-radius:50%;background:var(--line)}
 .dots span.on{background:var(--brand)}
+.bar{height:10px;border-radius:999px;background:var(--line);overflow:hidden;margin-top:8px}
+.bar span{display:block;height:100%;background:var(--brand)}
+.badges{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.badge{border:1px solid var(--line);border-radius:12px;padding:10px 6px;text-align:center;opacity:.45}
+.badge.on{opacity:1;border-color:var(--brand);background:var(--brand-soft)}
+.badge .bi{font-size:26px}
+.badge b{display:block;font-size:12px}
+.badge small{display:block;font-size:10px;color:var(--sub);line-height:1.4}
+.ghost:disabled{opacity:.5}
 footer{font-size:12px;color:var(--sub);margin-top:24px;line-height:1.7}
 h2{font-size:17px;margin:18px 0 10px}
 </style>
@@ -98,9 +107,10 @@ h2{font-size:17px;margin:18px 0 10px}
   <main id="view"></main>
   <footer>
     ・参加は無料です。ポイントはゲームの中だけで使うもので、お金や商品とは交換できません。<br>
-    ・試作版のため、データはこの端末（ブラウザ）の中だけに保存されます。<br>
+    ・予想の記録はこの端末（ブラウザ）に保存されます。claude.ai で共有されたページでは、ランキングのためにニックネームと予想も共有され、別の端末でも引き継がれます。<br>
     ・ニックネームには本名や連絡先を入れないでください。<br>
-    ・「AIミライくん」の予想は、試作版ではあらかじめ用意したルールで作っています。<br>
+    ・「AIミライくん」の予想：時事問題はClaudeが毎朝ニュースを調べて考えたもの、ボーナス問題はClaudeがその場で考えたものです（使えないときは、かんたんなルールで予想します）。「ミライくんに詳しく聞く」を使うと、見ている人のClaudeの利用枠を少し使います。<br>
+    ・みんなのランキングに送られるのは「ニックネーム」と「予想」だけです。<br>
     ・時事問題の答え合わせは、Claude（AI）が毎朝ニュースや公式発表を調べて行い、根拠のリンクを表示します。<br>
     ・天気・為替のボーナス問題の答え合わせは、公開されている気象データ（Open-Meteo）と為替データ（欧州中央銀行の基準レート／Frankfurter）を使って全自動で行います。<br>
     <button class="ghost" style="margin-top:8px" onclick="toggleDemo()" id="demoBtn">結果発表をお試し（デモ）</button>
@@ -129,7 +139,7 @@ const TABS = [
 function load() {
   try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; }
 }
-let state = Object.assign({ name: '', picks: {}, friends: {}, results: {}, demo: false, helped: false }, load());
+let state = Object.assign({ name: '', picks: {}, friends: {}, results: {}, aiPicks: {}, badges: {}, maxStreak: 0, demo: false, helped: false }, load());
 function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} }
 
 // ===== 日付（日本時間） =====
@@ -294,6 +304,15 @@ async function resolveAll() {
   render();
 }
 
+// ===== AIミライくんの予想 =====
+// 時事問題：毎朝Claudeがニュースを調べて考えた予想（questions.json）
+// ボーナス問題：Claudeがその場で考えた予想（使えないときは、かんたんなルールの予想）
+function aiOf(q) { return (state.aiPicks && state.aiPicks[q.id]) || q.ai; }
+function aiLabel(q) {
+  if (q.kind === 'news') return 'Claudeがニュースを調べて予想';
+  return state.aiPicks[q.id] ? 'Claudeがその場で考えて予想' : 'かんたんなルールで予想';
+}
+
 // ===== 結果と採点 =====
 function resultOf(q) {
   if (q.kind === 'news' && q.result) return q.result;
@@ -320,6 +339,7 @@ function streak() { // 1問でも予想した日が何日続いているか
   let s = 0; let d = todayStr();
   if (!days.has(d)) d = addDays(d, -1); // 今日まだ答えていなくても、昨日までの連続は数える
   while (days.has(d)) { s++; d = addDays(d, -1); }
+  if (s > (state.maxStreak || 0)) { state.maxStreak = s; save(); }
   return s;
 }
 
@@ -364,17 +384,19 @@ function questionCard(q, big) {
     if (!res) r = `<div class="result wait">${pendingText(q)}</div>`;
     else if (res === 'void') r = `<div class="result wait">⚪ ${q.kind === 'news' ? '判定できなかったため' : 'データがそろわなかったため'}、この問題は中止（0点）になりました</div>`;
     else {
-      const me = pointsFor(mine, res), ai = pointsFor(q.ai, res);
+      const me = pointsFor(mine, res), ai = pointsFor(aiOf(q), res);
       const verdict = me > ai ? '🎉 AIに勝ち！' : me < ai ? '😢 AIに負け…' : '🤝 引き分け';
       r = `<div class="result ${mine.pick === res ? 'win' : 'lose'}">結果：${pickWord(res)} ／ あなた ${me > 0 ? '+' : ''}${me}点・AI ${ai > 0 ? '+' : ''}${ai}点　${verdict}</div>`;
     }
     body = `
       <div class="vs">
         <div><h4>あなた</h4><div class="pick ${mine.pick}">${pickWord(mine.pick)}</div><div class="meta">${CONF_LABEL[mine.conf - 1]}</div></div>
-        <div><h4>🤖 ${AI_NAME}</h4><div class="pick ${q.ai.pick}">${pickWord(q.ai.pick)}</div><div class="meta">${CONF_LABEL[q.ai.conf - 1]}</div></div>
+        ${aiThinking[q.id] ? `<div><h4>🤖 ${AI_NAME}</h4><div class="pick">🤔</div><div class="meta">考え中…</div></div>` :
+        `<div><h4>🤖 ${AI_NAME}</h4><div class="pick ${aiOf(q).pick}">${pickWord(aiOf(q).pick)}</div><div class="meta">${CONF_LABEL[aiOf(q).conf - 1]}</div></div>`}
       </div>
-      <div class="reason">🤖「${esc(q.ai.reason)}」</div>${r}`;
+      ${aiThinking[q.id] ? '' : `<div class="reason">🤖「${esc(aiOf(q).reason)}」<br><small>（${aiLabel(q)}）</small></div>`}${r}`;
   }
+  if (ai.sample) body += askBox(q);
   if (q.kind === 'news') {
     body += `<div class="note">📏 判定のルール：${esc(q.criteria)}</div>`;
     if (res && !state.demo && q.note) body += `<div class="note">📝 ${esc(q.note)}</div>`;
@@ -403,7 +425,7 @@ function viewToday() {
   let html = `<div class="stats">
     <div class="stat"><b>🔥${s}</b><span>連続予想（日）</span></div>
     <div class="stat"><b>${tally(x => state.picks[x.id]).pts}</b><span>あなたの点数</span></div>
-    <div class="stat"><b>${tally(x => state.picks[x.id] ? x.ai : undefined).pts}</b><span>AIの点数</span></div>
+    <div class="stat"><b>${tally(x => state.picks[x.id] ? aiOf(x) : undefined).pts}</b><span>AIの点数</span></div>
   </div>`;
   html += `<h2>📅 今日の1問</h2>` + questionCard(q, true);
   if (state.picks[q.id]) html += shareCard();
@@ -428,12 +450,29 @@ function viewBattle() {
   const link = inviteLink();
   const rows = [
     { name: state.name + '（あなた）', me: true, ...tally(x => state.picks[x.id]) },
-    { name: '🤖 ' + AI_NAME, ...tally(x => state.picks[x.id] ? x.ai : undefined) },
-    ...Object.entries(state.friends).map(([n, f]) => ({ name: n, ...tally(x => decodePick(f.p[x.id])) })),
+    { name: '🤖 ' + AI_NAME, ...tally(x => state.picks[x.id] ? aiOf(x) : undefined) },
+    ...onlineRows(),
+    ...Object.entries(state.friends).map(([n, f]) => ({ name: '🔗 ' + n, ...tally(x => decodePick(f.p[x.id])) })),
   ].sort((a, b) => b.pts - a.pts);
+  const others = rows.length - 2;
+  let status;
+  if (online.db) status = online.loading ? '🔄 みんなのランキングを読み込み中…'
+    : online.failed ? '📡 ランキングにつながりません。しばらくしてから開き直してください。'
+    : online.readOnly ? '👀 見るだけの権限なので、あなたの予想はランキングに送られていません。ページの持ち主に「投稿者（Contributor）」以上の権限をもらうと参加できます。'
+    : `🌐 自動で共有中：このページを開いている人の予想が、リアルタイムでランキングに反映されます（参加者 ${Object.keys(online.players).length}人）。`;
+  else status = '自動で共有されるランキングは、claude.ai で共有されたページで使えます。ここでは、下の招待リンクで友達と対戦できます。';
   let html = `<h2>⚔️ 友達と対戦</h2>
   <div class="card">
-    <div class="t" style="font-weight:700">1. 招待リンクを友達に送る</div>
+    <div style="font-weight:700">🏆 ランキング</div>
+    <div class="note" style="margin-bottom:6px">${status}</div>
+    <table><tr><th>順位</th><th>名前</th><th style="text-align:right">的中</th><th style="text-align:right">点数</th></tr>
+    ${rows.map((r, i) => `<tr class="${r.me ? 'me-row' : ''}"><td>${i + 1}</td><td>${esc(r.name)}</td><td class="num">${r.hit}/${r.done}</td><td class="num">${r.pts}</td></tr>`).join('')}
+    </table>
+    ${others ? '' : '<div class="note">まだ対戦相手がいません。ページを友達と共有するか、下の招待リンクを送ってみよう！</div>'}
+    <div class="note">🌐＝自動共有で参加している人　🔗＝招待リンクで参加した人</div>
+  </div>
+  <div class="card">
+    <div class="t" style="font-weight:700">🔗 招待リンクで対戦する</div>
     <div class="note">リンクには「ニックネーム」と「あなたの予想」だけが入ります。友達が開くと、あなたとの対戦が始まります。</div>
     <div class="row">
       <a class="ghost" style="text-decoration:none" href="https://line.me/R/msg/text/?${encodeURIComponent('ミライ予想で勝負しよう！\n' + link)}" target="_blank" rel="noopener">LINEで送る</a>
@@ -441,13 +480,7 @@ function viewBattle() {
     </div>
     <div class="note">※予想を追加したら、もう一度リンクを送り合うと最新の予想で比べられます。</div>
   </div>
-  <div class="card">
-    <div style="font-weight:700">2. ランキング</div>
-    <table><tr><th>順位</th><th>名前</th><th style="text-align:right">的中</th><th style="text-align:right">点数</th></tr>
-    ${rows.map((r, i) => `<tr class="${r.me ? 'me-row' : ''}"><td>${i + 1}</td><td>${esc(r.name)}</td><td class="num">${r.hit}/${r.done}</td><td class="num">${r.pts}</td></tr>`).join('')}
-    </table>
-    ${Object.keys(state.friends).length ? '' : '<div class="note">まだ友達がいません。上のリンクを送ってみよう！</div>'}
-  </div>`;
+`;
   for (const [n, f] of Object.entries(state.friends)) {
     const common = allQuestions().filter(q => f.p[q.id] || state.picks[q.id]);
     if (!common.length) continue;
@@ -461,9 +494,12 @@ function viewBattle() {
   return html;
 }
 function viewRecord() {
-  const me = tally(x => state.picks[x.id]), ai = tally(x => state.picks[x.id] ? x.ai : undefined);
+  const me = tally(x => state.picks[x.id]), ai = tally(x => state.picks[x.id] ? aiOf(x) : undefined);
   const rate = me.done ? Math.round(me.hit / me.done * 100) : 0;
-  const title = me.done < 5 ? '見習い予想士' : rate >= 70 ? '🔮 予想の達人' : rate >= 55 ? '⭐ なかなかの予想士' : '🌱 成長中の予想士';
+  const { cur, next } = titleOf(me.pts);
+  const pct = next ? Math.max(0, Math.min(100, Math.round((me.pts - cur[0]) / (next[0] - cur[0]) * 100))) : 100;
+  const st = myStats();
+  const got = BADGES.filter(b => state.badges[b.id] || (state.demo && b.ok(st)));
   return `<h2>🏆 あなたの成績</h2>
   <div class="stats">
     <div class="stat"><b>${rate}%</b><span>的中率</span></div>
@@ -471,8 +507,13 @@ function viewRecord() {
     <div class="stat"><b>🔥${streak()}</b><span>連続日数</span></div>
   </div>
   <div class="card">
-    <div class="meta">あなたの称号</div><div class="q">${title}</div>
-    <div class="note">結果が出た問題が5問以上になると、的中率で称号が決まります。</div>
+    <div class="meta">あなたの称号</div><div class="q">${cur[1]}</div>
+    <div class="bar"><span style="width:${pct}%"></span></div>
+    <div class="note">${next ? `次の称号「${next[1]}」まで あと ${next[0] - me.pts} 点` : '最高の称号です！おめでとう！'}</div>
+  </div>
+  <div class="card">
+    <div style="font-weight:700">🏅 バッジ（${got.length} / ${BADGES.length}）</div>
+    <div class="badges">${BADGES.map(b => { const on = got.includes(b); return `<div class="badge ${on ? 'on' : ''}"><div class="bi">${on ? b.icon : '🔒'}</div><b>${b.name}</b><small>${b.desc}</small></div>`; }).join('')}</div>
   </div>
   <div class="card">
     <div style="font-weight:700">AIミライくんとの勝負</div>
@@ -494,7 +535,7 @@ function shareText() {
   const qs = allQuestions().filter(q => state.picks[q.id]).sort((a, b) => state.picks[a.id].at - state.picks[b.id].at).slice(-7);
   const mark = (p, q) => { const res = resultOf(q); if (!p) return '⬜'; if (!res) return '⏳'; if (res === 'void') return '⚪'; return p.pick === res ? '🟢' : '🔴'; };
   const me = qs.map(q => mark(state.picks[q.id], q)).join('');
-  const ai = qs.map(q => mark(q.ai, q)).join('');
+  const ai = qs.map(q => mark(aiOf(q), q)).join('');
   return `🔮ミライ予想 ${md(todayStr())}\nわたし ${me}\nAI　　 ${ai}\n🔥連続${streak()}日\n#ミライ予想`;
 }
 function shareCard() {
@@ -536,7 +577,8 @@ function submitPick(id) {
   const d = draft()[id]; const q = qById(id);
   if (!d || !d.pick || !d.conf || !q || !isOpen(q)) return;
   state.picks[id] = { pick: d.pick, conf: d.conf, at: Date.now() }; save();
-  toast(d.pick === q.ai.pick ? 'AIと同じ予想です' : 'AIと反対の予想！勝負です');
+    pushMine();
+  if (q.kind !== 'news' && ai.sample) thinkAI(q, d.pick); else toast(d.pick === aiOf(q).pick ? 'AIと同じ予想です' : 'AIと反対の予想！勝負です');
   render();
 }
 async function copyOrShare(text) {
@@ -548,7 +590,7 @@ function shareInvite() { copyOrShare('ミライ予想で勝負しよう！\n' + 
 function removeFriend(n) { delete state.friends[decodeURIComponent(n)]; save(); render(); }
 function rename() {
   const v = document.getElementById('rename').value.trim().slice(0, 12);
-  if (!v) return; state.name = v; save(); toast('変更しました'); render();
+  if (!v) return; state.name = v; save(); pushMine(); toast('変更しました'); render();
 }
 function toggleDemo() { state.demo = !state.demo; save(); toast(state.demo ? 'デモの結果を表示中' : 'デモを終了しました'); render(); }
 function toast(msg) {
@@ -556,11 +598,180 @@ function toast(msg) {
   document.body.appendChild(el); setTimeout(() => el.remove(), 2200);
 }
 
+// ===== 本物のAI（Claude）を呼ぶ =====
+// 公開ページ（claude.ai）で開いたときだけ使える。使うと、見ている人のClaude利用枠を少し使う
+const ai = { sample: null };
+const aiThinking = {};
+const askState = {}; // 問題ID → { text, busy, err }
+async function initAI() {
+  try { if (window.claude && window.claude.use) ai.sample = await window.claude.use('sample'); } catch { ai.sample = null; }
+  render();
+}
+function aiErrorText(e) {
+  const c = e && e.code;
+  if (c === 'not_granted' || c === 'sampling_disabled' || c === 'not_declared' || c === 'capability_disabled' || c === 'capability_removed') { ai.sample = null; return null; }
+  if (c === 'rate_limited') return '少し混み合っています。時間をおいてもう一度試してね。';
+  if (c === 'session_expired') return 'もう一度ログインしてから試してね。';
+  return 'うまく答えられませんでした。もう一度試してね。';
+}
+async function thinkAI(q, myPick) {
+  aiThinking[q.id] = true; render();
+  const j = q.judge || {};
+  const city = j.city && window.CITIES[j.city];
+  const hint = j.metric === 'tmax' && city ? `${city.name}のこの時期の平年の最高気温はおよそ${city.avgMax[+j.date.slice(5, 7) - 1]}℃` : 'とくになし';
+  const prompt = `あなたは予想ゲームのAIキャラ「ミライくん」です。次の問題に「はい」か「いいえ」で予想してください。
+インターネットは見られないので、季節・地域の気候・一般的な傾向から考えてください。
+問題：${q.text}
+今日の日付：${todayStr()}
+参考：${hint}
+次のJSONだけを返してください：
+{"pick": "yes" または "no", "conf": 1〜3の整数（1=ふつう, 2=自信あり, 3=絶対）, "reason": "中学生にも分かる日本語で60文字以内の理由"}`;
+  try {
+    const r = await ai.sample.json(prompt, { modelTier: 'quick' });
+    if (r && (r.pick === 'yes' || r.pick === 'no') && [1, 2, 3].includes(+r.conf) && typeof r.reason === 'string') {
+      state.aiPicks[q.id] = { pick: r.pick, conf: +r.conf, reason: r.reason.slice(0, 120) };
+      save();
+    }
+  } catch (e) { aiErrorText(e); }
+  delete aiThinking[q.id];
+  toast(myPick === aiOf(q).pick ? 'AIと同じ予想です' : 'AIと反対の予想！勝負です');
+  render();
+}
+function askBox(q) {
+  const a = askState[q.id] || {};
+  return `<div style="margin-top:10px">
+    <button class="ghost" ${a.busy ? 'disabled' : ''} onclick="askMirai('${q.id}')">🤖 ミライくんに詳しく聞く</button>
+    ${a.busy && !a.text ? '<div class="note">🤔 考え中…（最初は利用の許可を聞かれることがあります）</div>' : ''}
+    ${a.text ? `<div class="share">${esc(a.text)}</div>` : ''}
+    ${a.err ? `<div class="note">${esc(a.err)}</div>` : ''}
+  </div>`;
+}
+async function askMirai(id) {
+  const q = qById(id); if (!q || !ai.sample) return;
+  const mine = state.picks[id];
+  askState[id] = { busy: true, text: '' }; render();
+  const prompt = `あなたは予想ゲーム「ミライ予想」のAIキャラ「ミライくん」です。
+次の予想問題について、初心者にも分かるように、予想のヒントになる「背景」「これまでの傾向」「注目ポイント」を、やさしい日本語で200文字くらいで説明してください。
+・インターネットは見られません。知らない最新情報は「最新のニュースも確認してね」と伝えてください
+・結果を断定しないでください。お金を賭けることはすすめないでください
+・見出しや記号はつけず、短い文章で答えてください
+問題：${q.text}
+${q.criteria ? '判定のルール：' + q.criteria + '\n' : ''}今日の日付：${todayStr()}
+${mine ? `ミライくんの予想：${pickWord(aiOf(q).pick)}（理由：${aiOf(q).reason}）` : ''}`;
+  try {
+    await ai.sample(prompt, { modelTier: 'quick', onText: ({ text }) => { askState[id] = { busy: true, text }; render(); } });
+    askState[id] = { ...askState[id], busy: false };
+  } catch (e) {
+    const msg = aiErrorText(e);
+    askState[id] = { busy: false, text: (e && e.text) || '', err: msg || '' };
+  }
+  render();
+}
+
+// ===== みんなのランキング（自動で共有） =====
+// 公開ページ（claude.ai）で開いたときだけ使える。保存するのは「ニックネーム」と「予想」だけ
+const online = { db: null, uid: null, players: {}, loading: true, failed: false, readOnly: false, synced: false, queue: Promise.resolve() };
+async function initOnline() {
+  try {
+    if (!(window.claude && window.claude.use)) throw 0;
+    const [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]);
+    const uid = user ? await user.id() : null;
+    if (!db || !uid) throw 0;
+    online.db = db; online.uid = uid;
+  } catch { online.loading = false; render(); return; }
+  const timer = setTimeout(() => { if (online.loading) { online.loading = false; online.failed = true; render(); } }, 10000);
+  online.db.collection('players').onSnapshot(snap => {
+    const players = {};
+    snap.docs.forEach(d => { if (d.exists) players[d.id] = d.data(); });
+    online.players = players;
+    if (!snap.metadata.fromCache) { clearTimeout(timer); online.loading = false; online.failed = false; }
+    if (!online.synced && !snap.metadata.fromCache) { online.synced = true; mergeMine(); }
+    render();
+  }, () => { clearTimeout(timer); online.loading = false; online.failed = true; render(); });
+}
+function encodeAll() { const p = {}; for (const [id, v] of Object.entries(state.picks)) p[id] = encodePick(v); return p; }
+function mergeMine() { // 別の端末で予想した分を取り込む
+  const mine = online.players[online.uid];
+  let changed = false;
+  if (mine && mine.picks && typeof mine.picks === 'object') {
+    for (const [id, s] of Object.entries(mine.picks)) {
+      const p = decodePick(s);
+      if (p && !state.picks[id]) { state.picks[id] = { ...p, at: +mine.updatedAt || Date.now() }; changed = true; }
+    }
+    if (!state.name && typeof mine.nickname === 'string') { state.name = mine.nickname.slice(0, 12); changed = true; }
+  }
+  if (changed) save();
+  const remote = JSON.stringify((mine && mine.picks) || {}), local = JSON.stringify(encodeAll());
+  if (state.name && (remote !== local || !mine || mine.nickname !== state.name)) pushMine();
+}
+function pushMine() {
+  if (!online.db || !online.uid || online.readOnly || !state.name) return;
+  const body = { nickname: state.name.slice(0, 12), picks: encodeAll(), updatedAt: Date.now() };
+  online.queue = online.queue.then(() => online.db.doc('players/' + online.uid).set(body)).catch(e => {
+    if (e && (e.code === 'invalid_argument' || e.code === 'not_granted' || e.code === 'revoked')) { online.readOnly = true; render(); }
+  });
+}
+function onlineRows() {
+  const rows = [];
+  for (const [id, p] of Object.entries(online.players)) {
+    if (id === online.uid || !p || typeof p.picks !== 'object' || !p.picks) continue;
+    const name = typeof p.nickname === 'string' && p.nickname.trim() ? p.nickname.slice(0, 12) : 'ななしさん';
+    rows.push({ name: '🌐 ' + name, ...tally(x => decodePick(p.picks[x.id])) });
+  }
+  return rows;
+}
+
+// ===== バッジと称号 =====
+const BADGES = [
+  { id: 'first', icon: '🔰', name: 'はじめの一歩', desc: '初めて予想した', ok: s => s.answered >= 1 },
+  { id: 'streak3', icon: '🔥', name: '3日連続', desc: '3日続けて予想した', ok: s => s.maxStreak >= 3 },
+  { id: 'streak7', icon: '🌟', name: '7日連続', desc: '7日続けて予想した', ok: s => s.maxStreak >= 7 },
+  { id: 'streak30', icon: '👑', name: '30日連続', desc: '30日続けて予想した', ok: s => s.maxStreak >= 30 },
+  { id: 'hit1', icon: '🎯', name: '初的中', desc: '初めて予想が当たった', ok: s => s.hit >= 1 },
+  { id: 'hit10', icon: '🏹', name: '的中10回', desc: '予想が10回当たった', ok: s => s.hit >= 10 },
+  { id: 'confident', icon: '💪', name: '自信の的中', desc: '「絶対！」で当てた', ok: s => s.confHit >= 1 },
+  { id: 'beatai', icon: '🤖', name: 'AIに勝利', desc: '1問でAIより高い点を取った', ok: s => s.beatAI >= 1 },
+  { id: 'beatai10', icon: '🦾', name: 'AIハンター', desc: 'AIに10回勝った', ok: s => s.beatAI >= 10 },
+  { id: 'contra', icon: '🦊', name: '逆張り成功', desc: 'AIと反対の予想で当てた', ok: s => s.contra >= 1 },
+  { id: 'allcat', icon: '🌈', name: '何でも予想', desc: '4つ以上の分野に予想した', ok: s => s.cats >= 4 },
+  { id: 'news10', icon: '🗞️', name: '時事通', desc: '時事問題に10問予想した', ok: s => s.news >= 10 },
+  { id: 'friend', icon: '🤝', name: '対戦デビュー', desc: '友達と対戦した', ok: s => s.friends >= 1 },
+  { id: 'master', icon: '🔮', name: '予想の達人', desc: '10問以上で的中率70%以上', ok: s => s.done >= 10 && s.hit / s.done >= 0.7 },
+];
+const TITLES = [[0, '🌱 見習い予想士'], [50, '⭐ 予想士'], [150, '🌟 上級予想士'], [300, '💎 予想マスター'], [600, '🔮 ミライの賢者']];
+function myStats() {
+  const s = { answered: 0, hit: 0, done: 0, pts: 0, confHit: 0, beatAI: 0, contra: 0, news: 0, cats: 0, maxStreak: Math.max(state.maxStreak || 0, streak()),
+    friends: Object.keys(state.friends).length + onlineRows().length };
+  const cats = new Set();
+  for (const q of allQuestions()) {
+    const p = state.picks[q.id]; if (!p) continue;
+    s.answered++; cats.add(q.cat); if (q.kind === 'news') s.news++;
+    const res = resultOf(q); if (!res || res === 'void') continue;
+    const a = aiOf(q), mp = pointsFor(p, res);
+    s.done++; s.pts += mp;
+    if (p.pick === res) { s.hit++; if (p.conf === 3) s.confHit++; if (a.pick !== p.pick) s.contra++; }
+    if (mp > pointsFor(a, res)) s.beatAI++;
+  }
+  s.cats = cats.size;
+  return s;
+}
+function titleOf(pts) {
+  let cur = TITLES[0], next = null;
+  for (let i = 0; i < TITLES.length; i++) if (pts >= TITLES[i][0]) { cur = TITLES[i]; next = TITLES[i + 1] || null; }
+  return { cur, next };
+}
+function checkBadges() { // 新しく取ったバッジをお知らせ（デモ表示中は記録しない）
+  if (state.demo) return;
+  const s = myStats(); const fresh = [];
+  for (const b of BADGES) if (!state.badges[b.id] && b.ok(s)) { state.badges[b.id] = Date.now(); fresh.push(b); }
+  if (fresh.length) { save(); toast(fresh.length === 1 ? `🏅 バッジ獲得：${fresh[0].icon} ${fresh[0].name}` : `🏅 新しいバッジを${fresh.length}個獲得！`); }
+}
+
 // ===== 遊び方（3ステップ） =====
 const HELP = [
   { ill: '🔮', t: '1. 予想する', d: '毎日1問、「はい」か「いいえ」で答えます。自信度も選べます。自信があるほど、当たると高得点、はずれると減点です。' },
   { ill: '🤖', t: '2. AIと勝負', d: '予想を決めると、AIミライくんの予想と理由が見られます。AIより高い点数を目指そう！' },
-  { ill: '⚔️', t: '3. 友達と対戦', d: '招待リンクを送ると、友達とランキングで競えます。結果は絵文字でシェアできます。参加は無料、ポイントはお金と交換できません。' },
+  { ill: '⚔️', t: '3. 友達と対戦', d: 'このページを友達と共有すると、自動でランキングに参加できます。招待リンクでも対戦できます。結果は絵文字でシェアできます。参加は無料、ポイントはお金と交換できません。' },
 ];
 function showHelp(i) {
   const h = HELP[i]; const last = i === HELP.length - 1;
@@ -587,7 +798,7 @@ function askName() {
 function setName() {
   const v = document.getElementById('nameIn').value.trim().slice(0, 12);
   if (!v) return toast('ニックネームを入れてください');
-  state.name = v; save(); document.getElementById('overlay').innerHTML = '';
+  state.name = v; save(); pushMine(); document.getElementById('overlay').innerHTML = '';
   readInvite(); render();
 }
 
@@ -599,6 +810,7 @@ function render() {
   document.getElementById('demoBtn').textContent = state.demo ? 'デモを終了' : '結果発表をお試し（デモ）';
   document.getElementById('nav').innerHTML = TABS.map(t =>
     `<button class="${t.id === current ? 'on' : ''}" onclick="go('${t.id}')"><i>${t.icon}</i>${t.label}</button>`).join('');
+  checkBadges();
   const v = { today: viewToday, special: viewSpecial, battle: viewBattle, record: viewRecord }[current];
   document.getElementById('view').innerHTML = v();
 }
@@ -610,6 +822,8 @@ else if (!state.name) askName();
 else readInvite(), render();
 loadNews();
 resolveAll();
+initAI();
+initOnline();
 setInterval(resolveAll, 10 * 60 * 1000); // 開いている間は10分ごとに答え合わせ
 </script>
 </body>

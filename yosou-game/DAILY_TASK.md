@@ -42,5 +42,5 @@
 1. `python3 -c "import json; json.load(open('yosou-game/questions.json'))"` でJSONが正しいことを確認する
 2. 日時はすべて `+09:00` 付きの形式（例：`2026-12-16T23:59:00+09:00`）になっているか確認する
 3. コミットしてプッシュする（`git push -u origin claude/polymarket-prediction-platform-wwz93e`）。コミットメッセージは「ミライ予想：○月○日の問題更新（答え合わせ○問・新規○問）」
-4. Artifact（https://claude.ai/artifact/7Aq4c7cJ7XDgomyFhJRYLW）も更新する：まず `action: "read"` でそのURLを読み、そのあと `yosou-game/index.html` を `url` 付きで publish し、`files` に `{"data.js": "yosou-game/data.js", "questions.json": "yosou-game/questions.json"}` を渡す
+4. Artifact（https://claude.ai/artifact/7Aq4c7cJ7XDgomyFhJRYLW）も更新する：まず `action: "read"` でそのURLを読み、そのあと `yosou-game/index.html` を `url` 付きで publish し、`files` に `{"data.js": "yosou-game/data.js", "questions.json": "yosou-game/questions.json"}` を渡す。`capabilities` は指定しない（指定しないと、ランキング共有やAI機能の設定がそのまま引き継がれる）
 5. 最後に、今日行ったこと（答え合わせした問題と結果、追加した問題）を短くまとめる
