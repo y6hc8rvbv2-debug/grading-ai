@@ -101,7 +101,8 @@ h2{font-size:17px;margin:18px 0 10px}
     ・試作版のため、データはこの端末（ブラウザ）の中だけに保存されます。<br>
     ・ニックネームには本名や連絡先を入れないでください。<br>
     ・「AIミライくん」の予想は、試作版ではあらかじめ用意したルールで作っています。<br>
-    ・答え合わせは、公開されている気象データ（Open-Meteo）と為替データ（欧州中央銀行の基準レート／Frankfurter）を使って全自動で行います。<br>
+    ・時事問題の答え合わせは、Claude（AI）が毎朝ニュースや公式発表を調べて行い、根拠のリンクを表示します。<br>
+    ・天気・為替のボーナス問題の答え合わせは、公開されている気象データ（Open-Meteo）と為替データ（欧州中央銀行の基準レート／Frankfurter）を使って全自動で行います。<br>
     <button class="ghost" style="margin-top:8px" onclick="toggleDemo()" id="demoBtn">結果発表をお試し（デモ）</button>
     <button class="ghost" style="margin-top:8px" onclick="showHelp(0)">遊び方</button>
   </footer>
@@ -119,7 +120,7 @@ const CONF_LABEL = ['ふつう', '自信あり', '絶対！'];
 const AI_NAME = 'AIミライくん';
 const TABS = [
   { id: 'today', icon: '📅', label: '今日の1問' },
-  { id: 'special', icon: '🎍', label: '年末SP' },
+  { id: 'special', icon: '🗞️', label: '時事' },
   { id: 'battle', icon: '⚔️', label: '友達と対戦' },
   { id: 'record', icon: '🏆', label: '成績' },
 ];
@@ -175,7 +176,18 @@ function recentDaily(days = 7) {
   for (let i = 0; i < days; i++) out.push(dailyQuestion(addDays(t, -i)));
   return out;
 }
-function allQuestions() { return [...recentDaily(14), ...window.SPECIAL_QUESTIONS]; }
+// 時事問題（questions.json。毎朝Claudeがニュースを調べて、出題と答え合わせを自動で更新）
+window.NEWS = [];
+async function loadNews() {
+  try {
+    const r = await fetch('questions.json', { cache: 'no-store' });
+    if (!r.ok) throw new Error();
+    const j = await r.json();
+    window.NEWS = (j.questions || []).map(q => ({ ...q, kind: 'news' }));
+  } catch { window.NEWS = []; }
+  render();
+}
+function allQuestions() { return [...window.NEWS, ...recentDaily(14), ...window.SPECIAL_QUESTIONS]; }
 function qById(id) { return allQuestions().find(q => q.id === id); }
 function isOpen(q) { return Date.now() < new Date(q.deadline).getTime(); }
 
@@ -183,10 +195,12 @@ function isOpen(q) { return Date.now() < new Date(q.deadline).getTime(); }
 // データが出そろう時刻（日本時間）：天気は対象日の翌日3時、為替は翌日6時
 function lastDate(j) { return j.src === 'wxcount' ? j.to : j.date; }
 function readyAt(q) {
+  if (q.kind === 'news') return new Date(q.resolveBy).getTime();
   const j = q.judge;
   return new Date(addDays(lastDate(j), 1) + (j.src === 'fx' ? 'T06:00:00+09:00' : 'T03:00:00+09:00')).getTime();
 }
 function judgeSource(q) {
+  if (q.kind === 'news') return 'ニュース・公式発表をもとにClaudeが判定';
   return q.judge.src === 'fx' ? '欧州中央銀行の基準レート（Frankfurter）で自動判定' : '気象データ（Open-Meteo）で自動判定';
 }
 const resolving = { busy: false, failed: false };
@@ -255,7 +269,7 @@ function decide(q, wx, fx) {
 }
 async function resolveAll() {
   if (resolving.busy) return;
-  const need = allQuestions().filter(q => !state.results[q.id] && Date.now() >= readyAt(q));
+  const need = allQuestions().filter(q => q.judge && !state.results[q.id] && Date.now() >= readyAt(q));
   if (!need.length) return;
   resolving.busy = true; resolving.failed = false;
   try {
@@ -282,6 +296,7 @@ async function resolveAll() {
 
 // ===== 結果と採点 =====
 function resultOf(q) {
+  if (q.kind === 'news' && q.result) return q.result;
   if (state.results[q.id]) return state.results[q.id];
   if (state.demo) return hash(q.id + 'demo') % 2 ? 'yes' : 'no'; // デモ用の仮の結果（保存しない）
   return null;
@@ -300,10 +315,11 @@ function tally(picksOf) { // picksOf(q) => {pick, conf} | undefined
   }
   return { pts, hit, done, answered };
 }
-function streak() {
+function streak() { // 1問でも予想した日が何日続いているか
+  const days = new Set(Object.values(state.picks).map(p => ymd(jst(new Date(p.at || 0)))));
   let s = 0; let d = todayStr();
-  if (!state.picks['d-' + d]) d = addDays(d, -1); // 今日まだ答えていなくても、昨日までの連続は数える
-  while (state.picks['d-' + d]) { s++; d = addDays(d, -1); }
+  if (!days.has(d)) d = addDays(d, -1); // 今日まだ答えていなくても、昨日までの連続は数える
+  while (days.has(d)) { s++; d = addDays(d, -1); }
   return s;
 }
 
@@ -312,6 +328,9 @@ const pickWord = p => p === 'yes' ? 'はい' : 'いいえ';
 function fmtTime(ms) { return new Date(ms).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
 function pendingText(q) {
   const t = readyAt(q);
+  if (q.kind === 'news') return Date.now() < t
+    ? `⏳ 結果は ${fmtTime(t)} ごろまでに、ニュースをもとに判定されます`
+    : '⏳ 判定の準備中です（毎朝、自動で確認しています）';
   if (Date.now() < t) return `⏳ 結果は ${fmtTime(t)} ごろに自動で判定されます`;
   if (resolving.busy) return '🔄 データを確認しています…';
   if (resolving.failed) return '📡 データを取得できませんでした。次に開いたときに自動で再確認します';
@@ -343,7 +362,7 @@ function questionCard(q, big) {
   } else {
     let r;
     if (!res) r = `<div class="result wait">${pendingText(q)}</div>`;
-    else if (res === 'void') r = `<div class="result wait">⚪ データがそろわなかったため、この問題は中止（0点）になりました</div>`;
+    else if (res === 'void') r = `<div class="result wait">⚪ ${q.kind === 'news' ? '判定できなかったため' : 'データがそろわなかったため'}、この問題は中止（0点）になりました</div>`;
     else {
       const me = pointsFor(mine, res), ai = pointsFor(q.ai, res);
       const verdict = me > ai ? '🎉 AIに勝ち！' : me < ai ? '😢 AIに負け…' : '🤝 引き分け';
@@ -356,6 +375,12 @@ function questionCard(q, big) {
       </div>
       <div class="reason">🤖「${esc(q.ai.reason)}」</div>${r}`;
   }
+  if (q.kind === 'news') {
+    body += `<div class="note">📏 判定のルール：${esc(q.criteria)}</div>`;
+    if (res && !state.demo && q.note) body += `<div class="note">📝 ${esc(q.note)}</div>`;
+    if (res && !state.demo && (q.sources || []).length) body += `<div class="note">🔗 根拠：${q.sources.map(x =>
+      /^https?:\/\//.test(x.url) ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title || x.url)}</a>` : '').join('　')}</div>`;
+  }
   return `<div class="card">
     <span class="label">${q.icon} ${q.cat}</span>
     <div class="q" style="${big ? '' : 'font-size:17px'}">${esc(q.text)}</div>
@@ -365,8 +390,15 @@ function questionCard(q, big) {
 }
 
 // ===== 各タブ =====
+function featuredNews() {
+  const t = todayStr();
+  return window.NEWS.find(q => q.featured === t && isOpen(q))
+    || window.NEWS.filter(isOpen).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
+}
 function viewToday() {
-  const [q, ...past] = recentDaily(7);
+  const [daily, ...past] = recentDaily(7);
+  const news = featuredNews();
+  const q = news || daily;
   const s = streak();
   let html = `<div class="stats">
     <div class="stat"><b>🔥${s}</b><span>連続予想（日）</span></div>
@@ -375,14 +407,22 @@ function viewToday() {
   </div>`;
   html += `<h2>📅 今日の1問</h2>` + questionCard(q, true);
   if (state.picks[q.id]) html += shareCard();
+  const openNews = window.NEWS.filter(x => x !== q && isOpen(x) && !state.picks[x.id]).length;
+  if (openNews) html += `<div class="card" style="cursor:pointer" onclick="go('special')"><b>🗞️ ほかにも受付中の時事問題が ${openNews} 問あります</b><div class="note">「時事・イベント」タブで予想しよう →</div></div>`;
+  if (news) html += `<h2>🎁 ボーナス問題（天気・為替）</h2><div class="note" style="margin:-4px 0 10px">公開データで自動で答え合わせする、毎日のミニ問題です。</div>` + questionCard(daily);
   const answered = past.filter(x => state.picks[x.id]);
-  if (answered.length) html += `<h2>これまでの予想</h2>` + answered.map(x => questionCard(x)).join('');
+  if (answered.length) html += `<h2>これまでのボーナス問題</h2>` + answered.map(x => questionCard(x)).join('');
   return html;
 }
 function viewSpecial() {
-  return `<h2>🎍 年末スペシャル</h2>
-    <div class="note" style="margin:-4px 0 12px">年末年始の大きなイベントを予想しよう。友達との対戦にもカウントされます。</div>`
-    + window.SPECIAL_QUESTIONS.map(q => questionCard(q)).join('');
+  const open = window.NEWS.filter(isOpen).sort((a, b) => a.deadline.localeCompare(b.deadline));
+  const closed = window.NEWS.filter(q => !isOpen(q)).sort((a, b) => b.deadline.localeCompare(a.deadline));
+  let html = `<h2>🗞️ 時事・イベント</h2>
+    <div class="note" style="margin:-4px 0 12px">選挙・経済・スポーツ・エンタメなど、みんなが気になる出来事を予想しよう。問題は毎朝追加され、答え合わせはClaudeがニュースや公式発表を調べて自動で行います。</div>`;
+  html += open.length ? open.map(q => questionCard(q)).join('') : '<div class="card note">いま受付中の問題はありません。明日の朝をお楽しみに！</div>';
+  if (closed.length) html += `<h2>締め切った問題</h2>` + closed.map(q => questionCard(q)).join('');
+  html += `<h2>🎍 年末の天気スペシャル</h2>` + window.SPECIAL_QUESTIONS.map(q => questionCard(q)).join('');
+  return html;
 }
 function viewBattle() {
   const link = inviteLink();
@@ -451,7 +491,7 @@ function viewRecord() {
 
 // ===== シェア用の絵文字 =====
 function shareText() {
-  const qs = recentDaily(7).reverse();
+  const qs = allQuestions().filter(q => state.picks[q.id]).sort((a, b) => state.picks[a.id].at - state.picks[b.id].at).slice(-7);
   const mark = (p, q) => { const res = resultOf(q); if (!p) return '⬜'; if (!res) return '⏳'; if (res === 'void') return '⚪'; return p.pick === res ? '🟢' : '🔴'; };
   const me = qs.map(q => mark(state.picks[q.id], q)).join('');
   const ai = qs.map(q => mark(q.ai, q)).join('');
@@ -568,6 +608,7 @@ render();
 if (!state.helped) showHelp(0);
 else if (!state.name) askName();
 else readInvite(), render();
+loadNews();
 resolveAll();
 setInterval(resolveAll, 10 * 60 * 1000); // 開いている間は10分ごとに答え合わせ
 </script>
