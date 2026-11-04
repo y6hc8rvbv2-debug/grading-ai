@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ミライ予想</title>
+<meta name="description" content="毎日1問、友達とAIに勝負する無料の予想ゲーム" />
+<style>
+:root{
+  --bg:#f4f5fb; --card:#ffffff; --text:#1c1f2e; --sub:#6b7085; --line:#e5e7f0;
+  --brand:#3b3fd8; --brand-soft:#e9eafc; --yes:#16a34a; --yes-soft:#e3f6ea; --no:#dc2626; --no-soft:#fde8e8;
+  --gold:#d97706; --shadow:0 4px 18px rgba(20,24,60,.08);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0f1120; --card:#1a1d31; --text:#eef0fa; --sub:#a0a5be; --line:#2c3050;
+    --brand:#8b8ffb; --brand-soft:#262a52; --yes:#4ade80; --yes-soft:#16301f; --no:#f87171; --no-soft:#3a1a1d;
+    --gold:#fbbf24; --shadow:none;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;line-height:1.6}
+.wrap{max-width:560px;margin:0 auto;padding:16px 16px 96px}
+header{display:flex;align-items:center;justify-content:space-between;margin:4px 0 14px}
+.logo{font-weight:800;font-size:22px;letter-spacing:.02em}
+.logo span{color:var(--brand)}
+.who{font-size:13px;color:var(--sub);text-align:right}
+.who b{color:var(--text)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:var(--shadow);margin-bottom:14px}
+.label{display:inline-block;font-size:12px;font-weight:700;color:var(--brand);background:var(--brand-soft);border-radius:999px;padding:2px 10px}
+.q{font-size:19px;font-weight:700;margin:10px 0 4px}
+.meta{font-size:12px;color:var(--sub)}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.btn{border:none;border-radius:12px;padding:14px;font-size:17px;font-weight:800;cursor:pointer;font-family:inherit}
+.btn-yes{background:var(--yes-soft);color:var(--yes);border:2px solid transparent}
+.btn-no{background:var(--no-soft);color:var(--no);border:2px solid transparent}
+.btn-yes.on{border-color:var(--yes)} .btn-no.on{border-color:var(--no)}
+.conf{display:flex;gap:8px;margin-top:12px}
+.conf button{flex:1;border:1px solid var(--line);background:transparent;color:var(--text);border-radius:10px;padding:8px 4px;font-size:13px;cursor:pointer;font-family:inherit}
+.conf button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+.conf small{display:block;color:inherit;opacity:.75;font-size:11px}
+.primary{width:100%;background:var(--brand);color:#fff;border:none;border-radius:12px;padding:14px;font-size:16px;font-weight:800;margin-top:14px;cursor:pointer;font-family:inherit}
+.primary:disabled{opacity:.4;cursor:default}
+.ghost{background:transparent;border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px 14px;font-size:14px;cursor:pointer;font-family:inherit}
+.vs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.vs > div{border-radius:12px;padding:12px;background:var(--bg)}
+.vs h4{margin:0 0 4px;font-size:13px;color:var(--sub)}
+.pick{font-size:18px;font-weight:800}
+.pick.yes{color:var(--yes)} .pick.no{color:var(--no)}
+.reason{font-size:13px;color:var(--sub);margin-top:6px}
+.result{margin-top:12px;padding:10px 12px;border-radius:10px;font-weight:700;font-size:14px}
+.result.win{background:var(--yes-soft);color:var(--yes)}
+.result.lose{background:var(--no-soft);color:var(--no)}
+.result.wait{background:var(--brand-soft);color:var(--brand)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;text-align:center}
+.stat b{display:block;font-size:24px}
+.stat span{font-size:12px;color:var(--sub)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:10px 6px;border-bottom:1px solid var(--line);text-align:left}
+th{font-size:12px;color:var(--sub);font-weight:600}
+td.num{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+.me-row td{color:var(--brand)}
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);display:flex;justify-content:center}
+nav .in{display:flex;max-width:560px;width:100%}
+nav button{flex:1;background:none;border:none;color:var(--sub);padding:10px 0 14px;font-size:11px;cursor:pointer;font-family:inherit}
+nav button i{display:block;font-style:normal;font-size:22px}
+nav button.on{color:var(--brand);font-weight:700}
+.share{white-space:pre-wrap;background:var(--bg);border-radius:10px;padding:12px;font-size:14px;margin-top:10px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.mini{border-top:1px solid var(--line);padding:12px 0}
+.mini:first-child{border-top:none;padding-top:0}
+.mini .t{font-weight:700;font-size:15px}
+.tag{font-size:12px;font-weight:700;border-radius:6px;padding:1px 8px;margin-left:4px}
+.tag.yes{background:var(--yes-soft);color:var(--yes)} .tag.no{background:var(--no-soft);color:var(--no)}
+.banner{background:#fff4d6;color:#7a4b00;border-radius:12px;padding:10px 14px;font-size:13px;margin-bottom:14px}
+@media (prefers-color-scheme: dark){.banner{background:#3a2c08;color:#fcd98a}}
+.modal{position:fixed;inset:0;background:rgba(10,12,30,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
+.modal .card{max-width:440px;width:100%;margin:0}
+.step-ill{font-size:56px;text-align:center;margin:6px 0}
+input[type=text]{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:16px;font-family:inherit}
+.note{font-size:12px;color:var(--sub);margin-top:8px}
+.toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;z-index:20}
+.dots{display:flex;gap:6px;justify-content:center;margin-top:10px}
+.dots span{width:8px;height:8px;border-radius:50%;background:var(--line)}
+.dots span.on{background:var(--brand)}
+.bar{height:10px;border-radius:999px;background:var(--line);overflow:hidden;margin-top:8px}
+.bar span{display:block;height:100%;background:var(--brand)}
+.badges{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.badge{border:1px solid var(--line);border-radius:12px;padding:10px 6px;text-align:center;opacity:.45}
+.badge.on{opacity:1;border-color:var(--brand);background:var(--brand-soft)}
+.badge .bi{font-size:26px}
+.badge b{display:block;font-size:12px}
+.badge small{display:block;font-size:10px;color:var(--sub);line-height:1.4}
+.ghost:disabled{opacity:.5}
+footer{font-size:12px;color:var(--sub);margin-top:24px;line-height:1.7}
+h2{font-size:17px;margin:18px 0 10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">🔮 ミライ<span>予想</span></div>
+    <div class="who" id="who"></div>
+  </header>
+  <div id="demoBanner"></div>
+  <main id="view"></main>
+  <footer>
+    ・参加は無料です。ポイントはゲームの中だけで使うもので、お金や商品とは交換できません。<br>
+    ・予想の記録はこの端末（ブラウザ）に保存されます。claude.ai で共有されたページでは、ランキングのためにニックネームと予想も共有され、別の端末でも引き継がれます。<br>
+    ・ニックネームには本名や連絡先を入れないでください。<br>
+    ・「AIミライくん」の予想：時事問題はClaudeが毎朝ニュースを調べて考えたもの、ボーナス問題はClaudeがその場で考えたものです（使えないときは、かんたんなルールで予想します）。「ミライくんに詳しく聞く」を使うと、見ている人のClaudeの利用枠を少し使います。<br>
+    ・みんなのランキングに送られるのは「ニックネーム」と「予想」だけです。<br>
+    ・時事問題の答え合わせは、Claude（AI）が毎朝ニュースや公式発表を調べて行い、根拠のリンクを表示します。<br>
+    ・天気・為替のボーナス問題の答え合わせは、公開されている気象データ（Open-Meteo）と為替データ（欧州中央銀行の基準レート／Frankfurter）を使って全自動で行います。<br>
+    <button class="ghost" style="margin-top:8px" onclick="toggleDemo()" id="demoBtn">結果発表をお試し（デモ）</button>
+    <button class="ghost" style="margin-top:8px" onclick="showHelp(0)">遊び方</button>
+  </footer>
+</div>
+<nav><div class="in" id="nav"></div></nav>
+<div id="overlay"></div>
+
+<script>
+// ミライ予想：問題データ
+// ルール：答え合わせは「公開データ」で全自動。自動で判定できない問題は出さない。
+//   wx  … Open-Meteo（無料の気象データ）
+//   fx  … 欧州中央銀行の基準レート（Frankfurter 経由・無料）
+
+// 判定に使う都市（緯度・経度）と、平年の最高気温のめやす（1〜12月）
+window.CITIES = {
+  tokyo:   { name: '東京',  lat: 35.6895, lon: 139.6917, avgMax: [10, 11, 14, 19, 23, 26, 30, 31, 27, 22, 17, 12] },
+  osaka:   { name: '大阪',  lat: 34.6937, lon: 135.5023, avgMax: [9, 10, 14, 20, 25, 28, 32, 33, 29, 23, 17, 12] },
+  sapporo: { name: '札幌',  lat: 43.0618, lon: 141.3545, avgMax: [-1, 0, 4, 11, 17, 21, 25, 26, 22, 16, 8, 2] },
+  fukuoka: { name: '福岡',  lat: 33.5902, lon: 130.4017, avgMax: [10, 12, 15, 20, 24, 27, 31, 32, 28, 23, 18, 13] },
+  naha:    { name: '那覇',  lat: 26.2124, lon: 127.6809, avgMax: [20, 20, 22, 24, 27, 30, 32, 32, 31, 28, 25, 22] },
+};
+
+// 年末スペシャル（すべて公開データで自動判定できる問題）
+// judge の書き方：
+//   { src:'wx', city, date, metric:'tmax', op:'>=' または '<', value }  … 最高気温
+//   { src:'wx', city, date, metric:'rain' }       … 雨（1mm以上）が降ったら「はい」
+//   { src:'wx', city, date, metric:'snow' }       … 雪（降雪量0.1cm以上）が降ったら「はい」
+//   { src:'wx', city, date, metric:'sunrise' }    … 朝6〜7時の雲の量が50%未満なら「はい」
+//   { src:'wxcount', city, from, to, metric:'rain', value } … 雨の日が value 日以上なら「はい」
+//   { src:'fx', date, vs:'prev' }                 … 前の営業日より円高なら「はい」
+//   { src:'fx', date, vs:'date', base }           … base の日より円安なら「はい」
+window.SPECIAL_QUESTIONS = [
+  {
+    id: 'sp-dec-rain',
+    cat: '天気', icon: '☔',
+    text: '12月の東京で、雨（1mm以上）が降る日は5日以上ある？',
+    deadline: '2026-11-30T23:59:00+09:00',
+    judge: { src: 'wxcount', city: 'tokyo', from: '2026-12-01', to: '2026-12-31', metric: 'rain', value: 5 },
+    ai: { pick: 'no', conf: 1, reason: '12月の東京で雨が降るのは、ふつう4〜5日ほど。ぎりぎり「いいえ」と見ています。' },
+  },
+  {
+    id: 'sp-yen-yearend',
+    cat: '為替', icon: '💴',
+    text: '12月30日の1ドルの値段は、12月1日より「円安」（数字が大きい）になっている？',
+    deadline: '2026-11-30T23:59:00+09:00',
+    judge: { src: 'fx', date: '2026-12-30', vs: 'date', base: '2026-12-01' },
+    ai: { pick: 'yes', conf: 1, reason: '1か月の為替の動きは読みにくいですが、少しだけ「円安」寄りに予想します。' },
+  },
+  {
+    id: 'sp-xmas-rain',
+    cat: '天気', icon: '🎄',
+    text: 'クリスマス（12月25日）、東京で雨（1mm以上）が降る？',
+    deadline: '2026-12-24T23:59:00+09:00',
+    judge: { src: 'wx', city: 'tokyo', date: '2026-12-25', metric: 'rain' },
+    ai: { pick: 'no', conf: 2, reason: '冬の東京は乾燥していて晴れの日が多いので、「いいえ」に自信あり。' },
+  },
+  {
+    id: 'sp-sapporo-mafuyubi',
+    cat: '天気', icon: '❄️',
+    text: '大晦日（12月31日）の札幌は「真冬日」（最高気温が0℃未満）になる？',
+    deadline: '2026-12-30T23:59:00+09:00',
+    judge: { src: 'wx', city: 'sapporo', date: '2026-12-31', metric: 'tmax', op: '<', value: 0 },
+    ai: { pick: 'yes', conf: 1, reason: '年末の札幌の最高気温は平年で0℃前後。少し寒い方に予想します。' },
+  },
+  {
+    id: 'sp-hatsuhinode',
+    cat: 'お正月', icon: '🌅',
+    text: '元日の朝（6〜7時）、東京の空の雲は半分より少ない？（初日の出が見えそう）',
+    deadline: '2026-12-31T23:59:00+09:00',
+    judge: { src: 'wx', city: 'tokyo', date: '2027-01-01', metric: 'sunrise' },
+    ai: { pick: 'yes', conf: 2, reason: '元日の東京は晴れることが多いので、初日の出は見えると予想します。' },
+  },
+  {
+    id: 'sp-naha-20',
+    cat: 'お正月', icon: '🌺',
+    text: '元日の那覇の最高気温は、20℃以上になる？',
+    deadline: '2026-12-31T23:59:00+09:00',
+    judge: { src: 'wx', city: 'naha', date: '2027-01-01', metric: 'tmax', op: '>=', value: 20 },
+    ai: { pick: 'yes', conf: 1, reason: '那覇の1月の最高気温は平年で20℃前後。暖かい方に予想します。' },
+  },
+  {
+    id: 'sp-snow-tokyo',
+    cat: 'お正月', icon: '⛄',
+    text: '元日、東京都心で雪が降る？（降雪量0.1cm以上）',
+    deadline: '2026-12-31T23:59:00+09:00',
+    judge: { src: 'wx', city: 'tokyo', date: '2027-01-01', metric: 'snow' },
+    ai: { pick: 'no', conf: 3, reason: '東京都心で元日に雪が降るのはとても珍しいです。「いいえ」に強い自信あり。' },
+  },
+];
+
+window.NEWS_INLINE = [{"id": "n-2026-taipei-mayor", "cat": "選挙", "icon": "🗳️", "text": "台湾の統一地方選挙（11月28日）で、台北市長に現職の市長が当選する？", "criteria": "台湾の中央選挙委員会、または大手報道（NHK・共同通信・ロイターなど）で、現職の台北市長の当選が確定すれば「はい」。現職が立候補しなかった場合は中止。", "deadline": "2026-11-27T23:59:00+09:00", "resolveBy": "2026-11-30T06:00:00+09:00", "featured": "2026-11-04", "createdAt": "2026-11-04T15:30:00+09:00", "ai": {"pick": "yes", "conf": 2, "reason": "台北市長選では、現職が2期目を目指すときに強い傾向があります。「はい」に自信あり。"}, "result": null, "sources": []}, {"id": "n-2026-ryukougo", "cat": "エンタメ", "icon": "💬", "text": "今年の「新語・流行語大賞」の年間大賞に、カタカナを含む言葉が選ばれる？", "criteria": "主催者（自由国民社）の発表で、年間大賞の言葉にカタカナが1文字でも含まれていれば「はい」。年間大賞が複数ある場合は、どれか1つに含まれていれば「はい」。", "deadline": "2026-11-29T23:59:00+09:00", "resolveBy": "2026-12-03T06:00:00+09:00", "featured": null, "createdAt": "2026-11-04T15:20:00+09:00", "ai": {"pick": "yes", "conf": 1, "reason": "流行語にはカタカナの言葉や略語が多いので、少しだけ「はい」寄りです。"}, "result": null, "sources": []}, {"id": "n-2026-kanji", "cat": "エンタメ", "icon": "🈁", "text": "2026年の「今年の漢字」は、画数が10画以上の漢字？", "criteria": "日本漢字能力検定協会の発表（12月中旬）で、選ばれた漢字の画数が10画以上なら「はい」。", "deadline": "2026-12-10T23:59:00+09:00", "resolveBy": "2026-12-15T06:00:00+09:00", "featured": null, "createdAt": "2026-11-04T15:10:00+09:00", "ai": {"pick": "no", "conf": 1, "reason": "「金」（8画）のように画数の少ない漢字が選ばれる年もあり、五分五分に近いですが、少しだけ「いいえ」寄りです。"}, "result": null, "sources": []}, {"id": "n-2026-boj-dec", "cat": "経済", "icon": "🏦", "text": "12月17〜18日の日銀の金融政策決定会合で、利上げ（政策金利の引き上げ）が決まる？", "criteria": "日本銀行の公表文で、政策金利（無担保コールレートの誘導目標）の引き上げが決まれば「はい」。据え置きや引き下げなら「いいえ」。", "deadline": "2026-12-16T23:59:00+09:00", "resolveBy": "2026-12-19T06:00:00+09:00", "featured": null, "createdAt": "2026-11-04T15:00:00+09:00", "ai": {"pick": "yes", "conf": 1, "reason": "証券会社の予想では、12月の利上げをメインの見通しにしているところがあります。ただし五分五分に近いです。"}, "result": null, "sources": []}, {"id": "n-2026-m1-first", "cat": "お笑い", "icon": "🎤", "text": "M-1グランプリ2026で優勝するのは、「今年初めて決勝に出たコンビ」？", "criteria": "公式発表の優勝者が、過去の大会で一度も決勝（最終決戦を含む）に出たことがないコンビなら「はい」。敗者復活戦から勝ち上がった場合も、決勝初出場なら「はい」。", "deadline": "2026-12-12T23:59:00+09:00", "resolveBy": "2026-12-31T06:00:00+09:00", "featured": null, "createdAt": "2026-11-04T14:50:00+09:00", "ai": {"pick": "no", "conf": 1, "reason": "決勝の経験があるコンビは本番に強い傾向があるので、少しだけ「いいえ」寄りです。"}, "result": null, "sources": []}, {"id": "n-2026-arima", "cat": "スポーツ", "icon": "🐎", "text": "今年の有馬記念で、1番人気の馬が1着になる？", "criteria": "JRAの公式結果で、単勝の最終オッズが1番人気の馬が1着なら「はい」。レースが中止になった場合は中止。", "deadline": "2026-12-26T23:59:00+09:00", "resolveBy": "2026-12-29T06:00:00+09:00", "featured": null, "createdAt": "2026-11-04T14:40:00+09:00", "ai": {"pick": "no", "conf": 2, "reason": "有馬記念は1番人気が負けることも多いレースです。「いいえ」に自信あり。"}, "result": null, "sources": []}, {"id": "n-2026-kohaku", "cat": "エンタメ", "icon": "📺", "text": "紅白歌合戦（第2部）の関東地区の世帯視聴率は、35%以上になる？", "criteria": "ビデオリサーチの発表（大手報道で確認）で、第2部の関東地区・世帯視聴率が35.0%以上なら「はい」。", "deadline": "2026-12-30T23:59:00+09:00", "resolveBy": "2027-01-06T06:00:00+09:00", "featured": null, "createdAt": "2026-11-04T14:30:00+09:00", "ai": {"pick": "no", "conf": 2, "reason": "ここ数年は30%台前半が続いているので、35%は高いハードルだと考えます。"}, "result": null, "sources": []}, {"id": "n-2027-hakone", "cat": "スポーツ", "icon": "🏃", "text": "箱根駅伝（1月2〜3日）で、往路優勝した大学が総合優勝もする？", "criteria": "関東学生陸上競技連盟の公式結果で、往路1位の大学が総合1位なら「はい」。", "deadline": "2027-01-01T23:59:00+09:00", "resolveBy": "2027-01-04T06:00:00+09:00", "featured": null, "createdAt": "2026-11-04T14:20:00+09:00", "ai": {"pick": "yes", "conf": 2, "reason": "往路を制した大学は、そのまま総合優勝することが多いです。"}, "result": null, "sources": []}];
+</script>
+<script>
+// ===== 基本設定 =====
+const KEY = 'mirai-yosou-v1';
+const POINTS_WIN = [10, 20, 30];   // 自信度ごとの「当たり」の点
+const POINTS_LOSE = [0, -10, -20]; // 自信度ごとの「はずれ」の点
+const CONF_LABEL = ['ふつう', '自信あり', '絶対！'];
+const AI_NAME = 'AIミライくん';
+const TABS = [
+  { id: 'today', icon: '📅', label: '今日の1問' },
+  { id: 'special', icon: '🗞️', label: '時事' },
+  { id: 'battle', icon: '⚔️', label: '友達と対戦' },
+  { id: 'record', icon: '🏆', label: '成績' },
+];
+
+// ===== 保存（この端末の中だけ） =====
+function load() {
+  try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; }
+}
+let state = Object.assign({ name: '', picks: {}, friends: {}, results: {}, aiPicks: {}, badges: {}, maxStreak: 0, demo: false, helped: false }, load());
+function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} }
+
+// ===== 日付（日本時間） =====
+function jst(d = new Date()) { return new Date(d.getTime() + 9 * 3600e3); }
+function ymd(d) { return d.toISOString().slice(0, 10); }
+function todayStr() { return ymd(jst()); }
+function addDays(str, n) { const d = new Date(str + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return ymd(d); }
+function md(str) { const [, m, d] = str.split('-'); return `${+m}月${+d}日`; }
+function wd(str) { return '日月火水木金土'[new Date(str + 'T00:00:00Z').getUTCDay()]; }
+function hash(s) { let h = 7; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+// ===== 毎日の1問（自動で作る・答え合わせも全自動） =====
+// 出題日 D の問題は「翌日 D+1 のこと」を聞き、締め切りは D の23:59
+const CITY_ORDER = ['tokyo', 'osaka', 'sapporo', 'fukuoka', 'naha'];
+function dailyQuestion(dateStr) {
+  const target = addDays(dateStr, 1);
+  const dow = new Date(target + 'T00:00:00Z').getUTCDay();
+  const weekend = dow === 0 || dow === 6;          // 土日は為替の発表がないので天気だけ
+  const n = Math.floor(new Date(dateStr + 'T00:00:00Z').getTime() / 864e5);
+  const type = weekend ? ['tmax', 'rain'][n % 2] : ['tmax', 'fx', 'rain'][n % 3];
+  const cityKey = CITY_ORDER[n % CITY_ORDER.length];
+  const city = window.CITIES[cityKey];
+  const h = hash(dateStr);
+  const base = { id: 'd-' + dateStr, date: dateStr, deadline: dateStr + 'T23:59:00+09:00' };
+  const when = `明日（${md(target)}・${wd(target)}）`;
+  if (type === 'fx') { const pick = h % 2 ? 'yes' : 'no'; return { ...base, cat: '為替', icon: '💱',
+    text: `${when}の1ドルの値段は、前の営業日より「円高」（数字が小さい）になる？`,
+    judge: { src: 'fx', date: target, vs: 'prev' },
+    ai: { pick, conf: 1, reason: '為替の1日の動きはほぼ五分五分。今回は直感で決めました。' } }; }
+  if (type === 'rain') return { ...base, cat: '天気', icon: '☔',
+    text: `${when}の${city.name}で、雨（1mm以上）が降る？`,
+    judge: { src: 'wx', city: cityKey, date: target, metric: 'rain' },
+    ai: { pick: 'no', conf: 1, reason: `${city.name}では雨の降らない日のほうが多いので、「いいえ」と予想します。` } };
+  const t = city.avgMax[+target.slice(5, 7) - 1];
+  const pick = h % 3 === 0 ? 'no' : 'yes';
+  return { ...base, cat: '天気', icon: '🌡️',
+    text: `${when}の${city.name}の最高気温は、${t}℃以上になる？`,
+    judge: { src: 'wx', city: cityKey, date: target, metric: 'tmax', op: '>=', value: t },
+    ai: { pick, conf: 1, reason: `${t}℃はこの時期の平年並みの気温。最近の傾向から「${pick === 'yes' ? 'はい' : 'いいえ'}」と見ています。` } };
+}
+function recentDaily(days = 7) {
+  const out = []; const t = todayStr();
+  for (let i = 0; i < days; i++) out.push(dailyQuestion(addDays(t, -i)));
+  return out;
+}
+// 時事問題（questions.json。毎朝Claudeがニュースを調べて、出題と答え合わせを自動で更新）
+window.NEWS = [];
+async function loadNews() {
+  try {
+    const r = await fetch('questions.json', { cache: 'no-store' });
+    if (!r.ok) throw new Error();
+    const j = await r.json();
+    window.NEWS = (j.questions || []).map(q => ({ ...q, kind: 'news' }));
+  } catch { window.NEWS = (window.NEWS_INLINE || []).map(q => ({ ...q, kind: 'news' })); }
+  render();
+}
+function allQuestions() { return [...window.NEWS, ...recentDaily(14), ...window.SPECIAL_QUESTIONS]; }
+function qById(id) { return allQuestions().find(q => q.id === id); }
+function isOpen(q) { return Date.now() < new Date(q.deadline).getTime(); }
+
+// ===== 自動の答え合わせ =====
+// データが出そろう時刻（日本時間）：天気は対象日の翌日3時、為替は翌日6時
+function lastDate(j) { return j.src === 'wxcount' ? j.to : j.date; }
+function readyAt(q) {
+  if (q.kind === 'news') return new Date(q.resolveBy).getTime();
+  const j = q.judge;
+  return new Date(addDays(lastDate(j), 1) + (j.src === 'fx' ? 'T06:00:00+09:00' : 'T03:00:00+09:00')).getTime();
+}
+function judgeSource(q) {
+  if (q.kind === 'news') return 'ニュース・公式発表をもとにClaudeが判定';
+  return q.judge.src === 'fx' ? '欧州中央銀行の基準レート（Frankfurter）で自動判定' : '気象データ（Open-Meteo）で自動判定';
+}
+const resolving = { busy: false, failed: false };
+
+async function getJSON(url) {
+  const r = await fetch(url); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json();
+}
+// 都市ごとの天気データ（日付 → {tmax, rain, snow, cloud6, cloud7}）
+async function fetchWeather(cityKey, minDate) {
+  const c = window.CITIES[cityKey];
+  const out = {};
+  const put = (j) => {
+    const d = j.daily || {};
+    (d.time || []).forEach((t, i) => { out[t] = { ...(out[t] || {}), tmax: d.temperature_2m_max?.[i], rain: d.precipitation_sum?.[i], snow: d.snowfall_sum?.[i] }; });
+    const h = j.hourly || {};
+    (h.time || []).forEach((t, i) => {
+      const day = t.slice(0, 10), hr = t.slice(11, 13);
+      if (hr === '06' || hr === '07') out[day] = { ...(out[day] || {}), ['cloud' + (+hr)]: h.cloud_cover?.[i] };
+    });
+  };
+  const q = `latitude=${c.lat}&longitude=${c.lon}&daily=temperature_2m_max,precipitation_sum,snowfall_sum&hourly=cloud_cover&timezone=Asia%2FTokyo`;
+  const old = addDays(todayStr(), -85);
+  if (minDate < old) put(await getJSON(`https://archive-api.open-meteo.com/v1/archive?${q}&start_date=${minDate}&end_date=${addDays(todayStr(), -7)}`));
+  const recent = await getJSON(`https://api.open-meteo.com/v1/forecast?${q}&past_days=92&forecast_days=1`);
+  const keep = { ...out }; put(recent);
+  for (const k in keep) if (keep[k].tmax != null) out[k] = keep[k]; // 確定済みの過去データを優先
+  return out;
+}
+// ドル円（日付 → 1ドルの円）
+async function fetchFx(minDate, maxDate) {
+  const j = await getJSON(`https://api.frankfurter.app/${addDays(minDate, -10)}..${maxDate}?from=USD&to=JPY`);
+  const out = {}; for (const [d, v] of Object.entries(j.rates || {})) out[d] = v.JPY; return out;
+}
+function rateOnOrBefore(fx, date) { const ds = Object.keys(fx).filter(d => d <= date).sort(); return ds.length ? fx[ds[ds.length - 1]] : null; }
+
+// 1問の判定。'yes' / 'no' / 'void'（データがなく中止） / null（まだ分からない）
+function decide(q, wx, fx) {
+  const j = q.judge, late = Date.now() > readyAt(q) + 3 * 864e5; // 3日待ってもデータがなければ中止
+  if (j.src === 'fx') {
+    if (!fx) return null;
+    if (j.vs === 'prev') {
+      if (fx[j.date] == null) return late ? 'void' : null;
+      const prev = Object.keys(fx).filter(d => d < j.date).sort().pop();
+      if (!prev) return null;
+      return fx[j.date] < fx[prev] ? 'yes' : fx[j.date] > fx[prev] ? 'no' : 'void';
+    }
+    const a = rateOnOrBefore(fx, j.base), b = rateOnOrBefore(fx, j.date);
+    if (a == null || b == null) return late ? 'void' : null;
+    return b > a ? 'yes' : 'no';
+  }
+  const w = wx[j.city]; if (!w) return null;
+  if (j.src === 'wxcount') {
+    let days = 0;
+    for (let d = j.from; d <= j.to; d = addDays(d, 1)) {
+      const v = w[d]?.rain; if (v == null) return late ? 'void' : null; if (v >= 1) days++;
+    }
+    return days >= j.value ? 'yes' : 'no';
+  }
+  const v = w[j.date]; const miss = () => late ? 'void' : null;
+  if (!v) return miss();
+  if (j.metric === 'tmax') { if (v.tmax == null) return miss(); return (j.op === '<' ? v.tmax < j.value : v.tmax >= j.value) ? 'yes' : 'no'; }
+  if (j.metric === 'rain') { if (v.rain == null) return miss(); return v.rain >= 1 ? 'yes' : 'no'; }
+  if (j.metric === 'snow') { if (v.snow == null) return miss(); return v.snow >= 0.1 ? 'yes' : 'no'; }
+  if (j.metric === 'sunrise') { if (v.cloud6 == null || v.cloud7 == null) return miss(); return (v.cloud6 + v.cloud7) / 2 < 50 ? 'yes' : 'no'; }
+  return null;
+}
+async function resolveAll() {
+  if (resolving.busy) return;
+  const need = allQuestions().filter(q => q.judge && !state.results[q.id] && Date.now() >= readyAt(q));
+  if (!need.length) return;
+  resolving.busy = true; resolving.failed = false;
+  try {
+    const wx = {}; let fx = null;
+    const wxNeed = {};
+    for (const q of need) if (q.judge.src !== 'fx') {
+      const from = q.judge.src === 'wxcount' ? q.judge.from : q.judge.date;
+      wxNeed[q.judge.city] = wxNeed[q.judge.city] && wxNeed[q.judge.city] < from ? wxNeed[q.judge.city] : from;
+    }
+    const fxQs = need.filter(q => q.judge.src === 'fx');
+    const jobs = Object.entries(wxNeed).map(([c, from]) => fetchWeather(c, from).then(d => { wx[c] = d; }));
+    if (fxQs.length) {
+      const dates = fxQs.flatMap(q => [q.judge.date, q.judge.base].filter(Boolean)).sort();
+      jobs.push(fetchFx(dates[0], dates[dates.length - 1]).then(d => { fx = d; }));
+    }
+    const settled = await Promise.allSettled(jobs);
+    if (settled.some(s => s.status === 'rejected')) resolving.failed = true;
+    for (const q of need) { const r = decide(q, wx, fx); if (r) state.results[q.id] = r; }
+    save();
+  } catch { resolving.failed = true; }
+  resolving.busy = false;
+  render();
+}
+
+// ===== AIミライくんの予想 =====
+// 時事問題：毎朝Claudeがニュースを調べて考えた予想（questions.json）
+// ボーナス問題：Claudeがその場で考えた予想（使えないときは、かんたんなルールの予想）
+function aiOf(q) { return (state.aiPicks && state.aiPicks[q.id]) || q.ai; }
+function aiLabel(q) {
+  if (q.kind === 'news') return 'Claudeがニュースを調べて予想';
+  return state.aiPicks[q.id] ? 'Claudeがその場で考えて予想' : 'かんたんなルールで予想';
+}
+
+// ===== 結果と採点 =====
+function resultOf(q) {
+  if (q.kind === 'news' && q.result) return q.result;
+  if (state.results[q.id]) return state.results[q.id];
+  if (state.demo) return hash(q.id + 'demo') % 2 ? 'yes' : 'no'; // デモ用の仮の結果（保存しない）
+  return null;
+}
+function pointsFor(p, res) {
+  if (!p || !res) return null;
+  if (res === 'void') return 0;
+  return p.pick === res ? POINTS_WIN[p.conf - 1] : POINTS_LOSE[p.conf - 1];
+}
+function tally(picksOf) { // picksOf(q) => {pick, conf} | undefined
+  let pts = 0, hit = 0, done = 0, answered = 0;
+  for (const q of allQuestions()) {
+    const p = picksOf(q); if (!p) continue; answered++;
+    const res = resultOf(q); if (!res || res === 'void') continue;
+    done++; pts += pointsFor(p, res); if (p.pick === res) hit++;
+  }
+  return { pts, hit, done, answered };
+}
+function streak() { // 1問でも予想した日が何日続いているか
+  const days = new Set(Object.values(state.picks).map(p => ymd(jst(new Date(p.at || 0)))));
+  let s = 0; let d = todayStr();
+  if (!days.has(d)) d = addDays(d, -1); // 今日まだ答えていなくても、昨日までの連続は数える
+  while (days.has(d)) { s++; d = addDays(d, -1); }
+  if (s > (state.maxStreak || 0)) { state.maxStreak = s; save(); }
+  return s;
+}
+
+// ===== 画面の部品 =====
+const pickWord = p => p === 'yes' ? 'はい' : 'いいえ';
+function fmtTime(ms) { return new Date(ms).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
+function pendingText(q) {
+  const t = readyAt(q);
+  if (q.kind === 'news') return Date.now() < t
+    ? `⏳ 結果は ${fmtTime(t)} ごろまでに、ニュースをもとに判定されます`
+    : '⏳ 判定の準備中です（毎朝、自動で確認しています）';
+  if (Date.now() < t) return `⏳ 結果は ${fmtTime(t)} ごろに自動で判定されます`;
+  if (resolving.busy) return '🔄 データを確認しています…';
+  if (resolving.failed) return '📡 データを取得できませんでした。次に開いたときに自動で再確認します';
+  return '⏳ データの発表を待っています（自動で再確認します）';
+}
+function draft() { return window.__draft || (window.__draft = {}); }
+
+function questionCard(q, big) {
+  const mine = state.picks[q.id];
+  const res = resultOf(q);
+  const open = isOpen(q);
+  const dl = new Date(q.deadline);
+  const dlText = `締め切り ${dl.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
+  let body = '';
+  if (!mine && open) {
+    const d = draft()[q.id] || {};
+    body = `
+      <div class="btns">
+        <button class="btn btn-yes ${d.pick === 'yes' ? 'on' : ''}" onclick="setDraft('${q.id}','pick','yes')">⭕ はい</button>
+        <button class="btn btn-no ${d.pick === 'no' ? 'on' : ''}" onclick="setDraft('${q.id}','pick','no')">❌ いいえ</button>
+      </div>
+      <div class="conf">${CONF_LABEL.map((l, i) => `
+        <button class="${d.conf === i + 1 ? 'on' : ''}" onclick="setDraft('${q.id}','conf',${i + 1})">${l}<small>当たり +${POINTS_WIN[i]} / はずれ ${POINTS_LOSE[i]}</small></button>`).join('')}
+      </div>
+      <button class="primary" ${d.pick && d.conf ? '' : 'disabled'} onclick="submitPick('${q.id}')">この予想で決定</button>
+      <div class="note">決定すると、AIミライくんの予想が見られます。</div>`;
+  } else if (!mine && !open) {
+    body = `<div class="result wait">締め切りを過ぎました（予想していません）</div>`;
+  } else {
+    let r;
+    if (!res) r = `<div class="result wait">${pendingText(q)}</div>`;
+    else if (res === 'void') r = `<div class="result wait">⚪ ${q.kind === 'news' ? '判定できなかったため' : 'データがそろわなかったため'}、この問題は中止（0点）になりました</div>`;
+    else {
+      const me = pointsFor(mine, res), ai = pointsFor(aiOf(q), res);
+      const verdict = me > ai ? '🎉 AIに勝ち！' : me < ai ? '😢 AIに負け…' : '🤝 引き分け';
+      r = `<div class="result ${mine.pick === res ? 'win' : 'lose'}">結果：${pickWord(res)} ／ あなた ${me > 0 ? '+' : ''}${me}点・AI ${ai > 0 ? '+' : ''}${ai}点　${verdict}</div>`;
+    }
+    body = `
+      <div class="vs">
+        <div><h4>あなた</h4><div class="pick ${mine.pick}">${pickWord(mine.pick)}</div><div class="meta">${CONF_LABEL[mine.conf - 1]}</div></div>
+        ${aiThinking[q.id] ? `<div><h4>🤖 ${AI_NAME}</h4><div class="pick">🤔</div><div class="meta">考え中…</div></div>` :
+        `<div><h4>🤖 ${AI_NAME}</h4><div class="pick ${aiOf(q).pick}">${pickWord(aiOf(q).pick)}</div><div class="meta">${CONF_LABEL[aiOf(q).conf - 1]}</div></div>`}
+      </div>
+      ${aiThinking[q.id] ? '' : `<div class="reason">🤖「${esc(aiOf(q).reason)}」<br><small>（${aiLabel(q)}）</small></div>`}${r}`;
+  }
+  if (ai.sample) body += askBox(q);
+  if (q.kind === 'news') {
+    body += `<div class="note">📏 判定のルール：${esc(q.criteria)}</div>`;
+    if (res && !state.demo && q.note) body += `<div class="note">📝 ${esc(q.note)}</div>`;
+    if (res && !state.demo && (q.sources || []).length) body += `<div class="note">🔗 根拠：${q.sources.map(x =>
+      /^https?:\/\//.test(x.url) ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title || x.url)}</a>` : '').join('　')}</div>`;
+  }
+  return `<div class="card">
+    <span class="label">${q.icon} ${q.cat}</span>
+    <div class="q" style="${big ? '' : 'font-size:17px'}">${esc(q.text)}</div>
+    <div class="meta">${open ? dlText : '締め切り済み'}　・　${judgeSource(q)}</div>
+    ${body}
+  </div>`;
+}
+
+// ===== 各タブ =====
+function featuredNews() {
+  const t = todayStr();
+  return window.NEWS.find(q => q.featured === t && isOpen(q))
+    || window.NEWS.filter(isOpen).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
+}
+function viewToday() {
+  const [daily, ...past] = recentDaily(7);
+  const news = featuredNews();
+  const q = news || daily;
+  const s = streak();
+  let html = `<div class="stats">
+    <div class="stat"><b>🔥${s}</b><span>連続予想（日）</span></div>
+    <div class="stat"><b>${tally(x => state.picks[x.id]).pts}</b><span>あなたの点数</span></div>
+    <div class="stat"><b>${tally(x => state.picks[x.id] ? aiOf(x) : undefined).pts}</b><span>AIの点数</span></div>
+  </div>`;
+  html += `<h2>📅 今日の1問</h2>` + questionCard(q, true);
+  if (state.picks[q.id]) html += shareCard();
+  const openNews = window.NEWS.filter(x => x !== q && isOpen(x) && !state.picks[x.id]).length;
+  if (openNews) html += `<div class="card" style="cursor:pointer" onclick="go('special')"><b>🗞️ ほかにも受付中の時事問題が ${openNews} 問あります</b><div class="note">「時事・イベント」タブで予想しよう →</div></div>`;
+  if (news) html += `<h2>🎁 ボーナス問題（天気・為替）</h2><div class="note" style="margin:-4px 0 10px">公開データで自動で答え合わせする、毎日のミニ問題です。</div>` + questionCard(daily);
+  const answered = past.filter(x => state.picks[x.id]);
+  if (answered.length) html += `<h2>これまでのボーナス問題</h2>` + answered.map(x => questionCard(x)).join('');
+  return html;
+}
+function viewSpecial() {
+  const open = window.NEWS.filter(isOpen).sort((a, b) => a.deadline.localeCompare(b.deadline));
+  const closed = window.NEWS.filter(q => !isOpen(q)).sort((a, b) => b.deadline.localeCompare(a.deadline));
+  let html = `<h2>🗞️ 時事・イベント</h2>
+    <div class="note" style="margin:-4px 0 12px">選挙・経済・スポーツ・エンタメなど、みんなが気になる出来事を予想しよう。問題は毎朝追加され、答え合わせはClaudeがニュースや公式発表を調べて自動で行います。</div>`;
+  html += open.length ? open.map(q => questionCard(q)).join('') : '<div class="card note">いま受付中の問題はありません。明日の朝をお楽しみに！</div>';
+  if (closed.length) html += `<h2>締め切った問題</h2>` + closed.map(q => questionCard(q)).join('');
+  html += `<h2>🎍 年末の天気スペシャル</h2>` + window.SPECIAL_QUESTIONS.map(q => questionCard(q)).join('');
+  return html;
+}
+function viewBattle() {
+  const link = inviteLink();
+  const rows = [
+    { name: state.name + '（あなた）', me: true, ...tally(x => state.picks[x.id]) },
+    { name: '🤖 ' + AI_NAME, ...tally(x => state.picks[x.id] ? aiOf(x) : undefined) },
+    ...onlineRows(),
+    ...Object.entries(state.friends).map(([n, f]) => ({ name: '🔗 ' + n, ...tally(x => decodePick(f.p[x.id])) })),
+  ].sort((a, b) => b.pts - a.pts);
+  const others = rows.length - 2;
+  let status;
+  if (online.db) status = online.loading ? '🔄 みんなのランキングを読み込み中…'
+    : online.failed ? '📡 ランキングにつながりません。しばらくしてから開き直してください。'
+    : online.readOnly ? '👀 見るだけの権限なので、あなたの予想はランキングに送られていません。ページの持ち主に「投稿者（Contributor）」以上の権限をもらうと参加できます。'
+    : `🌐 自動で共有中：このページを開いている人の予想が、リアルタイムでランキングに反映されます（参加者 ${Object.keys(online.players).length}人）。`;
+  else status = '自動で共有されるランキングは、claude.ai で共有されたページで使えます。ここでは、下の招待リンクで友達と対戦できます。';
+  let html = `<h2>⚔️ 友達と対戦</h2>
+  <div class="card">
+    <div style="font-weight:700">🏆 ランキング</div>
+    <div class="note" style="margin-bottom:6px">${status}</div>
+    <table><tr><th>順位</th><th>名前</th><th style="text-align:right">的中</th><th style="text-align:right">点数</th></tr>
+    ${rows.map((r, i) => `<tr class="${r.me ? 'me-row' : ''}"><td>${i + 1}</td><td>${esc(r.name)}</td><td class="num">${r.hit}/${r.done}</td><td class="num">${r.pts}</td></tr>`).join('')}
+    </table>
+    ${others ? '' : '<div class="note">まだ対戦相手がいません。ページを友達と共有するか、下の招待リンクを送ってみよう！</div>'}
+    <div class="note">🌐＝自動共有で参加している人　🔗＝招待リンクで参加した人</div>
+  </div>
+  <div class="card">
+    <div class="t" style="font-weight:700">🔗 招待リンクで対戦する</div>
+    <div class="note">リンクには「ニックネーム」と「あなたの予想」だけが入ります。友達が開くと、あなたとの対戦が始まります。</div>
+    <div class="row">
+      <a class="ghost" style="text-decoration:none" href="https://line.me/R/msg/text/?${encodeURIComponent('ミライ予想で勝負しよう！\n' + link)}" target="_blank" rel="noopener">LINEで送る</a>
+      <button class="ghost" onclick="shareInvite()">リンクをコピー・共有</button>
+    </div>
+    <div class="note">※予想を追加したら、もう一度リンクを送り合うと最新の予想で比べられます。</div>
+  </div>
+`;
+  for (const [n, f] of Object.entries(state.friends)) {
+    const common = allQuestions().filter(q => f.p[q.id] || state.picks[q.id]);
+    if (!common.length) continue;
+    html += `<div class="card"><div style="font-weight:700">あなた vs ${esc(n)}</div>` + common.map(q => {
+      const a = state.picks[q.id], b = decodePick(f.p[q.id]), res = resultOf(q);
+      const show = p => p ? `<span class="tag ${p.pick}">${pickWord(p.pick)}</span>` : '<span class="meta">未回答</span>';
+      return `<div class="mini"><div class="t">${q.icon} ${esc(q.text)}</div>
+        <div class="meta">あなた ${show(a)}　${esc(n)} ${show(b)}　${res === 'void' ? '中止' : res ? '結果：' + pickWord(res) : '⏳結果待ち'}</div></div>`;
+    }).join('') + `<div class="row"><button class="ghost" onclick="removeFriend('${encodeURIComponent(n)}')">この友達を削除</button></div></div>`;
+  }
+  return html;
+}
+function viewRecord() {
+  const me = tally(x => state.picks[x.id]), ai = tally(x => state.picks[x.id] ? aiOf(x) : undefined);
+  const rate = me.done ? Math.round(me.hit / me.done * 100) : 0;
+  const { cur, next } = titleOf(me.pts);
+  const pct = next ? Math.max(0, Math.min(100, Math.round((me.pts - cur[0]) / (next[0] - cur[0]) * 100))) : 100;
+  const st = myStats();
+  const got = BADGES.filter(b => state.badges[b.id] || (state.demo && b.ok(st)));
+  return `<h2>🏆 あなたの成績</h2>
+  <div class="stats">
+    <div class="stat"><b>${rate}%</b><span>的中率</span></div>
+    <div class="stat"><b>${me.answered}</b><span>予想した数</span></div>
+    <div class="stat"><b>🔥${streak()}</b><span>連続日数</span></div>
+  </div>
+  <div class="card">
+    <div class="meta">あなたの称号</div><div class="q">${cur[1]}</div>
+    <div class="bar"><span style="width:${pct}%"></span></div>
+    <div class="note">${next ? `次の称号「${next[1]}」まで あと ${next[0] - me.pts} 点` : '最高の称号です！おめでとう！'}</div>
+  </div>
+  <div class="card">
+    <div style="font-weight:700">🏅 バッジ（${got.length} / ${BADGES.length}）</div>
+    <div class="badges">${BADGES.map(b => { const on = got.includes(b); return `<div class="badge ${on ? 'on' : ''}"><div class="bi">${on ? b.icon : '🔒'}</div><b>${b.name}</b><small>${b.desc}</small></div>`; }).join('')}</div>
+  </div>
+  <div class="card">
+    <div style="font-weight:700">AIミライくんとの勝負</div>
+    <table><tr><th></th><th style="text-align:right">的中</th><th style="text-align:right">点数</th></tr>
+      <tr class="me-row"><td>あなた</td><td class="num">${me.hit}/${me.done}</td><td class="num">${me.pts}</td></tr>
+      <tr><td>🤖 ${AI_NAME}</td><td class="num">${ai.hit}/${ai.done}</td><td class="num">${ai.pts}</td></tr>
+    </table>
+    <div class="note">${me.done === 0 ? '結果が出ると、ここで勝ち負けが分かります。' : me.pts > ai.pts ? 'あなたがリードしています！' : me.pts < ai.pts ? 'AIがリード中。巻き返そう！' : '互角の勝負です。'}</div>
+  </div>
+  <div class="card">
+    <div style="font-weight:700">ニックネーム</div>
+    <div class="row"><input type="text" id="rename" maxlength="12" value="${esc(state.name)}"><button class="ghost" onclick="rename()">変更</button></div>
+    <div class="note">本名や連絡先は入れないでください。</div>
+  </div>`;
+}
+
+// ===== シェア用の絵文字 =====
+function shareText() {
+  const qs = allQuestions().filter(q => state.picks[q.id]).sort((a, b) => state.picks[a.id].at - state.picks[b.id].at).slice(-7);
+  const mark = (p, q) => { const res = resultOf(q); if (!p) return '⬜'; if (!res) return '⏳'; if (res === 'void') return '⚪'; return p.pick === res ? '🟢' : '🔴'; };
+  const me = qs.map(q => mark(state.picks[q.id], q)).join('');
+  const ai = qs.map(q => mark(aiOf(q), q)).join('');
+  return `🔮ミライ予想 ${md(todayStr())}\nわたし ${me}\nAI　　 ${ai}\n🔥連続${streak()}日\n#ミライ予想`;
+}
+function shareCard() {
+  return `<div class="card"><div style="font-weight:700">結果をシェアしよう</div>
+    <div class="share">${esc(shareText())}</div>
+    <div class="row"><button class="ghost" onclick="shareResult()">コピー・共有する</button>
+    <a class="ghost" style="text-decoration:none" target="_blank" rel="noopener" href="https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText() + '\n' + baseUrl())}">Xに投稿</a></div></div>`;
+}
+
+// ===== 招待リンク（予想を URL に入れて渡す） =====
+function baseUrl() { return location.origin + location.pathname; }
+function b64(s) { return btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function unb64(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); return new TextDecoder().decode(Uint8Array.from(atob(s), c => c.charCodeAt(0))); }
+function encodePick(p) { return (p.pick === 'yes' ? 'y' : 'n') + p.conf; }
+function decodePick(s) { if (!s || !/^[yn][123]$/.test(s)) return undefined; return { pick: s[0] === 'y' ? 'yes' : 'no', conf: +s[1] }; }
+function inviteLink() {
+  const p = {}; for (const [id, v] of Object.entries(state.picks)) p[id] = encodePick(v);
+  return baseUrl() + '#vs=' + b64(JSON.stringify({ n: state.name, p }));
+}
+function readInvite() {
+  const m = location.hash.match(/vs=([\w-]+)/); if (!m) return;
+  try {
+    const d = JSON.parse(unb64(m[1]));
+    const n = String(d.n || '').slice(0, 12).trim();
+    if (n && typeof d.p === 'object') {
+      const name = n === state.name ? n + '（友達）' : n;
+      state.friends[name] = { p: d.p, at: Date.now() }; save();
+      toast(`${n}さんとの対戦が始まりました！`);
+      current = 'battle';
+    }
+  } catch { toast('招待リンクを読み込めませんでした'); }
+  history.replaceState(null, '', baseUrl());
+}
+
+// ===== 操作 =====
+let current = 'today';
+function setDraft(id, k, v) { draft()[id] = { ...(draft()[id] || {}), [k]: v }; render(); }
+function submitPick(id) {
+  const d = draft()[id]; const q = qById(id);
+  if (!d || !d.pick || !d.conf || !q || !isOpen(q)) return;
+  state.picks[id] = { pick: d.pick, conf: d.conf, at: Date.now() }; save();
+    pushMine();
+  if (q.kind !== 'news' && ai.sample) thinkAI(q, d.pick); else toast(d.pick === aiOf(q).pick ? 'AIと同じ予想です' : 'AIと反対の予想！勝負です');
+  render();
+}
+async function copyOrShare(text) {
+  if (navigator.share) { try { await navigator.share({ text }); return; } catch {} }
+  try { await navigator.clipboard.writeText(text); toast('コピーしました'); } catch { prompt('このテキストをコピーしてください', text); }
+}
+function shareResult() { copyOrShare(shareText() + '\n' + baseUrl()); }
+function shareInvite() { copyOrShare('ミライ予想で勝負しよう！\n' + inviteLink()); }
+function removeFriend(n) { delete state.friends[decodeURIComponent(n)]; save(); render(); }
+function rename() {
+  const v = document.getElementById('rename').value.trim().slice(0, 12);
+  if (!v) return; state.name = v; save(); pushMine(); toast('変更しました'); render();
+}
+function toggleDemo() { state.demo = !state.demo; save(); toast(state.demo ? 'デモの結果を表示中' : 'デモを終了しました'); render(); }
+function toast(msg) {
+  const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg;
+  document.body.appendChild(el); setTimeout(() => el.remove(), 2200);
+}
+
+// ===== 本物のAI（Claude）を呼ぶ =====
+// 公開ページ（claude.ai）で開いたときだけ使える。使うと、見ている人のClaude利用枠を少し使う
+const ai = { sample: null };
+const aiThinking = {};
+const askState = {}; // 問題ID → { text, busy, err }
+async function initAI() {
+  try { if (window.claude && window.claude.use) ai.sample = await window.claude.use('sample'); } catch { ai.sample = null; }
+  render();
+}
+function aiErrorText(e) {
+  const c = e && e.code;
+  if (c === 'not_granted' || c === 'sampling_disabled' || c === 'not_declared' || c === 'capability_disabled' || c === 'capability_removed') { ai.sample = null; return null; }
+  if (c === 'rate_limited') return '少し混み合っています。時間をおいてもう一度試してね。';
+  if (c === 'session_expired') return 'もう一度ログインしてから試してね。';
+  return 'うまく答えられませんでした。もう一度試してね。';
+}
+async function thinkAI(q, myPick) {
+  aiThinking[q.id] = true; render();
+  const j = q.judge || {};
+  const city = j.city && window.CITIES[j.city];
+  const hint = j.metric === 'tmax' && city ? `${city.name}のこの時期の平年の最高気温はおよそ${city.avgMax[+j.date.slice(5, 7) - 1]}℃` : 'とくになし';
+  const prompt = `あなたは予想ゲームのAIキャラ「ミライくん」です。次の問題に「はい」か「いいえ」で予想してください。
+インターネットは見られないので、季節・地域の気候・一般的な傾向から考えてください。
+問題：${q.text}
+今日の日付：${todayStr()}
+参考：${hint}
+次のJSONだけを返してください：
+{"pick": "yes" または "no", "conf": 1〜3の整数（1=ふつう, 2=自信あり, 3=絶対）, "reason": "中学生にも分かる日本語で60文字以内の理由"}`;
+  try {
+    const r = await ai.sample.json(prompt, { modelTier: 'quick' });
+    if (r && (r.pick === 'yes' || r.pick === 'no') && [1, 2, 3].includes(+r.conf) && typeof r.reason === 'string') {
+      state.aiPicks[q.id] = { pick: r.pick, conf: +r.conf, reason: r.reason.slice(0, 120) };
+      save();
+    }
+  } catch (e) { aiErrorText(e); }
+  delete aiThinking[q.id];
+  toast(myPick === aiOf(q).pick ? 'AIと同じ予想です' : 'AIと反対の予想！勝負です');
+  render();
+}
+function askBox(q) {
+  const a = askState[q.id] || {};
+  return `<div style="margin-top:10px">
+    <button class="ghost" ${a.busy ? 'disabled' : ''} onclick="askMirai('${q.id}')">🤖 ミライくんに詳しく聞く</button>
+    ${a.busy && !a.text ? '<div class="note">🤔 考え中…（最初は利用の許可を聞かれることがあります）</div>' : ''}
+    ${a.text ? `<div class="share">${esc(a.text)}</div>` : ''}
+    ${a.err ? `<div class="note">${esc(a.err)}</div>` : ''}
+  </div>`;
+}
+async function askMirai(id) {
+  const q = qById(id); if (!q || !ai.sample) return;
+  const mine = state.picks[id];
+  askState[id] = { busy: true, text: '' }; render();
+  const prompt = `あなたは予想ゲーム「ミライ予想」のAIキャラ「ミライくん」です。
+次の予想問題について、初心者にも分かるように、予想のヒントになる「背景」「これまでの傾向」「注目ポイント」を、やさしい日本語で200文字くらいで説明してください。
+・インターネットは見られません。知らない最新情報は「最新のニュースも確認してね」と伝えてください
+・結果を断定しないでください。お金を賭けることはすすめないでください
+・見出しや記号はつけず、短い文章で答えてください
+問題：${q.text}
+${q.criteria ? '判定のルール：' + q.criteria + '\n' : ''}今日の日付：${todayStr()}
+${mine ? `ミライくんの予想：${pickWord(aiOf(q).pick)}（理由：${aiOf(q).reason}）` : ''}`;
+  try {
+    await ai.sample(prompt, { modelTier: 'quick', onText: ({ text }) => { askState[id] = { busy: true, text }; render(); } });
+    askState[id] = { ...askState[id], busy: false };
+  } catch (e) {
+    const msg = aiErrorText(e);
+    askState[id] = { busy: false, text: (e && e.text) || '', err: msg || '' };
+  }
+  render();
+}
+
+// ===== みんなのランキング（自動で共有） =====
+// 公開ページ（claude.ai）で開いたときだけ使える。保存するのは「ニックネーム」と「予想」だけ
+const online = { db: null, uid: null, players: {}, loading: true, failed: false, readOnly: false, synced: false, queue: Promise.resolve() };
+async function initOnline() {
+  try {
+    if (!(window.claude && window.claude.use)) throw 0;
+    const [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]);
+    const uid = user ? await user.id() : null;
+    if (!db || !uid) throw 0;
+    online.db = db; online.uid = uid;
+  } catch { online.loading = false; render(); return; }
+  const timer = setTimeout(() => { if (online.loading) { online.loading = false; online.failed = true; render(); } }, 10000);
+  online.db.collection('players').onSnapshot(snap => {
+    const players = {};
+    snap.docs.forEach(d => { if (d.exists) players[d.id] = d.data(); });
+    online.players = players;
+    if (!snap.metadata.fromCache) { clearTimeout(timer); online.loading = false; online.failed = false; }
+    if (!online.synced && !snap.metadata.fromCache) { online.synced = true; mergeMine(); }
+    render();
+  }, () => { clearTimeout(timer); online.loading = false; online.failed = true; render(); });
+}
+function encodeAll() { const p = {}; for (const [id, v] of Object.entries(state.picks)) p[id] = encodePick(v); return p; }
+function mergeMine() { // 別の端末で予想した分を取り込む
+  const mine = online.players[online.uid];
+  let changed = false;
+  if (mine && mine.picks && typeof mine.picks === 'object') {
+    for (const [id, s] of Object.entries(mine.picks)) {
+      const p = decodePick(s);
+      if (p && !state.picks[id]) { state.picks[id] = { ...p, at: +mine.updatedAt || Date.now() }; changed = true; }
+    }
+    if (!state.name && typeof mine.nickname === 'string') { state.name = mine.nickname.slice(0, 12); changed = true; }
+  }
+  if (changed) save();
+  const remote = JSON.stringify((mine && mine.picks) || {}), local = JSON.stringify(encodeAll());
+  if (state.name && (remote !== local || !mine || mine.nickname !== state.name)) pushMine();
+}
+function pushMine() {
+  if (!online.db || !online.uid || online.readOnly || !state.name) return;
+  const body = { nickname: state.name.slice(0, 12), picks: encodeAll(), updatedAt: Date.now() };
+  online.queue = online.queue.then(() => online.db.doc('players/' + online.uid).set(body)).catch(e => {
+    if (e && (e.code === 'invalid_argument' || e.code === 'not_granted' || e.code === 'revoked')) { online.readOnly = true; render(); }
+  });
+}
+function onlineRows() {
+  const rows = [];
+  for (const [id, p] of Object.entries(online.players)) {
+    if (id === online.uid || !p || typeof p.picks !== 'object' || !p.picks) continue;
+    const name = typeof p.nickname === 'string' && p.nickname.trim() ? p.nickname.slice(0, 12) : 'ななしさん';
+    rows.push({ name: '🌐 ' + name, ...tally(x => decodePick(p.picks[x.id])) });
+  }
+  return rows;
+}
+
+// ===== バッジと称号 =====
+const BADGES = [
+  { id: 'first', icon: '🔰', name: 'はじめの一歩', desc: '初めて予想した', ok: s => s.answered >= 1 },
+  { id: 'streak3', icon: '🔥', name: '3日連続', desc: '3日続けて予想した', ok: s => s.maxStreak >= 3 },
+  { id: 'streak7', icon: '🌟', name: '7日連続', desc: '7日続けて予想した', ok: s => s.maxStreak >= 7 },
+  { id: 'streak30', icon: '👑', name: '30日連続', desc: '30日続けて予想した', ok: s => s.maxStreak >= 30 },
+  { id: 'hit1', icon: '🎯', name: '初的中', desc: '初めて予想が当たった', ok: s => s.hit >= 1 },
+  { id: 'hit10', icon: '🏹', name: '的中10回', desc: '予想が10回当たった', ok: s => s.hit >= 10 },
+  { id: 'confident', icon: '💪', name: '自信の的中', desc: '「絶対！」で当てた', ok: s => s.confHit >= 1 },
+  { id: 'beatai', icon: '🤖', name: 'AIに勝利', desc: '1問でAIより高い点を取った', ok: s => s.beatAI >= 1 },
+  { id: 'beatai10', icon: '🦾', name: 'AIハンター', desc: 'AIに10回勝った', ok: s => s.beatAI >= 10 },
+  { id: 'contra', icon: '🦊', name: '逆張り成功', desc: 'AIと反対の予想で当てた', ok: s => s.contra >= 1 },
+  { id: 'allcat', icon: '🌈', name: '何でも予想', desc: '4つ以上の分野に予想した', ok: s => s.cats >= 4 },
+  { id: 'news10', icon: '🗞️', name: '時事通', desc: '時事問題に10問予想した', ok: s => s.news >= 10 },
+  { id: 'friend', icon: '🤝', name: '対戦デビュー', desc: '友達と対戦した', ok: s => s.friends >= 1 },
+  { id: 'master', icon: '🔮', name: '予想の達人', desc: '10問以上で的中率70%以上', ok: s => s.done >= 10 && s.hit / s.done >= 0.7 },
+];
+const TITLES = [[0, '🌱 見習い予想士'], [50, '⭐ 予想士'], [150, '🌟 上級予想士'], [300, '💎 予想マスター'], [600, '🔮 ミライの賢者']];
+function myStats() {
+  const s = { answered: 0, hit: 0, done: 0, pts: 0, confHit: 0, beatAI: 0, contra: 0, news: 0, cats: 0, maxStreak: Math.max(state.maxStreak || 0, streak()),
+    friends: Object.keys(state.friends).length + onlineRows().length };
+  const cats = new Set();
+  for (const q of allQuestions()) {
+    const p = state.picks[q.id]; if (!p) continue;
+    s.answered++; cats.add(q.cat); if (q.kind === 'news') s.news++;
+    const res = resultOf(q); if (!res || res === 'void') continue;
+    const a = aiOf(q), mp = pointsFor(p, res);
+    s.done++; s.pts += mp;
+    if (p.pick === res) { s.hit++; if (p.conf === 3) s.confHit++; if (a.pick !== p.pick) s.contra++; }
+    if (mp > pointsFor(a, res)) s.beatAI++;
+  }
+  s.cats = cats.size;
+  return s;
+}
+function titleOf(pts) {
+  let cur = TITLES[0], next = null;
+  for (let i = 0; i < TITLES.length; i++) if (pts >= TITLES[i][0]) { cur = TITLES[i]; next = TITLES[i + 1] || null; }
+  return { cur, next };
+}
+function checkBadges() { // 新しく取ったバッジをお知らせ（デモ表示中は記録しない）
+  if (state.demo) return;
+  const s = myStats(); const fresh = [];
+  for (const b of BADGES) if (!state.badges[b.id] && b.ok(s)) { state.badges[b.id] = Date.now(); fresh.push(b); }
+  if (fresh.length) { save(); toast(fresh.length === 1 ? `🏅 バッジ獲得：${fresh[0].icon} ${fresh[0].name}` : `🏅 新しいバッジを${fresh.length}個獲得！`); }
+}
+
+// ===== 遊び方（3ステップ） =====
+const HELP = [
+  { ill: '🔮', t: '1. 予想する', d: '毎日1問、「はい」か「いいえ」で答えます。自信度も選べます。自信があるほど、当たると高得点、はずれると減点です。' },
+  { ill: '🤖', t: '2. AIと勝負', d: '予想を決めると、AIミライくんの予想と理由が見られます。AIより高い点数を目指そう！' },
+  { ill: '⚔️', t: '3. 友達と対戦', d: 'このページを友達と共有すると、自動でランキングに参加できます。招待リンクでも対戦できます。結果は絵文字でシェアできます。参加は無料、ポイントはお金と交換できません。' },
+];
+function showHelp(i) {
+  const h = HELP[i]; const last = i === HELP.length - 1;
+  document.getElementById('overlay').innerHTML = `<div class="modal"><div class="card">
+    <div class="step-ill">${h.ill}</div><div class="q">${h.t}</div><p>${h.d}</p>
+    <div class="dots">${HELP.map((_, j) => `<span class="${j === i ? 'on' : ''}"></span>`).join('')}</div>
+    <button class="primary" onclick="${last ? 'closeHelp()' : `showHelp(${i + 1})`}">${last ? 'はじめる' : '次へ'}</button>
+  </div></div>`;
+}
+function closeHelp() {
+  state.helped = true; save();
+  document.getElementById('overlay').innerHTML = '';
+  if (!state.name) askName();
+}
+function askName() {
+  document.getElementById('overlay').innerHTML = `<div class="modal"><div class="card">
+    <div class="q">ニックネームを決めよう</div>
+    <input type="text" id="nameIn" maxlength="12" placeholder="例：みらい太郎">
+    <div class="note">友達とのランキングに表示されます。本名や連絡先は入れないでください（12文字まで）。</div>
+    <button class="primary" onclick="setName()">決定</button>
+  </div></div>`;
+  setTimeout(() => document.getElementById('nameIn')?.focus(), 50);
+}
+function setName() {
+  const v = document.getElementById('nameIn').value.trim().slice(0, 12);
+  if (!v) return toast('ニックネームを入れてください');
+  state.name = v; save(); pushMine(); document.getElementById('overlay').innerHTML = '';
+  readInvite(); render();
+}
+
+// ===== 描画 =====
+function render() {
+  document.getElementById('who').innerHTML = state.name ? `ようこそ<br><b>${esc(state.name)}</b> さん` : '';
+  document.getElementById('demoBanner').innerHTML = state.demo
+    ? '<div class="banner">🧪 デモ表示中：結果は仮のものです。「デモを終了」で元に戻ります。</div>' : '';
+  document.getElementById('demoBtn').textContent = state.demo ? 'デモを終了' : '結果発表をお試し（デモ）';
+  document.getElementById('nav').innerHTML = TABS.map(t =>
+    `<button class="${t.id === current ? 'on' : ''}" onclick="go('${t.id}')"><i>${t.icon}</i>${t.label}</button>`).join('');
+  checkBadges();
+  const v = { today: viewToday, special: viewSpecial, battle: viewBattle, record: viewRecord }[current];
+  document.getElementById('view').innerHTML = v();
+}
+function go(t) { current = t; render(); window.scrollTo(0, 0); }
+
+render();
+if (!state.helped) showHelp(0);
+else if (!state.name) askName();
+else readInvite(), render();
+loadNews();
+resolveAll();
+initAI();
+initOnline();
+setInterval(resolveAll, 10 * 60 * 1000); // 開いている間は10分ごとに答え合わせ
+</script>
+</body>
+</html>
