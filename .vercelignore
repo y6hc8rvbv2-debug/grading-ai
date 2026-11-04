@@ -8,3 +8,8 @@ security-guard/.env
 security-guard/.env.example
 security-guard/.gitignore
 security-guard/CLAUDE.md
+yosou-game/package.json
+yosou-game/lib
+yosou-game/.env
+yosou-game/.env.example
+yosou-game/CLAUDE.md
