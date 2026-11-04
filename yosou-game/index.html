@@ -101,6 +101,7 @@ h2{font-size:17px;margin:18px 0 10px}
     ・試作版のため、データはこの端末（ブラウザ）の中だけに保存されます。<br>
     ・ニックネームには本名や連絡先を入れないでください。<br>
     ・「AIミライくん」の予想は、試作版ではあらかじめ用意したルールで作っています。<br>
+    ・答え合わせは、公開されている気象データ（Open-Meteo）と為替データ（欧州中央銀行の基準レート／Frankfurter）を使って全自動で行います。<br>
     <button class="ghost" style="margin-top:8px" onclick="toggleDemo()" id="demoBtn">結果発表をお試し（デモ）</button>
     <button class="ghost" style="margin-top:8px" onclick="showHelp(0)">遊び方</button>
   </footer>
@@ -127,7 +128,7 @@ const TABS = [
 function load() {
   try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; }
 }
-let state = Object.assign({ name: '', picks: {}, friends: {}, demo: false, helped: false }, load());
+let state = Object.assign({ name: '', picks: {}, friends: {}, results: {}, demo: false, helped: false }, load());
 function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} }
 
 // ===== 日付（日本時間） =====
@@ -140,28 +141,33 @@ function wd(str) { return '日月火水木金土'[new Date(str + 'T00:00:00Z').g
 function hash(s) { let h = 7; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; }
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
-// ===== 毎日の1問（自動で作る） =====
+// ===== 毎日の1問（自動で作る・答え合わせも全自動） =====
 // 出題日 D の問題は「翌日 D+1 のこと」を聞き、締め切りは D の23:59
-const AVG_MAX_TEMP = [10, 11, 14, 19, 23, 26, 30, 31, 27, 22, 17, 12]; // 東京の平年の最高気温（めやす）
+const CITY_ORDER = ['tokyo', 'osaka', 'sapporo', 'fukuoka', 'naha'];
 function dailyQuestion(dateStr) {
   const target = addDays(dateStr, 1);
   const dow = new Date(target + 'T00:00:00Z').getUTCDay();
-  const weekend = dow === 0 || dow === 6;
+  const weekend = dow === 0 || dow === 6;          // 土日は為替の発表がないので天気だけ
   const n = Math.floor(new Date(dateStr + 'T00:00:00Z').getTime() / 864e5);
-  const type = weekend ? 'weather' : ['stock', 'fx', 'weather'][n % 3];
+  const type = weekend ? ['tmax', 'rain'][n % 2] : ['tmax', 'fx', 'rain'][n % 3];
+  const cityKey = CITY_ORDER[n % CITY_ORDER.length];
+  const city = window.CITIES[cityKey];
   const h = hash(dateStr);
   const base = { id: 'd-' + dateStr, date: dateStr, deadline: dateStr + 'T23:59:00+09:00' };
   const when = `明日（${md(target)}・${wd(target)}）`;
-  if (type === 'stock') return { ...base, cat: '経済', icon: '📈',
-    text: `${when}の日経平均株価は、前の日より上がって終わる？`,
-    ai: { pick: 'yes', conf: 1, reason: '長い目で見ると、株価は上がる日のほうが少しだけ多いので「はい」と予想します。' } };
   if (type === 'fx') { const pick = h % 2 ? 'yes' : 'no'; return { ...base, cat: '為替', icon: '💱',
-    text: `${when}の夕方、前の日より「円高」になっている？`,
+    text: `${when}の1ドルの値段は、前の営業日より「円高」（数字が小さい）になる？`,
+    judge: { src: 'fx', date: target, vs: 'prev' },
     ai: { pick, conf: 1, reason: '為替の1日の動きはほぼ五分五分。今回は直感で決めました。' } }; }
-  const t = AVG_MAX_TEMP[+target.slice(5, 7) - 1];
+  if (type === 'rain') return { ...base, cat: '天気', icon: '☔',
+    text: `${when}の${city.name}で、雨（1mm以上）が降る？`,
+    judge: { src: 'wx', city: cityKey, date: target, metric: 'rain' },
+    ai: { pick: 'no', conf: 1, reason: `${city.name}では雨の降らない日のほうが多いので、「いいえ」と予想します。` } };
+  const t = city.avgMax[+target.slice(5, 7) - 1];
   const pick = h % 3 === 0 ? 'no' : 'yes';
-  return { ...base, cat: '天気', icon: '☀️',
-    text: `${when}の東京都心の最高気温は、${t}℃以上になる？`,
+  return { ...base, cat: '天気', icon: '🌡️',
+    text: `${when}の${city.name}の最高気温は、${t}℃以上になる？`,
+    judge: { src: 'wx', city: cityKey, date: target, metric: 'tmax', op: '>=', value: t },
     ai: { pick, conf: 1, reason: `${t}℃はこの時期の平年並みの気温。最近の傾向から「${pick === 'yes' ? 'はい' : 'いいえ'}」と見ています。` } };
 }
 function recentDaily(days = 7) {
@@ -173,21 +179,123 @@ function allQuestions() { return [...recentDaily(14), ...window.SPECIAL_QUESTION
 function qById(id) { return allQuestions().find(q => q.id === id); }
 function isOpen(q) { return Date.now() < new Date(q.deadline).getTime(); }
 
+// ===== 自動の答え合わせ =====
+// データが出そろう時刻（日本時間）：天気は対象日の翌日3時、為替は翌日6時
+function lastDate(j) { return j.src === 'wxcount' ? j.to : j.date; }
+function readyAt(q) {
+  const j = q.judge;
+  return new Date(addDays(lastDate(j), 1) + (j.src === 'fx' ? 'T06:00:00+09:00' : 'T03:00:00+09:00')).getTime();
+}
+function judgeSource(q) {
+  return q.judge.src === 'fx' ? '欧州中央銀行の基準レート（Frankfurter）で自動判定' : '気象データ（Open-Meteo）で自動判定';
+}
+const resolving = { busy: false, failed: false };
+
+async function getJSON(url) {
+  const r = await fetch(url); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json();
+}
+// 都市ごとの天気データ（日付 → {tmax, rain, snow, cloud6, cloud7}）
+async function fetchWeather(cityKey, minDate) {
+  const c = window.CITIES[cityKey];
+  const out = {};
+  const put = (j) => {
+    const d = j.daily || {};
+    (d.time || []).forEach((t, i) => { out[t] = { ...(out[t] || {}), tmax: d.temperature_2m_max?.[i], rain: d.precipitation_sum?.[i], snow: d.snowfall_sum?.[i] }; });
+    const h = j.hourly || {};
+    (h.time || []).forEach((t, i) => {
+      const day = t.slice(0, 10), hr = t.slice(11, 13);
+      if (hr === '06' || hr === '07') out[day] = { ...(out[day] || {}), ['cloud' + (+hr)]: h.cloud_cover?.[i] };
+    });
+  };
+  const q = `latitude=${c.lat}&longitude=${c.lon}&daily=temperature_2m_max,precipitation_sum,snowfall_sum&hourly=cloud_cover&timezone=Asia%2FTokyo`;
+  const old = addDays(todayStr(), -85);
+  if (minDate < old) put(await getJSON(`https://archive-api.open-meteo.com/v1/archive?${q}&start_date=${minDate}&end_date=${addDays(todayStr(), -7)}`));
+  const recent = await getJSON(`https://api.open-meteo.com/v1/forecast?${q}&past_days=92&forecast_days=1`);
+  const keep = { ...out }; put(recent);
+  for (const k in keep) if (keep[k].tmax != null) out[k] = keep[k]; // 確定済みの過去データを優先
+  return out;
+}
+// ドル円（日付 → 1ドルの円）
+async function fetchFx(minDate, maxDate) {
+  const j = await getJSON(`https://api.frankfurter.app/${addDays(minDate, -10)}..${maxDate}?from=USD&to=JPY`);
+  const out = {}; for (const [d, v] of Object.entries(j.rates || {})) out[d] = v.JPY; return out;
+}
+function rateOnOrBefore(fx, date) { const ds = Object.keys(fx).filter(d => d <= date).sort(); return ds.length ? fx[ds[ds.length - 1]] : null; }
+
+// 1問の判定。'yes' / 'no' / 'void'（データがなく中止） / null（まだ分からない）
+function decide(q, wx, fx) {
+  const j = q.judge, late = Date.now() > readyAt(q) + 3 * 864e5; // 3日待ってもデータがなければ中止
+  if (j.src === 'fx') {
+    if (!fx) return null;
+    if (j.vs === 'prev') {
+      if (fx[j.date] == null) return late ? 'void' : null;
+      const prev = Object.keys(fx).filter(d => d < j.date).sort().pop();
+      if (!prev) return null;
+      return fx[j.date] < fx[prev] ? 'yes' : fx[j.date] > fx[prev] ? 'no' : 'void';
+    }
+    const a = rateOnOrBefore(fx, j.base), b = rateOnOrBefore(fx, j.date);
+    if (a == null || b == null) return late ? 'void' : null;
+    return b > a ? 'yes' : 'no';
+  }
+  const w = wx[j.city]; if (!w) return null;
+  if (j.src === 'wxcount') {
+    let days = 0;
+    for (let d = j.from; d <= j.to; d = addDays(d, 1)) {
+      const v = w[d]?.rain; if (v == null) return late ? 'void' : null; if (v >= 1) days++;
+    }
+    return days >= j.value ? 'yes' : 'no';
+  }
+  const v = w[j.date]; const miss = () => late ? 'void' : null;
+  if (!v) return miss();
+  if (j.metric === 'tmax') { if (v.tmax == null) return miss(); return (j.op === '<' ? v.tmax < j.value : v.tmax >= j.value) ? 'yes' : 'no'; }
+  if (j.metric === 'rain') { if (v.rain == null) return miss(); return v.rain >= 1 ? 'yes' : 'no'; }
+  if (j.metric === 'snow') { if (v.snow == null) return miss(); return v.snow >= 0.1 ? 'yes' : 'no'; }
+  if (j.metric === 'sunrise') { if (v.cloud6 == null || v.cloud7 == null) return miss(); return (v.cloud6 + v.cloud7) / 2 < 50 ? 'yes' : 'no'; }
+  return null;
+}
+async function resolveAll() {
+  if (resolving.busy) return;
+  const need = allQuestions().filter(q => !state.results[q.id] && Date.now() >= readyAt(q));
+  if (!need.length) return;
+  resolving.busy = true; resolving.failed = false;
+  try {
+    const wx = {}; let fx = null;
+    const wxNeed = {};
+    for (const q of need) if (q.judge.src !== 'fx') {
+      const from = q.judge.src === 'wxcount' ? q.judge.from : q.judge.date;
+      wxNeed[q.judge.city] = wxNeed[q.judge.city] && wxNeed[q.judge.city] < from ? wxNeed[q.judge.city] : from;
+    }
+    const fxQs = need.filter(q => q.judge.src === 'fx');
+    const jobs = Object.entries(wxNeed).map(([c, from]) => fetchWeather(c, from).then(d => { wx[c] = d; }));
+    if (fxQs.length) {
+      const dates = fxQs.flatMap(q => [q.judge.date, q.judge.base].filter(Boolean)).sort();
+      jobs.push(fetchFx(dates[0], dates[dates.length - 1]).then(d => { fx = d; }));
+    }
+    const settled = await Promise.allSettled(jobs);
+    if (settled.some(s => s.status === 'rejected')) resolving.failed = true;
+    for (const q of need) { const r = decide(q, wx, fx); if (r) state.results[q.id] = r; }
+    save();
+  } catch { resolving.failed = true; }
+  resolving.busy = false;
+  render();
+}
+
 // ===== 結果と採点 =====
 function resultOf(q) {
-  if (window.RESULTS[q.id]) return window.RESULTS[q.id];
-  if (state.demo) return hash(q.id + 'demo') % 2 ? 'yes' : 'no'; // デモ用の仮の結果
+  if (state.results[q.id]) return state.results[q.id];
+  if (state.demo) return hash(q.id + 'demo') % 2 ? 'yes' : 'no'; // デモ用の仮の結果（保存しない）
   return null;
 }
 function pointsFor(p, res) {
   if (!p || !res) return null;
+  if (res === 'void') return 0;
   return p.pick === res ? POINTS_WIN[p.conf - 1] : POINTS_LOSE[p.conf - 1];
 }
 function tally(picksOf) { // picksOf(q) => {pick, conf} | undefined
   let pts = 0, hit = 0, done = 0, answered = 0;
   for (const q of allQuestions()) {
     const p = picksOf(q); if (!p) continue; answered++;
-    const res = resultOf(q); if (!res) continue;
+    const res = resultOf(q); if (!res || res === 'void') continue;
     done++; pts += pointsFor(p, res); if (p.pick === res) hit++;
   }
   return { pts, hit, done, answered };
@@ -201,6 +309,14 @@ function streak() {
 
 // ===== 画面の部品 =====
 const pickWord = p => p === 'yes' ? 'はい' : 'いいえ';
+function fmtTime(ms) { return new Date(ms).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
+function pendingText(q) {
+  const t = readyAt(q);
+  if (Date.now() < t) return `⏳ 結果は ${fmtTime(t)} ごろに自動で判定されます`;
+  if (resolving.busy) return '🔄 データを確認しています…';
+  if (resolving.failed) return '📡 データを取得できませんでした。次に開いたときに自動で再確認します';
+  return '⏳ データの発表を待っています（自動で再確認します）';
+}
 function draft() { return window.__draft || (window.__draft = {}); }
 
 function questionCard(q, big) {
@@ -226,7 +342,8 @@ function questionCard(q, big) {
     body = `<div class="result wait">締め切りを過ぎました（予想していません）</div>`;
   } else {
     let r;
-    if (!res) r = `<div class="result wait">⏳ 結果待ち</div>`;
+    if (!res) r = `<div class="result wait">${pendingText(q)}</div>`;
+    else if (res === 'void') r = `<div class="result wait">⚪ データがそろわなかったため、この問題は中止（0点）になりました</div>`;
     else {
       const me = pointsFor(mine, res), ai = pointsFor(q.ai, res);
       const verdict = me > ai ? '🎉 AIに勝ち！' : me < ai ? '😢 AIに負け…' : '🤝 引き分け';
@@ -242,7 +359,7 @@ function questionCard(q, big) {
   return `<div class="card">
     <span class="label">${q.icon} ${q.cat}</span>
     <div class="q" style="${big ? '' : 'font-size:17px'}">${esc(q.text)}</div>
-    <div class="meta">${open ? dlText : '締め切り済み'}</div>
+    <div class="meta">${open ? dlText : '締め切り済み'}　・　${judgeSource(q)}</div>
     ${body}
   </div>`;
 }
@@ -298,7 +415,7 @@ function viewBattle() {
       const a = state.picks[q.id], b = decodePick(f.p[q.id]), res = resultOf(q);
       const show = p => p ? `<span class="tag ${p.pick}">${pickWord(p.pick)}</span>` : '<span class="meta">未回答</span>';
       return `<div class="mini"><div class="t">${q.icon} ${esc(q.text)}</div>
-        <div class="meta">あなた ${show(a)}　${esc(n)} ${show(b)}　${res ? '結果：' + pickWord(res) : '⏳結果待ち'}</div></div>`;
+        <div class="meta">あなた ${show(a)}　${esc(n)} ${show(b)}　${res === 'void' ? '中止' : res ? '結果：' + pickWord(res) : '⏳結果待ち'}</div></div>`;
     }).join('') + `<div class="row"><button class="ghost" onclick="removeFriend('${encodeURIComponent(n)}')">この友達を削除</button></div></div>`;
   }
   return html;
@@ -335,7 +452,7 @@ function viewRecord() {
 // ===== シェア用の絵文字 =====
 function shareText() {
   const qs = recentDaily(7).reverse();
-  const mark = (p, q) => { const res = resultOf(q); if (!p) return '⬜'; if (!res) return '⏳'; return p.pick === res ? '🟢' : '🔴'; };
+  const mark = (p, q) => { const res = resultOf(q); if (!p) return '⬜'; if (!res) return '⏳'; if (res === 'void') return '⚪'; return p.pick === res ? '🟢' : '🔴'; };
   const me = qs.map(q => mark(state.picks[q.id], q)).join('');
   const ai = qs.map(q => mark(q.ai, q)).join('');
   return `🔮ミライ予想 ${md(todayStr())}\nわたし ${me}\nAI　　 ${ai}\n🔥連続${streak()}日\n#ミライ予想`;
@@ -451,6 +568,8 @@ render();
 if (!state.helped) showHelp(0);
 else if (!state.name) askName();
 else readInvite(), render();
+resolveAll();
+setInterval(resolveAll, 10 * 60 * 1000); // 開いている間は10分ごとに答え合わせ
 </script>
 </body>
 </html>
