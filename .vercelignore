@@ -8,3 +8,9 @@ security-guard/.env
 security-guard/.env.example
 security-guard/.gitignore
 security-guard/CLAUDE.md
+shield-hub/package.json
+shield-hub/lib
+shield-hub/.env
+shield-hub/.env.example
+shield-hub/.gitignore
+shield-hub/CLAUDE.md
