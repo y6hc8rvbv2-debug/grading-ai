@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Shield Hub 司令塔</title>
+<meta name="description" content="画面のこだま探知（特許出願中）の管理用Webアプリ" />
+<style>
+  :root{
+    --bg:#f4f6fb; --panel:#fff; --panel-2:#f8fafc; --ink:#1f2430; --muted:#5b6475;
+    --line:#e4e8f0; --brand:#3b5bdb; --brand-ink:#fff;
+    --ok:#1a9d6a; --ok-bg:#e6f7ef; --warn:#c77700; --warn-bg:#fff4e0;
+    --danger:#d6336c; --danger-bg:#fde8ef; --chip:#eef1f7; --radius:16px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0f131c; --panel:#161c28; --panel-2:#1b2230; --ink:#e9edf5; --muted:#9aa4b8;
+      --line:#2a3344; --brand:#5b7bff; --brand-ink:#0b1020;
+      --ok:#39d08c; --ok-bg:#122b22; --warn:#f0a93b; --warn-bg:#2e2412;
+      --danger:#ff6b9d; --danger-bg:#331320; --chip:#222a3a;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0f131c; --panel:#161c28; --panel-2:#1b2230; --ink:#e9edf5; --muted:#9aa4b8;
+    --line:#2a3344; --brand:#5b7bff; --brand-ink:#0b1020;
+    --ok:#39d08c; --ok-bg:#122b22; --warn:#f0a93b; --warn-bg:#2e2412;
+    --danger:#ff6b9d; --danger-bg:#331320; --chip:#222a3a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;background:var(--bg);color:var(--ink);line-height:1.7;-webkit-text-size-adjust:100%}
+  .wrap{max-width:860px;margin:0 auto;padding:20px 16px 72px}
+  header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+  h1{font-size:1.4rem;margin:0}
+  h2{font-size:1.15rem;margin:0 0 8px}
+  h3{font-size:1rem;margin:16px 0 6px}
+  .sub{color:var(--muted);font-size:.9rem;margin:4px 0 0}
+  nav{display:flex;gap:6px;margin:16px 0;overflow-x:auto;padding-bottom:4px}
+  nav button{flex:0 0 auto;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:8px 14px;border-radius:999px;font-size:.95rem;cursor:pointer}
+  nav button[aria-selected="true"]{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:14px}
+  .muted{color:var(--muted)}
+  .badge{display:inline-block;padding:2px 10px;border-radius:999px;font-size:.85rem;font-weight:600}
+  .b-ok{background:var(--ok-bg);color:var(--ok)} .b-warn{background:var(--warn-bg);color:var(--warn)} .b-danger{background:var(--danger-bg);color:var(--danger)} .b-chip{background:var(--chip);color:var(--muted)}
+  .notice{border-left:4px solid var(--warn);background:var(--warn-bg);padding:12px 14px;border-radius:8px;margin:10px 0}
+  .btn{border:0;background:var(--brand);color:var(--brand-ink);padding:10px 18px;border-radius:10px;font-size:1rem;cursor:pointer;font-weight:600}
+  .btn:disabled{opacity:.5;cursor:default}
+  .btn.ghost{background:var(--chip);color:var(--ink)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  label{font-size:.9rem}
+  input[type=text],input[type=number],select{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);color:var(--ink)}
+  ol.steps{padding-left:1.3em;margin:6px 0} ol.steps li{margin:4px 0}
+  .clock{font-size:2.4rem;font-variant-numeric:tabular-nums;text-align:center;padding:18px;border-radius:12px;background:var(--panel-2);transition:background .15s}
+  .clock.flash{background:var(--brand);color:var(--brand-ink)}
+  .tablewrap{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:.92rem}
+  th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:var(--muted);font-weight:600}
+  canvas{width:100%;height:auto;display:block;background:var(--panel-2);border-radius:10px}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.85rem;color:var(--muted);margin-top:6px}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+  .tile{background:var(--panel-2);border-radius:12px;padding:12px}
+  code{background:var(--chip);padding:1px 6px;border-radius:6px;font-size:.88em}
+  details summary{cursor:pointer;font-weight:600}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>🛡️ Shield Hub 司令塔</h1>
+      <p class="sub">「画面のこだま探知」（特許出願中）の管理画面</p>
+    </div>
+    <button class="btn ghost" id="themeBtn" type="button" aria-label="表示の明るさを切り替え">🌓</button>
+  </header>
+
+  <nav role="tablist">
+    <button role="tab" data-tab="home" aria-selected="true">ホーム</button>
+    <button role="tab" data-tab="demo" aria-selected="false">体験</button>
+    <button role="tab" data-tab="real" aria-selected="false">本物で試す</button>
+    <button role="tab" data-tab="connect" aria-selected="false">つなぎ方</button>
+  </nav>
+
+  <!-- ===== ホーム ===== -->
+  <section data-panel="home">
+    <div class="card">
+      <h2>司令塔の状態</h2>
+      <p id="status" class="muted">確認中…</p>
+      <div id="secretNotice" class="notice" hidden>
+        <strong>⚠️ いまはデモ用の鍵で動いています。</strong><br>
+        本番で使う前に、Vercel の「Settings → Environment Variables」で
+        <code>HUB_SECRET</code>（16文字以上のランダムな文字列）を登録し、再デプロイしてください。
+        登録しないと、誰でもリズムを予測できてしまい、探知の意味がなくなります。
+      </div>
+    </div>
+    <div class="card">
+      <h2>しくみ（かんたん説明）</h2>
+      <p>画面を盗み見て外へ送る「のぞき見ソフト」は、<strong>画面が変わった瞬間に通信量が増える</strong>というクセがあります。これを利用します。</p>
+      <ol class="steps">
+        <li>司令塔が、他人には予測できない<strong>「秘密のリズム」</strong>（画面を変える時刻の一覧）を作ります。</li>
+        <li>画面の一部（時計など）を、そのリズムどおりに少しだけ変化させます。</li>
+        <li>パソコンの通信を宛先ごとに0.1秒刻みで数えます。</li>
+        <li>リズムと<strong>そっくりに増減する宛先</strong>＝画面のこだまを返している宛先です。のぞき見の疑いがあります。</li>
+        <li>許可した共有先（会議ツールなど）でなければ「遮断」と判定し、署名つきの指示を出します。</li>
+      </ol>
+      <p class="muted">相関の強さ（0〜1）が <strong>0.3以上</strong> で「こだまあり」と判定します。</p>
+    </div>
+  </section>
+
+  <!-- ===== 体験 ===== -->
+  <section data-panel="demo" hidden>
+    <div class="card">
+      <h2>体験してみる（シミュレーション）</h2>
+      <p class="muted">本物の通信は使いません。画面の時計をリズムどおりに変化させ、3つの宛先の通信量を作って判定します。</p>
+      <div class="row">
+        <label>長さ <select id="demoDur"><option value="15">15秒</option><option value="30" selected>30秒</option><option value="60">60秒</option></select></label>
+        <label><input type="checkbox" id="demoAllow"> 「会議ツール」を許可済みにする</label>
+        <button class="btn" id="demoStart" type="button">スタート</button>
+      </div>
+      <div class="clock" id="clock" style="margin-top:14px">--:--:--</div>
+      <p id="demoMsg" class="muted" style="margin:8px 0 0"></p>
+    </div>
+    <div class="card" id="demoResult" hidden>
+      <h2>判定の結果</h2>
+      <canvas id="demoChart" width="800" height="300"></canvas>
+      <div class="legend" id="demoLegend"></div>
+      <div class="tablewrap" style="margin-top:12px"><table id="demoTable"></table></div>
+    </div>
+  </section>
+
+  <!-- ===== 本物で試す ===== -->
+  <section data-panel="real" hidden>
+    <div class="card">
+      <h2>本物の通信で試す</h2>
+      <ol class="steps">
+        <li>下の「リズムを受け取る」を押すと、時計がリズムどおりに変化し始めます。</li>
+        <li>そのあいだ、自分のパソコンで Wireshark で通信を記録します。</li>
+        <li>Wireshark の「ファイル → エクスポート → CSV」で、<strong>Time（時刻）・Destination（宛先）・Length（バイト数）</strong>を含むCSVを書き出します。<br><span class="muted">時刻は「表示 → 時刻表示形式 → UTC日時」または「エポック秒」にしてください。</span></li>
+        <li>CSVを読み込んで「判定する」を押します。</li>
+      </ol>
+      <div class="notice">🔒 <strong>宛先のIPアドレスはサーバーへ送りません。</strong>この画面の中で「宛先1」「宛先2」…に置き換えてから送ります。対応表はこの画面にだけ表示され、どこにも保存されません。<br>自分のパソコン・自分が管理する機器の通信だけで試してください。</div>
+      <div class="row">
+        <label>長さ <select id="realDur"><option value="30">30秒</option><option value="60" selected>60秒</option><option value="120">120秒</option></select></label>
+        <button class="btn" id="realStart" type="button">リズムを受け取る</button>
+      </div>
+      <div class="clock" id="clock2" style="margin-top:14px">--:--:--</div>
+      <p id="realMsg" class="muted"></p>
+      <h3>CSVを読み込む</h3>
+      <input type="file" id="csvFile" accept=".csv,text/csv">
+      <p id="csvMsg" class="muted"></p>
+      <div id="allowBox" hidden>
+        <h3>許可する共有先（会議ツールなど）にチェック</h3>
+        <div id="allowList" class="grid"></div>
+        <div style="margin-top:12px"><button class="btn" id="realAnalyze" type="button">判定する</button></div>
+      </div>
+    </div>
+    <div class="card" id="realResult" hidden>
+      <h2>判定の結果</h2>
+      <canvas id="realChart" width="800" height="300"></canvas>
+      <div class="legend" id="realLegend"></div>
+      <div class="tablewrap" style="margin-top:12px"><table id="realTable"></table></div>
+    </div>
+  </section>
+
+  <!-- ===== つなぎ方 ===== -->
+  <section data-panel="connect" hidden>
+    <div class="card">
+      <h2>つなぎ方</h2>
+      <p class="muted">司令塔（この画面とAPI）は動いています。ほかの部品は順番に作っていきます。</p>
+      <div class="grid">
+        <div class="tile"><strong>🖥️ サーバーの部品</strong><br><span class="badge b-chip">これから作る</span><p class="muted" style="margin:6px 0 0">Webサイトに組み込み、司令塔の署名つき指示を確かめて通信を止めます。</p></div>
+        <div class="tile"><strong>👀 見張り役</strong><br><span class="badge b-chip">これから作る</span><p class="muted" style="margin:6px 0 0">パソコンの通信量を自動で数えて司令塔へ送ります（いまはCSVで代用）。</p></div>
+        <div class="tile"><strong>📱 スマホアプリ</strong><br><span class="badge b-chip">これから作る</span><p class="muted" style="margin:6px 0 0">判定結果の通知を受け取り、遮断を承認します。</p></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>API（いま使えるもの）</h2>
+      <ul>
+        <li><code>GET /api/hub-rhythm?sid=…&amp;dur=秒数</code> … 秘密のリズムを受け取る</li>
+        <li><code>POST /api/hub-analyze</code> … 宛先ごとの0.1秒ごとの通信量を送り、判定を受け取る</li>
+      </ul>
+      <div class="notice"><strong>本番の前に必ず：</strong> Vercel に <code>HUB_SECRET</code> を登録してください（ホームの説明を参照）。</div>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = s => document.querySelector(s);
+  const BIN = 100;
+
+  // ---- テーマ ----
+  const root = document.documentElement;
+  try { const t = localStorage.getItem('hub-theme'); if (t) root.dataset.theme = t; } catch {}
+  $('#themeBtn').onclick = () => {
+    const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    root.dataset.theme = dark ? 'light' : 'dark';
+    try { localStorage.setItem('hub-theme', root.dataset.theme); } catch {}
+  };
+
+  // ---- タブ ----
+  document.querySelectorAll('nav [data-tab]').forEach(b => b.onclick = () => {
+    document.querySelectorAll('nav [data-tab]').forEach(x => x.setAttribute('aria-selected', x === b));
+    document.querySelectorAll('[data-panel]').forEach(p => p.hidden = p.dataset.panel !== b.dataset.tab);
+  });
+
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const newSid = () => 's' + Math.random().toString(36).slice(2, 12);
+
+  async function getRhythm(sid, dur) {
+    const r = await fetch(`/api/hub-rhythm?sid=${encodeURIComponent(sid)}&dur=${dur}`);
+    if (!r.ok) throw new Error('リズムを受け取れませんでした');
+    return r.json();
+  }
+  async function analyze(body) {
+    const r = await fetch('/api/hub-analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '判定に失敗しました');
+    return j;
+  }
+
+  // ---- 状態 ----
+  getRhythm('status', 10).then(j => {
+    $('#status').innerHTML = j.demo
+      ? '<span class="badge b-warn">デモ用の鍵で動作中</span> APIは動いていますが、本番用の鍵がまだ登録されていません。'
+      : '<span class="badge b-ok">本番の鍵で動作中</span> HUB_SECRET が登録されています。';
+    $('#secretNotice').hidden = !j.demo;
+  }).catch(() => {
+    $('#status').innerHTML = '<span class="badge b-danger">つながりません</span> APIに接続できませんでした。少し待ってから再読み込みしてください。';
+  });
+
+  // ---- 時計をリズムどおりに変化させる ----
+  function runClock(el, rh, onDone) {
+    let i = 0;
+    const end = rh.startMs + rh.dur * 1000;
+    const tick = () => {
+      const now = Date.now();
+      el.textContent = new Date(now).toLocaleTimeString('ja-JP');
+      while (i < rh.times.length && rh.times[i] <= now) {
+        i++;
+        el.classList.add('flash');
+        setTimeout(() => el.classList.remove('flash'), 120);
+      }
+      if (now < end) requestAnimationFrame(tick); else onDone && onDone();
+    };
+    tick();
+  }
+
+  // ---- グラフ ----
+  const COLORS = ['#e03131', '#1971c2', '#2f9e44', '#f08c00', '#7048e8'];
+  function drawChart(canvas, legendEl, rh, flows) {
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height, pad = 24;
+    const css = getComputedStyle(document.documentElement);
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = css.getPropertyValue('--muted');
+    ctx.globalAlpha = .25;
+    for (const t of rh.times) {
+      const x = pad + (t - rh.startMs) / (rh.dur * 1000) * (W - pad * 2);
+      ctx.fillRect(x, pad, 2, H - pad * 2);
+    }
+    ctx.globalAlpha = 1;
+    const shown = flows.slice(0, 5);
+    shown.forEach((f, k) => {
+      const max = Math.max(1, ...f.values);
+      ctx.strokeStyle = COLORS[k]; ctx.lineWidth = 1.5; ctx.beginPath();
+      f.values.forEach((v, i) => {
+        const x = pad + i / f.values.length * (W - pad * 2);
+        const y = H - pad - v / max * (H - pad * 2);
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      });
+      ctx.stroke();
+    });
+    legendEl.innerHTML = '<span><span class="dot" style="background:var(--muted);opacity:.5"></span>秘密のリズム（画面が変わった時刻）</span>' +
+      shown.map((f, k) => `<span><span class="dot" style="background:${COLORS[k]}"></span>${esc(f.dst)}</span>`).join('');
+  }
+
+  const VERDICT = {
+    block: '<span class="badge b-danger">遮断（のぞき見の疑い）</span>',
+    'allowed-share': '<span class="badge b-warn">許可した共有先</span>',
+    none: '<span class="badge b-ok">問題なし</span>',
+  };
+  function renderTable(table, res, label) {
+    table.innerHTML = '<tr><th>宛先</th><th>相関の強さ</th><th>遅れ</th><th>判定</th></tr>' +
+      res.results.map(r => `<tr><td>${esc(label ? label(r.dst) : r.dst)}</td><td>${r.score.toFixed(3)}</td><td>${r.lagMs}ミリ秒</td><td>${VERDICT[r.verdict] || esc(r.verdict)}</td></tr>`).join('') +
+      `<tr><td colspan="4" class="muted">指示: ${res.order.action === 'block' ? '遮断（署名つき）' : 'なし'}${res.demo ? '・デモ用の鍵' : ''}</td></tr>`;
+  }
+
+  // ---- 体験 ----
+  function simulate(rh, allowShare) {
+    const n = Math.ceil(rh.dur * 1000 / BIN);
+    const hit = new Array(n).fill(0);
+    for (const t of rh.times) { const k = Math.floor((t - rh.startMs) / BIN); if (k >= 0 && k < n) hit[k] = 1; }
+    const noise = a => Math.round(Math.random() * a);
+    const spy = hit.map((_, i) => 3 + noise(4) + (i >= 2 && hit[i - 2] ? 300 + noise(80) : 0));
+    const meet = hit.map((_, i) => 40 + noise(20) + (i >= 3 && hit[i - 3] ? 150 + noise(60) : 0));
+    const web = hit.map(() => (Math.random() < .05 ? 200 + noise(300) : noise(15)));
+    return {
+      allowed: allowShare ? ['会議ツール'] : [],
+      flows: [{ dst: 'のぞき見ソフト', values: spy }, { dst: '会議ツール', values: meet }, { dst: 'ふつうのWebサイト', values: web }],
+    };
+  }
+
+  $('#demoStart').onclick = async () => {
+    const btn = $('#demoStart'); btn.disabled = true; $('#demoResult').hidden = true;
+    try {
+      const dur = +$('#demoDur').value;
+      const rh = await getRhythm(newSid(), dur);
+      $('#demoMsg').textContent = `秘密のリズムを受け取りました（変化 ${rh.times.length} 回）。時計の色が変わる瞬間がリズムです。`;
+      runClock($('#clock'), rh, async () => {
+        const sim = simulate(rh, $('#demoAllow').checked);
+        const res = await analyze({ sid: rh.sid, startMs: rh.startMs, dur: rh.dur, binMs: BIN, ...sim });
+        drawChart($('#demoChart'), $('#demoLegend'), rh, sim.flows);
+        renderTable($('#demoTable'), res);
+        $('#demoResult').hidden = false;
+        $('#demoMsg').textContent = '判定が終わりました。';
+        btn.disabled = false;
+      });
+    } catch (e) { $('#demoMsg').textContent = e.message; btn.disabled = false; }
+  };
+
+  // ---- 本物で試す ----
+  let realRh = null, realFlows = null, realMap = null;
+  $('#realStart').onclick = async () => {
+    try {
+      realRh = await getRhythm(newSid(), +$('#realDur').value);
+      $('#realMsg').textContent = `リズムを受け取りました（変化 ${realRh.times.length} 回、${realRh.dur}秒）。いまから Wireshark で記録してください。`;
+      runClock($('#clock2'), realRh, () => { $('#realMsg').textContent = '終了しました。Wireshark の記録を止め、CSVを書き出して読み込んでください。'; });
+    } catch (e) { $('#realMsg').textContent = e.message; }
+  };
+
+  function parseCSV(text) {
+    const rows = [];
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const out = []; let cur = '', q = false;
+      for (const ch of line) {
+        if (ch === '"') q = !q; else if (ch === ',' && !q) { out.push(cur); cur = ''; } else cur += ch;
+      }
+      out.push(cur); rows.push(out);
+    }
+    return rows;
+  }
+  function parseTime(v) {
+    v = v.trim();
+    if (/^\d{9,}(\.\d+)?$/.test(v)) return parseFloat(v) * 1000; // エポック秒
+    const t = Date.parse(v.replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1') + (/[zZ]|[+-]\d\d:?\d\d$/.test(v) ? '' : 'Z'));
+    return Number.isFinite(t) ? t : NaN;
+  }
+
+  $('#csvFile').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    if (!realRh) { $('#csvMsg').textContent = '先に「リズムを受け取る」を押して、記録してください。'; return; }
+    const rows = parseCSV(await f.text());
+    const head = (rows.shift() || []).map(h => h.trim().toLowerCase());
+    const iT = head.findIndex(h => h === 'time' || h.includes('時刻'));
+    const iD = head.findIndex(h => h === 'destination' || h.includes('宛先'));
+    const iL = head.findIndex(h => h === 'length' || h.includes('長さ') || h.includes('バイト'));
+    if (iT < 0 || iD < 0 || iL < 0) { $('#csvMsg').textContent = '列が見つかりません。Time・Destination・Length の列を含めて書き出してください。'; return; }
+    const n = Math.ceil(realRh.dur * 1000 / BIN);
+    const byDst = new Map(); let used = 0, bad = 0;
+    for (const r of rows) {
+      const t = parseTime(r[iT] || ''), len = Number(r[iL]), dst = (r[iD] || '').trim();
+      if (!Number.isFinite(t) || !dst) { bad++; continue; }
+      const k = Math.floor((t - realRh.startMs) / BIN);
+      if (k < 0 || k >= n) continue;
+      if (!byDst.has(dst)) byDst.set(dst, new Array(n).fill(0));
+      byDst.get(dst)[k] += Number.isFinite(len) ? len : 0; used++;
+    }
+    if (!byDst.size) { $('#csvMsg').textContent = `リズムの時間内の記録がありませんでした（読めない行 ${bad}件）。時刻の形式（UTC日時かエポック秒）を確認してください。`; return; }
+    // 通信量が多い順に最大200件。IPアドレスは「宛先N」に置き換える（実IPはサーバーへ送らない）
+    const list = [...byDst.entries()].sort((a, b) => b[1].reduce((x, y) => x + y, 0) - a[1].reduce((x, y) => x + y, 0)).slice(0, 200);
+    realMap = new Map(); realFlows = list.map(([ip, values], i) => { const name = `宛先${i + 1}`; realMap.set(name, ip); return { dst: name, values }; });
+    $('#csvMsg').textContent = `${used}件の記録を ${realFlows.length} 個の宛先にまとめました。`;
+    $('#allowList').innerHTML = realFlows.map(fl => `<label class="tile"><input type="checkbox" value="${esc(fl.dst)}"> ${esc(fl.dst)}<br><span class="muted">${esc(realMap.get(fl.dst))}</span></label>`).join('');
+    $('#allowBox').hidden = false;
+  };
+
+  $('#realAnalyze').onclick = async () => {
+    const allowed = [...document.querySelectorAll('#allowList input:checked')].map(x => x.value);
+    try {
+      const res = await analyze({ sid: realRh.sid, startMs: realRh.startMs, dur: realRh.dur, binMs: BIN, allowed, flows: realFlows });
+      const order = res.results.map(r => r.dst);
+      drawChart($('#realChart'), $('#realLegend'), realRh, order.map(d => realFlows.find(f => f.dst === d)));
+      renderTable($('#realTable'), res, d => `${d}（${realMap.get(d) || '?'}）`);
+      $('#realResult').hidden = false;
+    } catch (e) { $('#csvMsg').textContent = e.message; }
+  };
+})();
+</script>
+</body>
+</html>
