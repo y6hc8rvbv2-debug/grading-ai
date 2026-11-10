@@ -11,6 +11,8 @@ try {
     await db.exec(fs.readFileSync(`supabase/migrations/${file}`,'utf8'));
     console.log('PASS',file);
   }
+  // 0027：管理者の二段階認証の必須は security_test.sql の中で確かめる。ほかのテストは必須を外して動かす（supabase/tests/run.sh と同じ）
+  await db.exec('update public.security_settings set require_admin_mfa = false');
   for (const file of ['rls_test.sql','ver6_test.sql','security_test.sql','workflow_test.sql']) {
     await db.exec(fs.readFileSync(`supabase/tests/${file}`,'utf8').replace(/^\\.*$/gm,''));
     console.log('PASS',file);

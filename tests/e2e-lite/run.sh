@@ -54,6 +54,8 @@ echo "== マイグレーションを全部適用（0001〜）"
 for f in supabase/migrations/*.sql; do "${APPDB[@]}" -f "$f" >/dev/null; done
 "${SU[@]}" -d lite -c "create role authenticator login noinherit; grant anon, authenticated, service_role to authenticator;"
 echo "== 初期データ（配信先の登録・教師確認・本人への返却まで本物の関数で）"
+# 0027：管理者の二段階認証の必須は access.mjs の最後で確かめる。代役のログインは2段階目（aal2）を持たないので、ほかのシナリオでは必須を外す
+"${SU[@]}" -d lite -c "update public.security_settings set require_admin_mfa = false" >/dev/null
 "${SU[@]}" -d lite -f tests/e2e-lite/seed.sql >/dev/null
 
 echo "== PostgREST を起動"
@@ -72,7 +74,7 @@ PIDS+=($!)
 for _ in $(seq 1 30); do curl -sf -o /dev/null "http://127.0.0.1:$REST_PORT/" && break; sleep 1; done
 
 echo "== ログイン・画像の代役と、AI の宛先の罠を起動"
-LITE_USERS='{"admin@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000001","password":"pass-lite-123"},"stu-a@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000002","password":"pass-lite-123"},"stu-b@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000003","password":"pass-lite-123"},"acc-x-teacher@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000a1","password":"pass-lite-123"},"acc-y-teacher@lite.example":{"id":"acce55ed-0000-0000-000b-0000000000a1","password":"pass-lite-123"},"acc-x-stu1@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000b1","password":"pass-lite-123"},"acc-x-stu2@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000b2","password":"pass-lite-123"},"night-admin@lite.example":{"id":"b1ab1ab1-0000-0000-0000-0000000000a1","password":"pass-lite-123"}}'
+LITE_USERS='{"admin@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000001","password":"pass-lite-123"},"stu-a@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000002","password":"pass-lite-123"},"stu-b@lite.example":{"id":"eeeeeeee-0000-0000-0000-000000000003","password":"pass-lite-123"},"acc-x-teacher@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000a1","password":"pass-lite-123"},"acc-y-teacher@lite.example":{"id":"acce55ed-0000-0000-000b-0000000000a1","password":"pass-lite-123"},"acc-x-stu1@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000b1","password":"pass-lite-123"},"acc-x-stu2@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000b2","password":"pass-lite-123"},"night-admin@lite.example":{"id":"b1ab1ab1-0000-0000-0000-0000000000a1","password":"pass-lite-123"},"acc-x-admin@lite.example":{"id":"acce55ed-0000-0000-000a-0000000000a9","password":"pass-lite-123","role":"admin"}}'
 GATEWAY_PORT="$GW_PORT" POSTGREST_URL="http://127.0.0.1:$REST_PORT" JWT_SECRET="$JWT_SECRET" LITE_USERS="$LITE_USERS" \
   PG_URL="postgresql://postgres@127.0.0.1:$PG_PORT/lite" \
   node tests/e2e-lite/gateway.mjs > "$WORK/gateway.log" 2>&1 &

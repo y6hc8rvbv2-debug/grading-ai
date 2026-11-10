@@ -1,0 +1,23 @@
+# 使っている部品の更新を、GitHub が自動で提案する（2026-11-10。セキュリティの12項目の10）
+#   脆弱性の修正は Dependabot security updates（リポジトリの Settings → Code security で有効にする）が、すぐに PR を作る
+#   ふだんの更新は週1回・まとめて1つの PR（多すぎる PR で見落とさないように）
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Tokyo

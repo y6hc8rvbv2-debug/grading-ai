@@ -12,6 +12,7 @@ try {
   await db.exec(fs.readFileSync('supabase/tests/00_supabase_shim.sql','utf8'));
   await db.exec('set role app_owner');
   for(const file of fs.readdirSync('supabase/migrations').sort()) await db.exec(fs.readFileSync('supabase/migrations/'+file,'utf8'));
+  await db.exec('update public.security_settings set require_admin_mfa = false'); // 0027：管理者の二段階認証の必須は security_test.sql で確かめる
   await db.exec(`
     insert into schools(id,name,code) values('eeeeeeee-0000-0000-0000-000000000000','Billing test','BILL');
     insert into auth.users(id,email,raw_app_meta_data) values('eeeeeeee-0000-0000-0000-000000000001','billing@example.test','{"school_id":"eeeeeeee-0000-0000-0000-000000000000","role":"admin"}');

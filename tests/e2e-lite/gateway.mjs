@@ -32,7 +32,8 @@ function verify(token) {
   return c.exp && c.exp * 1000 < Date.now() ? null : c;
 }
 const userJson = (id, email) => ({ id, aud: "authenticated", role: "authenticated", email, email_confirmed_at: new Date(0).toISOString(),
-  app_metadata: { provider: "email" }, user_metadata: {}, identities: [], created_at: new Date(0).toISOString(), updated_at: new Date(0).toISOString() });
+  // 役割（LITE_USERS の role）。本物の Supabase と同じく app_metadata に入れる（0027：管理者の二段階認証の案内を確かめる）
+  app_metadata: { provider: "email", ...(USERS[email]?.role ? { role: USERS[email].role } : {}) }, user_metadata: {}, identities: [], created_at: new Date(0).toISOString(), updated_at: new Date(0).toISOString() });
 
 // 白い PNG（答案の写真の代わり。縦長 800x1100）
 function png(w, h) {

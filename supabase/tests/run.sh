@@ -22,6 +22,8 @@ for f in supabase/migrations/*.sql; do
   "${PSQL_APP[@]}" -f "$f"
 done
 
+# 0027：管理者の二段階認証の必須は、security_test.sql で確かめる。ほかのテストは、管理者が二段階認証を設定していない形で書いてあるので、必須を外して動かす
+"${PSQL_APP[@]}" -c "update public.security_settings set require_admin_mfa = false"
 echo "== supabase/tests/rls_test.sql"
 "${PSQL_APP[@]}" -f supabase/tests/rls_test.sql
 "${PSQL_APP[@]}" -f supabase/tests/ver6_test.sql

@@ -19,7 +19,14 @@ export const uid = (() => {
   return (p = "id") => `${p}_${++n}`;
 })();
 
+// データの書き出し（CSV）を監査ログに残すための受け口（2026-11-10。セキュリティの12項目の9）。AppShell が Supabase 接続時に登録する
+let exportHook: ((info: { filename: string; rows: number }) => void) | null = null;
+export function setExportHook(fn: ((info: { filename: string; rows: number }) => void) | null) { exportHook = fn; }
+
 export function download(filename, text, mime = "text/plain;charset=utf-8") {
+  if (/\.csv$/i.test(filename) && exportHook) {
+    try { exportHook({ filename, rows: Math.max(0, String(text).split("\n").length - 1) }); } catch { /* 記録の失敗で書き出しを止めない */ }
+  }
   try {
     const blob = new Blob(["\uFEFF" + text], { type: mime });
     const url = URL.createObjectURL(blob);

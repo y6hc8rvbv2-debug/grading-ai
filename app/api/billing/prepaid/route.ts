@@ -9,6 +9,7 @@
 // 受け付けるのはプランのキーと月数だけ（画面から送られた金額は使わない）。ストア用のアプリの中では受け付けない。
 // ============================================================================
 import { NextResponse } from "next/server";
+import { publicError } from "@/lib/security";
 import { randomUUID } from "node:crypto";
 import { isNativeUserAgent } from "@/lib/native";
 import { createAdminClient } from "@/lib/supabase/server";
@@ -97,6 +98,6 @@ export async function POST(req: Request) {
     await db.from("billing_prepaid").update({ provider_ref: ref }).eq("id", orderId);
     return NextResponse.json({ url, orderId, total: total.total });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error && !/Stripe/.test(e.name) ? e.message : "支払いを開始できません。設定を確認してください。" }, { status: 400 });
+    return NextResponse.json({ error: publicError(e, "支払いを開始できません。時間をおいて、もう一度お試しください。", "billing/prepaid") }, { status: 400 });
   }
 }

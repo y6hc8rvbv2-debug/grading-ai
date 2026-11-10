@@ -18,6 +18,12 @@
 不正アクセスの4経路で調べる ― ①正規のアプリ・API を装った侵入（認証・学校の分離・CSRF・回数の制限）②脆弱性（`npm audit`・XSS・CSV・AI への指示の書き込み・ヘッダー）
 ③管理者のなりすまし（役割・RLS・関数の権限・MFA）④委託先・クラウド（依存関係・GitHub Actions・鍵）。見つけたらユーザーに報告し、既存の機能を壊さずに防ぐ仕組みを実装する（直せないものは理由とおすすめを書く）
 
+**セキュリティの12項目を作成の条件にする（2026-11-10 ユーザーの指示。`docs/SECURITY-12.md`）**：自作のアプリ（このアプリも、新しいアプリも）は、
+①ログイン認証（実績のある認証サービス・管理者は多要素認証必須）②権限チェック（サーバー側で毎回）③秘密情報（環境変数・GitHub に上げない）④入力値の検査（形式と長さ・SQL インジェクション・XSS）
+⑤個人情報の最小化（暗号化・不要なら削除・AI に送る前に氏名を伏せる）⑥HTTPS ⑦AI の防御（プロンプトインジェクション・権限を絞る・出力をそのまま実行/表示しない）⑧回数制限（ログイン・API・AI の費用）
+⑨ログと通知（ログイン・権限変更・書き出しを記録・異常を通知・ログに個人情報を書かない）⑩ライブラリの更新（npm audit・Dependabot）⑪バックアップと復元（実際に戻せるか試す）⑫エラー表示（利用者には簡潔に・詳細はログ）を満たす。
+1〜4は公開前に必須、5〜8は個人情報・AI を扱うなら公開前に必須。作るとき・大きな変更のときに12項目で点検し、状態・根拠・残りを `docs/SECURITY-12.md` の表に書いて報告する
+
 変更を push したら、毎回つぎを行ってから報告する。
 1. 手元の自動テスト → push（ブランチ claude/**）。ビルドは `.next` を消してから（lint の結果の使い回しで、Vercel だけが失敗することがある。2026-10-22）
 2. GitHub Actions の `checks`（単体・DB）と `verify-db`（新しいマイグレーションを検証用 saiten-verify に自動適用。`scripts/verify-db/apply.mjs --to latest`）の結果を確かめる
@@ -32,6 +38,14 @@
 ---
 
 ## 現在地
+
+### セキュリティの12項目の点検（2026-11-10。**0027_security_12.sql**。`docs/SECURITY-12.md`）
+
+- 管理者は二段階認証が必須（0027 の mfa_satisfied・`my_mfa_required`・proxy.ts と /login の設定の案内。緊急時は `security_settings.require_admin_mfa=false`）。テストは run.sh・pglite・e2e-lite で必須を外し、security_test.sql と access.mjs の最後で必須を確かめる
+- 自由記述の長さの上限（not valid）・役割の変更／二段階認証の設定と解除を監査ログに・CSV の書き出しを監査ログに（`lib/util.ts` の setExportHook → AppShell）
+- 管理者の「セキュリティのお知らせ」（`components/SecurityNotices.tsx`・`lib/security-notices.ts`）・AI 採点の1日の上限（`DAILY_LIMIT.grade`）・`publicError`（内部のエラー文を返さない）
+- 氏名欄の塗りつぶしは既定でオン・checks に `npm audit --audit-level=high`・`.github/dependabot.yml`
+- 残り：バックアップの復元の練習（ユーザー作業）・画面の外への通知
 
 ### 夜間の Batch・学校の Opus単独の追加料金・従量課金（2026-11-02。**0026_batch_overage.sql**。`docs/BILLING-NIGHT.md`）
 
@@ -57,7 +71,7 @@
 - 検証：`supabase/tests/security_test.sql`（run.sh・pglite）・`tests/unit/handy.test.ts`・`npm run preview:check` がヘッダーを確かめる
 - 2回目（同日。ユーザーの指示でおすすめをすべて実装）：**0022_account_security.sql**（二段階認証を設定した人は aal2 でないと current_school_id/current_role_is が空・生徒アカウントは招待→生徒の承認（student_account_invites・my_student_invites・accept/decline_student_invite。bind_student_account は招待を作るだけでアカウントの有無を答えない）・app_metadata の変更を profiles に反映）。
   二段階認証の画面 `components/MfaSettings.tsx`・ログインの2段階目（`app/login`）・proxy.ts（旧 middleware.ts）の aal2 への誘導。再認証 `verifyPassword`（アカウント削除・/api/billing・/api/billing/prepaid。`password` が要る）。
-  verify-db は `VERIFY_DB_URL`（検証用 DB だけの接続文字列。ref・リージョンを照合）を優先（ユーザーが Secret を入れ替えるまでは SUPABASE_ACCESS_TOKEN で動く）。二段階認証は必須にしていない（未設定の管理者が締め出されるため）
+  verify-db は `VERIFY_DB_URL`（検証用 DB だけの接続文字列。ref・リージョンを照合）を優先（ユーザーが Secret を入れ替えるまでは SUPABASE_ACCESS_TOKEN で動く）。二段階認証は 2026-11-10（0027）から管理者だけ必須（ログインのあとに設定を案内するので締め出さない）
 
 ### 漏れても使えないようにする対策（2026-10-27。ユーザーの指示で A〜D をすべて。`docs/SECURITY-REVIEW.md` 3回目）
 

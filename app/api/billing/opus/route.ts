@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { publicError } from "@/lib/security";
 import { isNativeUserAgent } from "@/lib/native";
 import { randomBytes } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/server";
@@ -34,5 +35,5 @@ export async function POST(req: Request) {
     const { error } = await admin.from("billing_orders").update({ checkout_id: session.id }).eq("id", jobId);
     if (error) throw Error("支払い情報を保存できません。もう一度お試しください。");
     return NextResponse.json({ url: session.url });
-  } catch (e) { return NextResponse.json({ error: e instanceof Error && !/Stripe/.test(e.name) ? e.message : "決済を開始できません。" }, { status: 400 }); }
+  } catch (e) { return NextResponse.json({ error: publicError(e, "決済を開始できません。時間をおいて、もう一度お試しください。", "billing/opus") }, { status: 400 }); }
 }

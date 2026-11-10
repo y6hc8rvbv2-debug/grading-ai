@@ -61,6 +61,17 @@ export async function proxy(request: NextRequest) {
       url.search = "?mfa=1";
       return NextResponse.redirect(url);
     }
+    // 0027：管理者で二段階認証をまだ設定していない → 設定の画面へ（DB も、設定して2段階目まで済むまで学校のデータを返さない）
+    if (aal?.nextLevel !== "aal2" && user.app_metadata?.role === "admin") {
+      const { data: required, error } = await supabase.rpc("my_mfa_required");
+      if (!error && required === true) {
+        if (path.startsWith("/api/")) return NextResponse.json({ error: "管理者は二段階認証の設定が必要です。ログインし直して、設定してください。", code: "mfa_setup" }, { status: 401 });
+        const url = request.nextUrl.clone();
+        url.pathname = "/login";
+        url.search = "?mfa=setup";
+        return NextResponse.redirect(url);
+      }
+    }
   }
 
   return response;

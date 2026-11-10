@@ -5,7 +5,8 @@ import React, { useCallback, useEffect, useMemo, useState, type ReactNode } from
 import { usePathname, useRouter } from "next/navigation";
 import { THEME, FONT_UI, FONT_MONO, FONT_HAND } from "@/lib/ui/theme";
 import { makeT, isRTL } from "@/lib/i18n";
-import { clamp, uid } from "@/lib/util";
+import { clamp, setExportHook, uid } from "@/lib/util";
+import { writeAudit } from "@/lib/db/grading";
 import { DEFAULT_RUBRIC } from "@/lib/grading/engine";
 import { friendlyError } from "@/lib/errors";
 import { isSupabaseConfigured, type DataSource, type SessionInfo } from "@/lib/data/source";
@@ -173,6 +174,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
       if (!session) { router.replace("/login"); return; }
       if (!session.profile) { setState({ kind: "no-school", session }); return; }
       if (session.profile.uiLang && session.profile.uiLang !== "ja") setLangState(session.profile.uiLang);
+      // CSV の書き出し（成績・名簿・監査ログなど）を監査ログに残す（ファイル名と行数だけ。中身は書かない）
+      const schoolId = session.school?.id;
+      if (ds.mode === "supabase" && schoolId) {
+        setExportHook(({ filename, rows }: { filename: string; rows: number }) =>
+          void writeAudit({ schoolId, action: "data.export", targetTable: "export", targetId: null, detail: { file: filename.slice(0, 120), rows } }));
+      }
       await loadAll();
       // 採点AIが使えないときは、答案の保存までで止める（画面の案内が変わるだけで、起動は止めない）
       ds.aiStatus().then(setAi).catch(() => setAi({ enabled: false, model: null }));

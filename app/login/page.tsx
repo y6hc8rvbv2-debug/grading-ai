@@ -8,6 +8,7 @@ import { friendlyError } from "@/lib/errors";
 import { isSupabaseConfigured } from "@/lib/data/source";
 import { createClient } from "@/lib/supabase/client";
 import { APP_NAME } from "@/lib/app-info";
+import { MfaSettings } from "@/components/MfaSettings";
 import { PasskeySignIn } from "@/components/PasskeySettings";
 
 const T = THEME.light;
@@ -22,6 +23,8 @@ export default function LoginPage() {
   const [deleted, setDeleted] = useState(false);
   // 二段階認証（0022）：パスワードのあと、設定済みの人だけ6桁のコードを聞く
   const [mfa, setMfa] = useState<{ factorId: string } | null>(null);
+  // 0027：管理者で二段階認証がまだ無い → ログインのあとに、ここで設定してもらう
+  const [setup, setSetup] = useState(false);
   const [code, setCode] = useState("");
   // アカウントを削除した直後（/login?deleted=1）
   useEffect(() => {
@@ -29,6 +32,7 @@ export default function LoginPage() {
     setDeleted(q.get("deleted") === "1");
     // 1段階目だけ済んだ状態で戻された（middleware）とき：そのまま2段階目を聞く
     if (q.get("mfa") === "1" && isSupabaseConfigured()) needSecondStep().catch(() => undefined);
+    if (q.get("mfa") === "setup" && isSupabaseConfigured()) needSetup().then(setSetup).catch(() => undefined);
   }, []);
 
   /** 二段階認証が設定済みで、まだ2段階目が済んでいなければ、コードの入力に切り替える */
@@ -41,6 +45,11 @@ export default function LoginPage() {
     if (!factor) return false;
     setMfa({ factorId: factor.id });
     return true;
+  };
+  /** 管理者で二段階認証の設定が必要か（0027 の my_mfa_required。0027 の前の DB では呼べないので、必要なしとして進む） */
+  const needSetup = async () => {
+    const { data, error: err } = await createClient().rpc("my_mfa_required");
+    return !err && data === true;
   };
   const verify = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,6 +74,7 @@ export default function LoginPage() {
       const { error: err } = await createClient().auth.signInWithPassword({ email, password });
       if (err) throw err;
       if (await needSecondStep()) { setBusy(false); return; }
+      if (await needSetup()) { setSetup(true); setBusy(false); return; }
       router.replace("/");
       router.refresh();
     } catch (err) {
@@ -114,6 +124,13 @@ export default function LoginPage() {
               background: T.accent, color: "#fff", font: `700 14px ${FONT_UI}`, cursor: "pointer",
             }}>デモを開く</button>
           </div>
+        ) : setup ? (
+          <div style={{ fontSize: 13, lineHeight: 1.8 }}>
+            <div role="status" style={{ background: T.warnSoft, color: T.warn, borderRadius: 9, padding: "9px 11px", marginBottom: 10 }}>
+              管理者のアカウントは、二段階認証（スマホの認証アプリの6桁のコード）の設定が必要です。設定すると、すぐに使えます。
+            </div>
+            <MfaSettings isAdmin required onDone={() => { setSetup(false); router.replace("/"); router.refresh(); }} />
+          </div>
         ) : mfa ? (
           <form onSubmit={verify} noValidate>
             <div style={{ fontSize: 13, lineHeight: 1.8, marginBottom: 10 }}>二段階認証：スマホの認証アプリに表示された6桁の数字を入力してください。</div>
@@ -153,6 +170,7 @@ export default function LoginPage() {
             }}>{busy ? "ログインしています…" : "ログイン"}</button>
             <PasskeySignIn onError={setError} onSignedIn={async () => {
               if (await needSecondStep()) return;
+              if (await needSetup()) { setSetup(true); return; }
               router.replace("/"); router.refresh();
             }} />
             <div style={{ fontSize: 11.5, color: T.textFaint, marginTop: 14, lineHeight: 1.75 }}>

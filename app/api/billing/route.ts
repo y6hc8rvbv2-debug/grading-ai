@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { isNativeUserAgent } from "@/lib/native";
 import { randomBytes } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/server";
-import { REAUTH_ERROR, verifyPassword } from "@/lib/security";
+import { REAUTH_ERROR, publicError, verifyPassword } from "@/lib/security";
 import { CLEAR_CHECKOUT, appUrl, contractLabel, billingEnabled, billingUser, nightEnabled, planAvailability, stripeMode, planPriceId, sameOrigin, stripeClient, syncSubscription, verifiedSchoolTaxRate } from "@/lib/billing/server";
 import { BILLING_PLANS, billingPlan } from "@/lib/billing/catalog";
 
@@ -42,7 +42,7 @@ export async function GET() {
     const review = rv?.review_at ? { at: rv.review_at, reason: canManage ? rv.review_reason : null } : null;
     return NextResponse.json({ enabled: true, nightEnabled: nightEnabled(), canManage, pendingOrders: orders || [], account, planLabel: contractLabel(account?.plan_id), review,
       used: rows.filter((u) => u.kind !== "overage").length, opusAmount: rows.reduce((n, x) => n + x.amount, 0), availability, overage, prices: prices ?? null });
-  } catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : "契約情報を確認できません。" }, { status: 503 }); }
+  } catch (e) { return NextResponse.json({ error: publicError(e, "契約情報を確認できません。時間をおいて、もう一度お試しください。", "billing") }, { status: 503 }); }
 }
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return NextResponse.json({ error: "別のサイトからの操作を拒否しました。" }, { status: 403 });
@@ -147,5 +147,5 @@ export async function POST(req: Request) {
     const { error: stored } = await db.from("billing_accounts").update({ checkout_session_id: session.id }).eq("school_id", schoolId);
     if (stored) throw Error("決済画面を保存できません。もう一度お試しください。");
     return NextResponse.json({ url: session.url });
-  } catch (e) { return NextResponse.json({ error: e instanceof Error && !/Stripe/.test(e.name) ? e.message : "決済を開始できません。設定を確認してください。" }, { status: 400 }); }
+  } catch (e) { return NextResponse.json({ error: publicError(e, "決済を開始できません。時間をおいて、もう一度お試しください。", "billing") }, { status: 400 }); }
 }

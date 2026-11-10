@@ -18,7 +18,8 @@ export function bearerMatches(req: Request, secret: string | undefined): boolean
 }
 
 /** 1人の教職員が24時間に AI を呼べる回数（盗まれたアカウント・不具合の繰り返しで費用が膨らむのを止める。ふだんの使い方では届かない） */
-export const DAILY_LIMIT = { intake: 2000, testImport: 60 } as const;
+// grade：AI 採点（1日・1校。課金を有効にした環境では月の枠と従量課金の上限額が別にかかる。2026-11-10 セキュリティの12項目の8）
+export const DAILY_LIMIT = { intake: 2000, testImport: 60, grade: 3000 } as const;
 export const dayAgo = () => new Date(Date.now() - 24 * 3600 * 1000).toISOString();
 
 /** パスワードの聞き直し（再認証）：大事な操作（アカウントの削除・契約の申し込みや変更）の前に、本人のパスワードを確かめる。
@@ -35,3 +36,12 @@ export async function verifyPassword(email: string | undefined | null, password:
   return true;
 }
 export const REAUTH_ERROR = "確認のため、ログインのパスワードを入力してください（パスワードが違う場合も、このメッセージになります）。";
+
+/** 画面に返すエラー文（2026-11-10。セキュリティの12項目の12）：アプリが書いた日本語の案内だけを返し、
+ *  DB・決済・ライブラリの内部のエラー文（英語・識別子を含むことがある）は返さずに、決まった文に置き換える。内部の種類だけをログに残す */
+export function publicError(e: unknown, fallback: string, where = "api") {
+  const err = e instanceof Error ? e : null;
+  const ours = !!err && !/Stripe|Postgrest|Supabase|Fetch|TypeError|SyntaxError/i.test(err.name) && /[ぁ-んァ-ン一-龥]/.test(err.message);
+  if (!ours) console.error(`[${where}] ${err?.name ?? typeof e}`);
+  return ours ? err!.message : fallback;
+}

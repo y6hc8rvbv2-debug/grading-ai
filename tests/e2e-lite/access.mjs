@@ -262,6 +262,34 @@ for (const s of [SUB_X1, SUB_X2]) {
   await s1.ctx.close(); await stu2.ctx.close();
 }
 
+// ---------------------------------------------------------------- 5. 管理者は二段階認証が必須（0027。セキュリティの12項目の1）
+{
+  sql(`insert into auth.users (id, email, email_confirmed_at, raw_app_meta_data) values ('acce55ed-0000-0000-000a-0000000000a9', 'acc-x-admin@lite.example', now(), '{"school_id":"${X}","role":"admin"}');
+       update public.security_settings set require_admin_mfa = true`);
+  const c = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const p = await c.newPage();
+  p.on("pageerror", (e) => errors.push(`[mfa] ${e.message}`));
+  await p.goto(BASE + "/login");
+  await p.getByLabel("メールアドレス").fill("acc-x-admin@lite.example");
+  await p.getByLabel("パスワード").fill(PW);
+  await p.getByRole("button", { name: "ログイン", exact: true }).click();
+  await p.getByText("管理者のアカウントは、二段階認証").waitFor({ timeout: 20000 }).catch(async (e) => {
+    console.log("--- url", p.url(), "\n--- text", (await p.evaluate(() => document.body.innerText)).slice(0, 800));
+    console.log("--- rpc", JSON.stringify(await rest(await tokenOf("acc-x-admin@lite.example"), "rpc/my_mfa_required", { method: "POST", body: "{}" })));
+    throw e;
+  });
+  await p.getByRole("button", { name: "二段階認証を設定する" }).waitFor({ timeout: 10000 });
+  ok(true, "二段階認証の無い管理者は、ログインのあとに設定の画面が出る（設定のボタンつき）");
+  await p.goto(BASE + "/");
+  ok(new URL(p.url()).search.includes("mfa=setup"), "設定するまで、ダッシュボードを開こうとしても設定の画面へ戻される");
+  const t = await tokenOf("acc-x-admin@lite.example");
+  ok((await rest(t, "students?select=id")).body.length === 0, "設定するまで、DB も学校のデータ（名簿）を返さない");
+  const tt = await tokenOf("acc-x-teacher@lite.example");
+  ok((await rest(tt, "students?select=id")).body.length > 0, "先生（管理者でない）は今までどおり使える");
+  sql("update public.security_settings set require_admin_mfa = false");
+  await c.close();
+}
+
 ok(errors.length === 0, `画面のエラーなし${errors.length ? "：" + errors.slice(0, 3).join(" / ") : ""}`);
 await tx.ctx.close(); await ty.ctx.close();
 await browser.close();

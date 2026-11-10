@@ -41,6 +41,7 @@ import { costOfStage, type GradingMode, type GradingStage } from "@/lib/grading/
 import { billingEnabled, nightEnabled, sameOrigin, workerAuthorized } from "@/lib/billing/server";
 import { BATCH_DISCOUNT } from "@/lib/grading/batch";
 import { isNativeUserAgent } from "@/lib/native";
+import { DAILY_LIMIT, dayAgo } from "@/lib/security";
 import type { QType, Rubric } from "@/lib/types";
 import { loadSchoolAi } from "@/lib/ai/settings";
 
@@ -228,6 +229,10 @@ export async function POST(request: Request) {
       }
       job = created as JobRow;
     } else {
+    // 1日の上限（課金を止めている環境でも、AI の利用料が際限なく増えないように）
+    const { count: today } = await supabase.from("grading_jobs").select("id", { count: "exact", head: true })
+      .eq("school_id", sub.school_id).gte("created_at", dayAgo());
+    if ((today ?? 0) >= DAILY_LIMIT.grade) return fail(`AI採点は1日${DAILY_LIMIT.grade.toLocaleString("ja-JP")}件までです。明日また試してください。急ぎのときは管理者に連絡してください。`, 429, { code: "daily_limit" });
     const { data: created, error } = await supabase.from("grading_jobs").insert({
       school_id: sub.school_id, submission_id: submissionId, created_by: user.id, request_id: requestId, mode,
       prev_status: sub.status, prev_progress: sub.progress,

@@ -85,8 +85,8 @@ export default function NewGrading() {
   const [pagesPer, setPagesPer] = useState(1);
   // おまかせモード（自動振り分け・自動確認）と、準備がそろったら自動で採点を始めるか
   const [omakase, setOmakase] = useLocalFlag("omakase", true);
-  // 氏名欄を塗りつぶしてから保存する（2026-10-27。自動振り分けが見つけた氏名欄だけ。既定はオフ・端末に記憶）
-  const [redactName, setRedactName] = useLocalFlag("redactName", false);
+  // 氏名欄を塗りつぶしてから保存する（2026-10-27。自動振り分けが見つけた氏名欄だけ。2026-11-10 から既定はオン（セキュリティの12項目の5）・端末に記憶）
+  const [redactName, setRedactName] = useLocalFlag("redactName", true);
   const [autoStart, setAutoStart] = useLocalFlag("autoStart", true);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [autoStartOff, setAutoStartOff] = useState(false);

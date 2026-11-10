@@ -3,7 +3,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { purgeExpired } from "@/lib/retention";
-import { bearerMatches } from "@/lib/security";
+import { bearerMatches, publicError } from "@/lib/security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +34,6 @@ export async function GET(req: Request) {
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+    return NextResponse.json({ error: publicError(e, "保存期間の削除に失敗しました。次回もう一度行います。", "retention") }, { status: 500 });
   }
 }

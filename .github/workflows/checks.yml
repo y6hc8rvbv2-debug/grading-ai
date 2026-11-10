@@ -26,3 +26,6 @@ jobs:
         run: npm run test:db:memory
       - name: DB（料金・前払い）
         run: npm run test:billing:db
+      # 使っている部品の、公開済みの脆弱性（高・重大）が無いか（2026-11-10。セキュリティの12項目の10）
+      - name: 部品の脆弱性（npm audit）
+        run: npm audit --omit=dev --audit-level=high

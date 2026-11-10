@@ -9,6 +9,7 @@ import { pct } from "@/lib/util";
 import { useUI, type View } from "@/components/ui-context";
 import { Btn, Card, Field, Input, Section, Stat, grid, inputStyle } from "@/components/ui";
 import SubscriptionPlans from "@/components/SubscriptionPlans";
+import { SecurityNotices } from "@/components/SecurityNotices";
 import { APP_INFO, POLICY_VERSION, mailtoLink } from "@/lib/app-info";
 
 const QA = [
@@ -139,17 +140,20 @@ export default function Dashboard() {
           </div>
         </Card>
 
+        {/* セキュリティのお知らせ（管理者だけ。監査ログから。0027） */}
+        <SecurityNotices />
         {/* セキュリティ対策（docs/SECURITY-REVIEW.md の要点） */}
-        <Card title="セキュリティ対策" sub="不正アクセスの4つの経路に沿って点検しています（2026年10月）">
+        <Card title="セキュリティ対策" sub="不正アクセスの4つの経路と、セキュリティの12項目に沿って点検しています（2026年11月）">
           <ul data-testid="security-measures" style={{ margin: 0, paddingInlineStart: 18, fontSize: 12.5, color: T.textSub, lineHeight: 1.85 }}>
             <li>学校ごとにデータを分け、他校からは見えません</li>
             <li>通信は HTTPS だけ。ほかのサイトへの埋め込みも禁止</li>
-            <li>二段階認証（認証アプリの6桁）に対応</li>
+            <li>二段階認証（認証アプリの6桁）。管理者は必須</li>
             <li>削除・契約の変更の前にパスワードを聞き直します</li>
             <li>閲覧だけの役割は、成績を変えられません</li>
             <li>答案の写真の暗号化（鍵は別の鍵金庫）・氏名欄の塗りつぶしに対応</li>
             <li>パスキー（指紋・顔認証）でのログインに対応</li>
-            <li>部品の既知の脆弱性を点検・更新しています</li>
+            <li>部品の既知の脆弱性を自動で点検・更新しています</li>
+            <li>書き出し・役割の変更などを記録し、管理者にお知らせします</li>
           </ul>
           <div style={{ marginTop: 12 }}>
             <Btn size="sm" variant="soft" onClick={() => go("settings")}>二段階認証を設定する（設定画面）</Btn>

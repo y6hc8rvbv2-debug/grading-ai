@@ -3,13 +3,21 @@
 //   設定すると、ログインのたびにパスワードのあとで6桁のコードを聞かれる。DB も、2段階目まで済んだログインでないと学校のデータを返さない（0022）
 //   管理者には設定をすすめる（パスワードが漏れても、なりすまされない）
 import React, { useEffect, useState } from "react";
-import { Btn } from "@/components/ui";
 import { createClient } from "@/lib/supabase/client";
 import { friendlyError } from "@/lib/errors";
 
+// ボタン（画面の共通設定に頼らない。ログイン画面（共通の外枠の外）でも使うため。2026-11-10）
+function Btn({ children, onClick, disabled, variant }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean; size?: string; variant?: "ghost" }) {
+  return <button type="button" onClick={onClick} disabled={disabled} style={{
+    padding: "6px 12px", borderRadius: 8, fontSize: 13, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : 1,
+    border: `1px solid ${variant === "ghost" ? "transparent" : "#9aa3ad"}`, background: variant === "ghost" ? "transparent" : "#fff", color: "#1d2433",
+  }}>{children}</button>;
+}
+
 type Factor = { id: string; status: string; factor_type?: string; friendly_name?: string };
 
-export function MfaSettings({ isAdmin }: { isAdmin: boolean }) {
+/** onDone：設定が終わったとき（ログインの直後に設定を求める画面で、続きへ進む）。required：管理者で設定が必須（2026-11-10。0027） */
+export function MfaSettings({ isAdmin, onDone, required }: { isAdmin: boolean; onDone?: () => void; required?: boolean }) {
   const [factors, setFactors] = useState<Factor[] | null>(null);
   const [enroll, setEnroll] = useState<{ id: string; qr: string; secret: string } | null>(null);
   const [code, setCode] = useState("");
@@ -17,9 +25,12 @@ export function MfaSettings({ isAdmin }: { isAdmin: boolean }) {
   const [message, setMessage] = useState("");
 
   const load = async () => {
-    const { data, error } = await createClient().auth.mfa.listFactors();
-    if (error) { setFactors([]); return; }
-    setFactors(((data?.all ?? []) as Factor[]).filter((f) => (f.factor_type ?? "totp") === "totp"));
+    // 読み込みに失敗しても（例外を含む）、設定のボタンは出す（何も出ないと、必須の管理者が先へ進めない）
+    try {
+      const { data, error } = await createClient().auth.mfa.listFactors();
+      if (error) { setFactors([]); return; }
+      setFactors(((data?.all ?? []) as Factor[]).filter((f) => (f.factor_type ?? "totp") === "totp"));
+    } catch { setFactors([]); }
   };
   useEffect(() => { load(); }, []);
   const verified = (factors ?? []).filter((f) => f.status === "verified");
@@ -43,10 +54,13 @@ export function MfaSettings({ isAdmin }: { isAdmin: boolean }) {
       if (error) throw error;
       setEnroll(null); setCode(""); setMessage("二段階認証を設定しました。次のログインから、6桁のコードを聞かれます。");
       await load();
+      onDone?.();
     } catch (e) { setMessage(friendlyError(e, "コードの確認")); } finally { setBusy(false); }
   };
   const remove = async (id: string) => {
-    if (!window.confirm("二段階認証を解除しますか？ パスワードだけでログインできるようになります。")) return;
+    if (!window.confirm(isAdmin
+      ? "二段階認証を解除しますか？ 管理者は二段階認証が必須のため、解除すると次のログインで設定し直すまで学校のデータを使えません。"
+      : "二段階認証を解除しますか？ パスワードだけでログインできるようになります。")) return;
     setBusy(true); setMessage("");
     try {
       const { error } = await createClient().auth.mfa.unenroll({ factorId: id });
@@ -84,7 +98,9 @@ export function MfaSettings({ isAdmin }: { isAdmin: boolean }) {
       ) : (
         <div style={{ fontSize: 13, lineHeight: 1.8 }}>
           {isAdmin
-            ? <div role="note" style={{ color: "#b5620e", fontWeight: 700 }}>管理者は設定をおすすめします。パスワードが漏れても、なりすましを防げます。</div>
+            ? <div role="note" style={{ color: "#b5620e", fontWeight: 700 }}>{required
+                ? "管理者は二段階認証の設定が必須です。設定するまで、学校のデータは使えません（パスワードが漏れても、なりすましを防ぐため）。"
+                : "管理者は二段階認証が必須です。パスワードが漏れても、なりすましを防げます。"}</div>
             : <div>パスワードに加えて、スマホの認証アプリのコードでログインします。</div>}
           <div style={{ marginTop: 6 }}><Btn size="sm" disabled={busy} onClick={start}>二段階認証を設定する</Btn></div>
         </div>
