@@ -15,7 +15,7 @@
     "jszip": "^3.10.1",
     "lucide-react": "^0.469.0",
     "lz-string": "^1.5.0",
-    "pii-shield": "github:y6hc8rvbv2-debug/pii-shield",
+    "pii-shield": "file:vendor/pii-shield",
     "pptxgenjs": "^4.0.1",
     "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
@@ -27,5 +27,8 @@
     "@vitejs/plugin-react": "^4.7.0",
     "tailwindcss": "^4.1.18",
     "vite": "^7.3.0"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }
