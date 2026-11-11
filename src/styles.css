@@ -1,0 +1,66 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic UI", "Noto Sans JP", system-ui, sans-serif;
+  --font-display: "Zen Maru Gothic", "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-mute: var(--mute);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-soft: var(--brand-soft);
+  --color-on-brand: var(--on-brand);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-good-soft: var(--good-soft);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad-soft: var(--bad-soft);
+}
+
+:root {
+  --bg: #f5f2ec; --surface: #ffffff; --sunken: #efebe3; --line: #e3ded3; --ink: #1d232c; --mute: #646c7a;
+  --brand: #0f766e; --brand-strong: #0b5a54; --brand-soft: #d8f0ec; --on-brand: #ffffff;
+  --good: #15803d; --warn: #b45309; --bad: #c2410c; --good-soft: #dcf5e3; --warn-soft: #fdefc8; --bad-soft: #fde4d8;
+  color-scheme: light;
+}
+:root[data-accent="indigo"] { --brand: #4338ca; --brand-strong: #3730a3; --brand-soft: #e4e5ff; }
+:root[data-accent="coral"]  { --brand: #c2472a; --brand-strong: #9c3820; --brand-soft: #fde5db; }
+:root[data-accent="violet"] { --brand: #7c3aed; --brand-strong: #6425cf; --brand-soft: #efe6ff; }
+:root[data-accent="navy"]   { --brand: #1e4b8f; --brand-strong: #163a70; --brand-soft: #dde9fa; }
+
+.dark {
+  --bg: #111418; --surface: #1a1e25; --sunken: #151920; --line: #2b313c; --ink: #e8ebf0; --mute: #9aa3b3;
+  --brand: #2dd4bf; --brand-strong: #5eead4; --brand-soft: #123a37; --on-brand: #06201d;
+  --good: #4ade80; --warn: #fbbf24; --bad: #fb923c; --good-soft: #123821; --warn-soft: #3d2f0c; --bad-soft: #40200f;
+  color-scheme: dark;
+}
+.dark[data-accent="indigo"] { --brand: #a5b4fc; --brand-strong: #c7d2fe; --brand-soft: #262a5c; --on-brand: #14173a; }
+.dark[data-accent="coral"]  { --brand: #fb9a7c; --brand-strong: #fdb9a3; --brand-soft: #4a2217; --on-brand: #2a0f07; }
+.dark[data-accent="violet"] { --brand: #c4a5fd; --brand-strong: #dcc8ff; --brand-soft: #35235c; --on-brand: #1c0f3a; }
+.dark[data-accent="navy"]   { --brand: #8fb8f5; --brand-strong: #b5d0f9; --brand-soft: #1c3152; --on-brand: #0b1a30; }
+
+html { font-size: 16px; }
+html[data-size="sm"] { font-size: 14.5px; }
+html[data-size="lg"] { font-size: 17.5px; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 6px; }
+::selection { background: var(--brand-soft); }
+.scroll-thin { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.prose-ja { line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
+.md h1, .md h2, .md h3 { font-weight: 700; margin: 1.1em 0 .4em; }
+.md h1 { font-size: 1.25rem; } .md h2 { font-size: 1.1rem; } .md h3 { font-size: 1rem; }
+.md p { margin: .5em 0; line-height: 1.8; } .md ul, .md ol { padding-left: 1.4em; margin: .4em 0; } .md ul { list-style: disc; } .md ol { list-style: decimal; }
+.md table { border-collapse: collapse; width: 100%; margin: .6em 0; font-size: .9em; } .md th, .md td { border: 1px solid var(--line); padding: .4em .6em; text-align: left; vertical-align: top; }
+.md th { background: var(--sunken); } .md code { background: var(--sunken); padding: .1em .3em; border-radius: 4px; } .md hr { border: 0; border-top: 1px solid var(--line); margin: 1em 0; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.rise { animation: rise .25s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .rise { animation: none; } * { transition: none !important; } }
+@media print { .no-print { display: none !important; } body { background: #fff; } }

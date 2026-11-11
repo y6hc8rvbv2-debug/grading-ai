@@ -1,0 +1,9 @@
+{
+  "framework": "vite",
+  "installCommand": "npm install",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/app.js": { "maxDuration": 30 }
+  }
+}
