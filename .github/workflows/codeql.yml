@@ -1,0 +1,43 @@
+# GitHub の CodeQL（AI ではない、決まった規則での脆弱性の検査）。AI の点検（security-ai）と組み合わせる
+# （2026-11-13。docs/SECURITY-12.md の 13）。結果は「Security → Code scanning」
+name: codeql
+
+on:
+  push:
+    branches: ["claude/**", "main"]
+  pull_request:
+  schedule:
+    - cron: "41 18 * * 2"   # 毎週 水曜 3:41（日本時間）。main に入ってから動く
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # v4.39.3（コミットで固定）
+      - uses: github/codeql-action/init@f3bbb05694c2f74569081c28664c0866d64dec21
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+          config: |
+            paths-ignore:
+              - node_modules
+              - tests
+              - docs
+              - ios
+              - android
+              - mobile/www
+      - uses: github/codeql-action/analyze@f3bbb05694c2f74569081c28664c0866d64dec21
+        with:
+          category: codeql-js

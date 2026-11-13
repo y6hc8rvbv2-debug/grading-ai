@@ -24,6 +24,9 @@
 ⑨ログと通知（ログイン・権限変更・書き出しを記録・異常を通知・ログに個人情報を書かない）⑩ライブラリの更新（npm audit・Dependabot）⑪バックアップと復元（実際に戻せるか試す）⑫エラー表示（利用者には簡潔に・詳細はログ）を満たす。
 1〜4は公開前に必須、5〜8は個人情報・AI を扱うなら公開前に必須。作るとき・大きな変更のときに12項目で点検し、状態・根拠・残りを `docs/SECURITY-12.md` の表に書いて報告する
 
+**13〜15 を追加（2026-11-13 ユーザーの指示。15項目に。すでに実装済みならパス）**：⑬AI による脆弱性の検知（稼働中のアプリのプログラムを変更のたび＋定期的に AI が点検。結果は関係者だけが見られる場所へ・AI は読むだけ。このアプリは `security-ai.yml`・`codeql.yml`）
+⑭アクセスできる人の制限（招待・承認制。Preview も保護）⑮海外の IP アドレスからのアクセスの遮断（入口で断る・通知と公開ページは例外・緊急時に止められる。このアプリは `lib/geo.ts`。App Store の審査中は `GEO_ALLOW_COUNTRIES=JP,US`）
+
 変更を push したら、毎回つぎを行ってから報告する。
 1. 手元の自動テスト → push（ブランチ claude/**）。ビルドは `.next` を消してから（lint の結果の使い回しで、Vercel だけが失敗することがある。2026-10-22）
 2. GitHub Actions の `checks`（単体・DB）と `verify-db`（新しいマイグレーションを検証用 saiten-verify に自動適用。`scripts/verify-db/apply.mjs --to latest`）の結果を確かめる
@@ -38,6 +41,12 @@
 ---
 
 ## 現在地
+
+### セキュリティの13〜15項目（2026-11-13。`docs/SECURITY-12.md`）
+
+- ⑬ `.github/workflows/security-ai.yml`（push ごとに差分を Sonnet・週1回全体を Opus。結果は SARIF で Code scanning へ。ログには件数だけ。鍵 `ANTHROPIC_API_KEY`＝GitHub Secret が無ければ飛ばす）・`codeql.yml`・`scripts/security/ai-sarif.mjs`
+- ⑭ 実装済みでパス ⑮ `lib/geo.ts`（proxy.ts の最初。x-vercel-ip-country。`GEO_BLOCK=off`・`GEO_ALLOW_COUNTRIES`・`GEO_ALLOW_IPS`。Vercel の外では断らない）
+- 検証：`tests/unit/security-extra.test.ts`
 
 ### セキュリティの12項目の点検（2026-11-10。**0027_security_12.sql**。`docs/SECURITY-12.md`）
 

@@ -1,8 +1,23 @@
 // ログインセッションを維持するための proxy（Next.js 16 で middleware から名前が変わった）
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { clientIp, geoBlockedBody, geoDecision } from "./lib/geo";
 
 export async function proxy(request: NextRequest) {
+  // 海外の IP アドレスからのアクセスを断る（lib/geo.ts。ログイン・データの読み出しより前）
+  const geo = geoDecision(
+    { path: request.nextUrl.pathname, country: request.headers.get("x-vercel-ip-country"), ip: clientIp(request.headers), bypass: request.headers.get("x-vercel-protection-bypass") },
+    process.env,
+  );
+  if (!geo.allow) {
+    // 記録は国だけ（IP アドレス・利用者は書かない）
+    console.warn(`[geo] blocked country=${geo.country}`);
+    if (request.nextUrl.pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "このサービスは日本国内からのみ利用できます。", code: "geo_blocked" }, { status: 403 });
+    }
+    return new NextResponse(geoBlockedBody(), { status: 403, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+  }
+
   let response = NextResponse.next({ request });
 
   // Supabase が未設定ならデモモード。ログイン確認をしない。
