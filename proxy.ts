@@ -89,6 +89,8 @@ export async function proxy(request: NextRequest) {
     }
   }
 
+  // 海外の遮断が動いているかを外から確かめられるよう、判定の理由だけを付ける（国・IP は付けない）
+  response.headers.set("x-geo-check", geo.reason);
   return response;
 }
 
