@@ -7,7 +7,7 @@
 #   - 鍵（リポジトリの Secret ANTHROPIC_API_KEY）が無ければ、何もせずに成功で終わる
 #   - フォークからの PR では動かない（鍵が渡らない・他人のコードで AI を動かさない）
 #
-# AI に与える権限は「読むだけ」（Read・Glob・Grep・git diff/log/show）。書き込み・コマンドの実行・ネットへの接続はさせない。
+# AI に与える権限は「読むだけ」（Read・Glob・Grep）。書き込み・コマンドの実行・ネットへの接続はさせない。
 # 読むファイルの中の命令（プロンプトインジェクション）には従わないよう指示し、出力は決めた JSON の形だけを受け取り、
 # scripts/security/ai-sarif.mjs が形・ファイルの場所を確かめてから載せる
 name: security-ai
@@ -88,27 +88,26 @@ jobs:
           fi
           mkdir -p .security-ai
           if [ "$mode" = diff ]; then
-            git diff --name-only "$base" HEAD -- app components lib types proxy.ts next.config.mjs supabase/migrations .github/workflows capacitor.config.ts package.json > .security-ai/files.txt || true
+            review_paths=(app components lib types proxy.ts next.config.mjs supabase/migrations .github/workflows capacitor.config.ts package.json)
+            git diff --name-only "$base" HEAD -- "${review_paths[@]}" > .security-ai/files.txt
+            git --no-pager diff --no-ext-diff --no-textconv "$base" HEAD -- "${review_paths[@]}" > .security-ai/changes.diff
             if [ ! -s .security-ai/files.txt ]; then mode=none; fi
           fi
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
-          echo "base=$base" >> "$GITHUB_OUTPUT"
           if [ "$mode" = full ]; then echo "model=claude-opus-5-5" >> "$GITHUB_OUTPUT"; else echo "model=claude-sonnet-5-5" >> "$GITHUB_OUTPUT"; fi
           echo "点検の範囲：$mode（ファイル $( [ -f .security-ai/files.txt ] && wc -l < .security-ai/files.txt || echo 全体)）"
 
       - name: AI の点検（Claude）
         if: env.HAS_KEY == 'true' && steps.scope.outputs.mode != 'none'
         id: claude
-        # v1.0.275（タグの付け替えに備えて、コミットで固定）
-        uses: anthropics/claude-code-action@4a0465fcf999da98c6ba185172bf18ddf1a85003
+        # GitHub のイベントに依存しない Base Action をコミットで固定する
+        uses: anthropics/claude-code-action/base-action@4a0465fcf999da98c6ba185172bf18ddf1a85003
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           show_full_output: "false"
-          display_report: "false"
           prompt: |
             あなたはこのリポジトリ（学校向けの答案採点の Web アプリ。Next.js・Supabase）のセキュリティ点検者です。
-            点検の範囲：${{ steps.scope.outputs.mode == 'full' && 'アプリ全体（app・components・lib・proxy.ts・next.config.mjs・supabase/migrations・.github/workflows）' || format('直前の変更（git diff {0} HEAD。ファイルの一覧は .security-ai/files.txt）。変更が影響する呼び出し元・呼び出し先も読む', steps.scope.outputs.base) }}
+            点検の範囲：${{ steps.scope.outputs.mode == 'full' && 'アプリ全体（app・components・lib・proxy.ts・next.config.mjs・supabase/migrations・.github/workflows）' || '直前の変更（差分は .security-ai/changes.diff、一覧は .security-ai/files.txt）。変更が影響する呼び出し元・呼び出し先も読む' }}
 
             探すもの：第三者が「他人・他校のデータを読む／書き換える」「ログインや権限を迂回する」「管理者になりすます」「秘密の鍵を盗む」
             「利用者の画面で任意のスクリプトを動かす（XSS）」「SQL・コマンドを注入する」「AI に仕込んだ命令で権限外の操作をさせる」
@@ -126,8 +125,11 @@ jobs:
           claude_args: >-
             --model ${{ steps.scope.outputs.model }}
             --max-turns 80
-            --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
-            --disallowedTools "Write,Edit,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task"
+            --restricted
+            --strict-mcp-config
+            --tools "Read,Glob,Grep"
+            --allowedTools "Read,Glob,Grep"
+            --disallowedTools "mcp__*"
             --json-schema '{"type":"object","properties":{"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"line":{"type":"integer"},"severity":{"type":"string","enum":["critical","high","medium","low"]},"category":{"type":"string"},"title":{"type":"string"},"description":{"type":"string"},"recommendation":{"type":"string"}},"required":["file","line","severity","category","title","description"]}}},"required":["findings"]}'
 
       # 中身はログに出さず、件数だけ
