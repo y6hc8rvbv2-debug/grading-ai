@@ -74,7 +74,10 @@ test("13：AI の点検結果は、形を確かめてから Code scanning の形
 test("13：AI の点検の workflow は、結果をログに出さず、鍵が無ければ飛ばす", () => {
   const y = readFileSync(".github/workflows/security-ai.yml", "utf8");
   assert.match(y, /show_full_output: "false"/);
-  assert.match(y, /display_report: "false"/);
+  assert.match(y, /uses: anthropics\/claude-code-action\/base-action@/);
+  assert.match(y, /--restricted/);
+  assert.match(y, /--tools "Read,Glob,Grep"/);
+  assert.doesNotMatch(y, /display_report:|github_token:/); // Base Action にはレポート機能や GitHub トークンを渡さない
   assert.match(y, /upload-sarif/);
   assert.match(y, /HAS_KEY == 'true'/);
   assert.doesNotMatch(y, /pull_request_target/);

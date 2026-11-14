@@ -31,6 +31,16 @@ do $$ begin
     raise exception 'FAIL: claude 以外のモデルIDが保存できた';
   exception when check_violation then null; end;
   begin
+    update public.ai_settings set model_fast = 'claude-opus-5-5';
+    raise exception 'FAIL: 高速に Opus を保存できた';
+  exception when check_violation then null; end;
+  begin
+    update public.ai_settings set model_standard = 'claude-fable-5-1';
+    raise exception 'FAIL: 標準に Fable を保存できた';
+  exception when check_violation then null; end;
+  update public.ai_settings set model_fast = 'claude-haiku-4-5-20251001',
+                                model_standard = 'claude-sonnet-6';
+  begin
     update public.ai_settings set concurrency = 99 where school_id = 'aaaaaaaa-0000-0000-0000-000000000000';
     raise exception 'FAIL: 同時に採点する数が上限を超えた';
   exception when check_violation then null; end;

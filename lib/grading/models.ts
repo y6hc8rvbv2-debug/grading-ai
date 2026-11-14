@@ -125,6 +125,11 @@ export function tierOfModel(id: string): Tier | null {
   return parsed ? FAMILY_TIER[parsed.family] : null;
 }
 
+/** 下位の段階は、想定した費用の系列に制限する。 */
+export function isModelAllowedForTier(tier: Tier, id: unknown): id is string {
+  return isModelId(id) && (tier === "top" || tierOfModel(id) === tier);
+}
+
 /** 実際のトークン数から概算費用（USD） */
 export type TokenUsage = { input: number; output: number; cacheWrite?: number; cacheRead?: number };
 export function costOfModel(id: string, u: TokenUsage) {
@@ -141,8 +146,11 @@ export const isModelId = (v: unknown): v is string => typeof v === "string" && V
 export function resolveModels(env: Record<string, string | undefined>, school: ModelOverrides = {}): Record<Tier, string> {
   const pick = (tier: Tier, ...envKeys: string[]) => {
     const fromSchool = school[tier];
-    if (isModelId(fromSchool)) return fromSchool;
-    for (const k of envKeys) if (isModelId(env[k])) return env[k] as string;
+    if (isModelAllowedForTier(tier, fromSchool)) return fromSchool;
+    for (const key of envKeys) {
+      const model = env[key];
+      if (isModelAllowedForTier(tier, model)) return model;
+    }
     return DEFAULT_MODELS[tier];
   };
   return {

@@ -62,17 +62,35 @@ export const FLAG_MESSAGE: Record<ReviewFlag | "unusable", string> = {
 // 正答と照合する設問形式（記述・グラフは照合しない）
 const KEYED: GradeTest["questions"][number]["type"][] = ["calc", "choice", "fill"];
 
+const ANSWER_UNITS = new Set([
+  "円", "cm3", "cm2", "cm", "mm", "km", "kg", "mg", "ml", "分", "秒", "時間",
+  "個", "人", "度", "°", "本", "枚", "点", "回", "倍", "%", "m", "g", "l",
+]);
+
 /** 解答の表記をそろえる（全角・半角、空白、マイナス記号、x= の前置き、末尾の単位など） */
 export function normAnswer(s: string) {
-  return s.normalize("NFKC").toLowerCase()
+  const normalized = s.normalize("NFKC").toLowerCase()
     .replace(/\s+/g, "")
     .replace(/[−－ー‐–—]/g, "-")
     .replace(/[、，・]/g, ",")
     .replace(/[\^*]/g, "")
     .replace(/÷/g, "/")
     .replace(/^(答え?|ans)[:：]?/, "")
-    .replace(/^[a-z]=/, "")
-    .replace(/(円|cm3|cm2|cm|mm|km|kg|mg|ml|分|秒|時間|個|人|度|°|本|枚|点|回|倍|%|m|g|l)+$/, "");
+    .replace(/^[a-z]=/, "");
+  // 単位の組み合わせで末尾まで到達できる最初の位置を、最大3文字ずつ照合する。
+  const unitSuffix = new Uint8Array(normalized.length + 1);
+  let end = normalized.length;
+  unitSuffix[end] = 1;
+  for (let start = end - 1; start >= 0 && start >= end - 3; start--) {
+    for (let length = 1; length <= 3 && start + length <= normalized.length; length++) {
+      if (unitSuffix[start + length] && ANSWER_UNITS.has(normalized.slice(start, start + length))) {
+        unitSuffix[start] = 1;
+        end = start;
+        break;
+      }
+    }
+  }
+  return normalized.slice(0, end);
 }
 
 /** 読み取った解答が正答と一致するか（式ごと書いた「3+3=6」も最後の値で比べる） */

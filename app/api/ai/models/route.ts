@@ -14,7 +14,7 @@ import { createClient } from "@/lib/supabase/server";
 import { aiConfig } from "@/lib/ai/grade";
 import { loadSchoolAi } from "@/lib/ai/settings";
 import {
-  DEFAULT_MODELS, MODEL_CATALOG, TIERS, isModelId, labelOf, newerModels, priceOf, tierOfModel, type Tier,
+  DEFAULT_MODELS, MODEL_CATALOG, TIERS, isModelAllowedForTier, TIER_LABEL, labelOf, newerModels, priceOf, tierOfModel, type Tier,
 } from "@/lib/grading/models";
 
 export const runtime = "nodejs";
@@ -86,7 +86,9 @@ export async function POST(request: Request) {
     const v = body[tier];
     if (v === undefined) continue;
     if (v === null || v === "") { row[`model_${tier}`] = null; continue; }
-    if (!isModelId(v) || !allowed.has(v)) return fail(`「${String(v)}」は、このAPIキーで使えるモデルとして確認できませんでした。一覧から選んでください。`, 400);
+    if (!isModelAllowedForTier(tier, v) || !allowed.has(v)) {
+      return fail(`${TIER_LABEL[tier]}に設定できるモデルを一覧から選んでください。`, 400);
+    }
     row[`model_${tier}`] = v;
   }
   if (body.concurrency !== undefined) {

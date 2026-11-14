@@ -91,7 +91,7 @@ export function AiEngineCard() {
               <div style={{ marginTop: 8 }}>
                 <Select value={draft[r.tier] ?? ""} onChange={(v: string) => setDraft((d) => ({ ...d, [r.tier]: v }))}
                   options={[{ value: "", label: `おすすめ（既定：${labelOf(DEFAULT_MODELS[r.tier])}）` },
-                    ...info.available.filter((m) => !m.tier || m.tier === r.tier || r.tier === "top").map((m) => ({ value: m.id, label: `${m.display}（${m.id}）` }))]} />
+                    ...info.available.filter((m) => m.tier === r.tier || r.tier === "top").map((m) => ({ value: m.id, label: `${m.display}（${m.id}）` }))]} />
               </div>
             )}
           </div>
