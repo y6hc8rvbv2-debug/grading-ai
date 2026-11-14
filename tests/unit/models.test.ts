@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  DEFAULT_MODELS, catalogEntry, costOfModel, labelOf, newerModels, parseModelId, priceOf, resolveModels, tierOfModel, traitsOf,
+  DEFAULT_MODELS, catalogEntry, isModelAllowedForTier, costOfModel, labelOf, newerModels, parseModelId, priceOf, resolveModels, tierOfModel, traitsOf,
 } from "../../lib/grading/models";
 
 test("既定は最新世代（Haiku 5.5 / Sonnet 5.5 / Opus 5.5）", () => {
@@ -18,6 +18,17 @@ test("優先順：学校の設定 → 新しい環境変数 → ver5 の環境�
   // 形の正しくない値は使わない（既定値に戻る）
   assert.equal(resolveModels({ ANTHROPIC_MODEL: "gpt-5" }, { top: "DROP TABLE" }).top, "claude-opus-5-5");
   assert.equal(resolveModels({}, { fast: null }).fast, "claude-haiku-5-5");
+});
+
+test("高速・標準は指定系列のみ使い、不適切な保存値や環境変数は無視する", () => {
+  assert.equal(isModelAllowedForTier("fast", "claude-opus-5-5"), false);
+  assert.equal(isModelAllowedForTier("standard", "claude-fable-5-1"), false);
+  assert.equal(isModelAllowedForTier("standard", "claude-sonnet-6-20261114"), true);
+  assert.equal(isModelAllowedForTier("top", "claude-opus-5-5"), true);
+  assert.deepEqual(resolveModels(
+    { ANTHROPIC_MODEL_FAST: "claude-opus-5-5" },
+    { fast: "claude-opus-5-5", standard: "claude-fable-5-1" },
+  ), DEFAULT_MODELS);
 });
 
 test("登録表に無い将来のモデルも、名前から系列・世代・料金の目安・呼び出し方を決める", () => {

@@ -132,8 +132,14 @@ async function main() {
   if (DB_URL) {
     // 検証用 DB だけの接続文字列：saiten-verify の ref（と東京のリージョン）を含むものだけを使う
     let u; try { u = new URL(DB_URL); } catch { stop("VERIFY_DB_URL の形が正しくありません（postgresql://… の接続文字列）"); }
-    if (!`${u.username}@${u.hostname}`.includes(TARGET_REF)) stop("VERIFY_DB_URL が検証用（saiten-verify）の DB ではありません");
-    if (u.hostname.includes("pooler.supabase.com") && !u.hostname.includes(TARGET_REGION)) stop(`VERIFY_DB_URL のリージョンが ${TARGET_REGION} ではありません`);
+    const direct = u.hostname === `db.${TARGET_REF}.supabase.co` && u.username === "postgres";
+    const pooler = /^aws-[0-9]+-ap-northeast-1\.pooler\.supabase\.com$/.test(u.hostname)
+      && u.username === `postgres.${TARGET_REF}`;
+    // libpq はクエリの接続先・ユーザー指定を優先するため、接続先を上書きできない項目だけ通す。
+    const safeParams = [...u.searchParams.keys()].every((key) => ["sslmode", "connect_timeout", "application_name"].includes(key));
+    if (!["postgresql:", "postgres:"].includes(u.protocol) || (!direct && !pooler) || !safeParams) {
+      stop("VERIFY_DB_URL が検証用（saiten-verify）の DB ではありません");
+    }
     console.log(`✓ 接続先：検証用 DB の接続文字列（ref ${TARGET_REF}）。アカウント全体のアクセストークンは使いません`);
   } else if (!TEST_URL) {
     if (!TOKEN) stop("環境変数 SUPABASE_ACCESS_TOKEN がありません（docs/DB-RUNBOOK.md の 1-2b）");
