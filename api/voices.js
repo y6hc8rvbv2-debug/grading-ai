@@ -72,6 +72,10 @@ CREATE TABLE IF NOT EXISTS kg_reports(
   id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES kg_users(id) ON DELETE CASCADE,
   post_id BIGINT NOT NULL REFERENCES kg_posts(id) ON DELETE CASCADE, reason TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE(user_id, post_id));
+CREATE TABLE IF NOT EXISTS kg_digests(
+  id BIGSERIAL PRIMARY KEY, country TEXT NOT NULL, period TEXT NOT NULL, platform TEXT NOT NULL,
+  ok BOOLEAN NOT NULL, detail TEXT, at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE UNIQUE INDEX IF NOT EXISTS kg_digests_once ON kg_digests(country, period, platform) WHERE ok;
 CREATE TABLE IF NOT EXISTS kg_rl(k TEXT NOT NULL, w BIGINT NOT NULL, n INT NOT NULL, PRIMARY KEY(k, w));
 CREATE TABLE IF NOT EXISTS kg_logs(
   id BIGSERIAL PRIMARY KEY, ev TEXT NOT NULL, uid BIGINT, iph TEXT, detail TEXT,
@@ -564,7 +568,119 @@ A.stats = async ({ p }) => {
   });
 };
 
-const NEED_LOGIN = new Set(['updateProfile', 'changePassword', 'deleteAccount', 'post', 'deletePost', 'react', 'vote', 'follow', 'notifications', 'report', 'reportDesk', 'adminReports', 'adminHide', 'adminHideDesk']);
+// ---------- 集計結果の自動発信（週報）----------
+// 毎週、集計結果を短い文章にまとめて SNS に投稿する。鍵（環境変数）を設定した SNS にだけ投稿する。
+// 個人の投稿や個人が分かる情報は載せず、集計した数字だけを発信する。
+const E = process.env;
+const SITE_URL = (E.KG_SITE_URL || '').replace(/\/$/, '');
+const DIGEST_COUNTRIES = (E.KG_DIGEST_COUNTRIES || 'JP').split(',').map((x) => x.trim().toUpperCase()).filter((x) => x === 'ALL' || KG.country(x));
+const DIGEST_MIN_USERS = Math.max(1, Number(E.KG_DIGEST_MIN_USERS) || 30); // 投稿者がこれより少ない週は発信しない
+const PLATFORMS = {
+  x: { name: 'X（旧Twitter）', on: !!(E.X_API_KEY && E.X_API_SECRET && E.X_ACCESS_TOKEN && E.X_ACCESS_SECRET), text: 'short' },
+  bluesky: { name: 'Bluesky', on: !!(E.BSKY_HANDLE && E.BSKY_APP_PASSWORD), text: 'short' },
+  mastodon: { name: 'Mastodon', on: !!(E.MASTODON_URL && E.MASTODON_TOKEN), text: 'long' },
+};
+const jst = (ms) => new Date(ms + 9 * 3600e3);
+const md = (d) => `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+// X の文字数の数え方（全角は2、半角は1、URLは23）。上限は280
+const xLen = (t) => t.split(/(https?:\/\/\S+)/).reduce((n, part, i) => n + (i % 2 ? 23 : [...part].reduce((a, ch) => a + (ch.codePointAt(0) > 0x10ff ? 2 : 1), 0)), 0);
+
+async function buildDigest(country, siteUrl) {
+  const s = await A.stats({ p: { country, days: 7 } });
+  const c = KG.country(country);
+  const where = country === 'ALL' ? '🌐 世界' : `${c.flag} ${c.name}`;
+  const now = Date.now(), period = jst(now).toISOString().slice(0, 10);
+  const span = `${md(jst(now - 6 * 864e5))}〜${md(jst(now))}`;
+  const sn = s.topicStance.reduce((a, r) => a + r.n, 0);
+  const pct = (v) => Math.round((v / sn) * 100);
+  const sup = s.topicStance.reduce((a, r) => a + r.support, 0), opp = s.topicStance.reduce((a, r) => a + r.oppose, 0);
+  const topics = s.topicCount.slice().sort((a, b) => b.n - a.n).slice(0, 3).map((t) => KG.nameOf(KG.TOPICS, t.k));
+  const url = `${siteUrl}#/stats`;
+  const head = [`【クニゴエ週報】${where} ${span}`, `投稿${s.totals.posts.toLocaleString()}件・${s.totals.users.toLocaleString()}人`];
+  const stance = sn >= KG.MIN_CELL ? `政策を支持${pct(sup)}%／不支持${pct(opp)}%` : null;
+  const short = [...head, stance, topics[0] && `関心1位：${topics[0]}`, '※自主投稿の集計で世論調査ではありません', '#クニゴエ', url].filter(Boolean);
+  while (xLen(short.join('\n')) > 280 && short.length > 4) short.splice(short.length - 4, 1); // 長すぎるときは下の行から削る
+  const long = [...head, stance && `${stance}（1人1票換算・${sn}人）`,
+    topics.length && `関心の高い分野：${topics.map((t, i) => `${i + 1}.${t}`).join(' ')}`,
+    s.sat.n >= KG.MIN_CELL && `暮らし向き：平均${s.sat.avg.toFixed(2)}／5（${s.sat.n}人）`,
+    s.tags[0] && `話題のタグ：${s.tags.slice(0, 3).map((t) => '#' + t.tag).join(' ')}`,
+    '', '※自分から投稿した人の声の集計です。無作為抽出の世論調査とは異なり、社会全体の割合を示すものではありません。', '#クニゴエ', url].filter((x) => x !== null && x !== undefined && x !== 0 && x !== false);
+  const skip = s.totals.users < DIGEST_MIN_USERS ? `投稿者が${s.totals.users}人で、発信の基準（${DIGEST_MIN_USERS}人以上）に届いていません。` : null;
+  return { country, period, users: s.totals.users, short: short.join('\n'), long: long.join('\n'), url, skip };
+}
+
+const outFetch = async (url, opts) => {
+  const r = await fetch(url, { ...opts, signal: AbortSignal.timeout(10000) });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`HTTP ${r.status} ${text.slice(0, 160)}`);
+  try { return JSON.parse(text); } catch { return {}; }
+};
+const SENDERS = {
+  async x(text) {
+    // OAuth 1.0a（X の投稿用の署名方式）
+    const url = (E.X_API_BASE || 'https://api.x.com') + '/2/tweets';
+    const enc = (v) => encodeURIComponent(v).replace(/[!'()*]/g, (ch) => '%' + ch.charCodeAt(0).toString(16).toUpperCase());
+    const o = { oauth_consumer_key: E.X_API_KEY, oauth_nonce: crypto.randomBytes(16).toString('hex'), oauth_signature_method: 'HMAC-SHA1',
+      oauth_timestamp: String(Math.floor(Date.now() / 1000)), oauth_token: E.X_ACCESS_TOKEN, oauth_version: '1.0' };
+    const base = ['POST', enc(url), enc(Object.keys(o).sort().map((k) => `${enc(k)}=${enc(o[k])}`).join('&'))].join('&');
+    o.oauth_signature = crypto.createHmac('sha1', `${enc(E.X_API_SECRET)}&${enc(E.X_ACCESS_SECRET)}`).update(base).digest('base64');
+    const auth = 'OAuth ' + Object.keys(o).sort().map((k) => `${enc(k)}="${enc(o[k])}"`).join(', ');
+    const r = await outFetch(url, { method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    return 'id=' + ((r.data && r.data.id) || '?');
+  },
+  async bluesky(text, d) {
+    const svc = E.BSKY_SERVICE || 'https://bsky.social';
+    const ses = await outFetch(svc + '/xrpc/com.atproto.server.createSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: E.BSKY_HANDLE, password: E.BSKY_APP_PASSWORD }) });
+    const start = Buffer.byteLength(text.slice(0, text.indexOf(d.url))); // リンクの位置はバイト数で指定する決まり
+    const record = { $type: 'app.bsky.feed.post', text, createdAt: new Date().toISOString(), langs: ['ja'],
+      facets: [{ index: { byteStart: start, byteEnd: start + Buffer.byteLength(d.url) }, features: [{ $type: 'app.bsky.richtext.facet#link', uri: d.url }] }] };
+    const r = await outFetch(svc + '/xrpc/com.atproto.repo.createRecord', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + ses.accessJwt }, body: JSON.stringify({ repo: ses.did, collection: 'app.bsky.feed.post', record }) });
+    return r.uri || 'ok';
+  },
+  async mastodon(text) {
+    const base = E.MASTODON_URL.replace(/\/$/, '');
+    if (!/^https:\/\//.test(base) && !/^http:\/\/localhost/.test(base)) throw new Error('MASTODON_URL は https:// で始めてください');
+    const r = await outFetch(base + '/api/v1/statuses', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + E.MASTODON_TOKEN }, body: JSON.stringify({ status: text, visibility: 'public', language: 'ja' }) });
+    return r.url || 'ok';
+  },
+};
+// 発信の本体。同じ週・同じ国・同じ SNS には二重に投稿しない
+async function runDigest(siteUrl, who) {
+  const results = [];
+  for (const country of DIGEST_COUNTRIES) {
+    const d = await buildDigest(country, siteUrl);
+    if (d.skip) { results.push({ country, skipped: d.skip }); continue; }
+    for (const [key, pf] of Object.entries(PLATFORMS)) {
+      if (!pf.on) continue;
+      const week = d.period.slice(0, 8) + String(Math.floor((Number(d.period.slice(8)) - 1) / 7)); // 月ごとに週単位で区切る
+      if ((await q('SELECT 1 FROM kg_digests WHERE country=$1 AND period=$2 AND platform=$3 AND ok', [country, week, key])).rows[0]) { results.push({ country, platform: key, skipped: 'この週はすでに発信済みです。' }); continue; }
+      let ok = true, detail;
+      try { detail = await SENDERS[key](d[pf.text], d); } catch (e) { ok = false; detail = String(e.message || e).slice(0, 200); console.error('[voices] digest failed', key, detail); }
+      await q('INSERT INTO kg_digests(country, period, platform, ok, detail) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [country, week, key, ok, detail]);
+      results.push({ country, platform: key, ok, detail });
+    }
+  }
+  log('digest', who || null, null, JSON.stringify(results).slice(0, 190));
+  return results;
+}
+const siteOf = (req) => SITE_URL || `https://${req.headers.host}/voices`;
+
+// 運営者：発信内容の下見と、今すぐ発信
+A.adminDigest = async ({ me, req }) => {
+  adminOnly(me);
+  const previews = [];
+  for (const c of DIGEST_COUNTRIES) previews.push(await buildDigest(c, siteOf(req)));
+  const hist = await q('SELECT country, period, platform, ok, detail, at FROM kg_digests ORDER BY id DESC LIMIT 20');
+  return { platforms: Object.entries(PLATFORMS).map(([k, v]) => ({ k, name: v.name, on: v.on })), minUsers: DIGEST_MIN_USERS, previews,
+    history: hist.rows.map((r) => ({ ...r, at: new Date(r.at).getTime() })) };
+};
+A.adminDigestSend = async ({ me, req }) => {
+  adminOnly(me);
+  await rateLimit('digest:' + me.id, 5, 3600);
+  return { results: await runDigest(siteOf(req), me.id) };
+};
+
+const NEED_LOGIN = new Set(['adminDigest', 'adminDigestSend', 'updateProfile', 'changePassword', 'deleteAccount', 'post', 'deletePost', 'react', 'vote', 'follow', 'notifications', 'report', 'reportDesk', 'adminReports', 'adminHide', 'adminHideDesk']);
 const CACHEABLE_GET = new Set(['stats', 'trends']); // 誰が見ても同じ集計は CDN に短時間キャッシュ（DB負荷と費用を抑える）
 
 async function handler(req, res) {
@@ -574,6 +690,15 @@ async function handler(req, res) {
     let p;
     if (req.method === 'GET') {
       p = req.query || Object.fromEntries(new URL(req.url, 'http://x').searchParams);
+      if (p.action === 'cron') {
+        // 定期実行（毎週）。合言葉（CRON_SECRET）を知っている呼び出しだけ受け付ける
+        const secret = E.CRON_SECRET || '';
+        const got = Buffer.from(String(req.headers.authorization || '')), want = Buffer.from('Bearer ' + secret);
+        if (!secret || got.length !== want.length || !crypto.timingSafeEqual(got, want)) throw new Bad('権限がありません。', 401);
+        if (!DB_URL) return res.status(503).json({ error: 'データベースが未設定です。', code: 'NO_DB' });
+        await init();
+        return res.status(200).json({ results: await runDigest(siteOf(req), null) });
+      }
       if (!CACHEABLE_GET.has(p.action)) throw new Bad('この操作はできません。', 405);
     } else if (req.method === 'POST') {
       // 他サイトからの勝手な操作（CSRF）を防ぐ：同じサイトからの JSON だけ受け付ける

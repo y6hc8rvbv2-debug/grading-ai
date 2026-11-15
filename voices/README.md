@@ -23,3 +23,18 @@
 | `KG_SESSION_SECRET` | ログイン情報の署名鍵（未設定なら `DATABASE_URL` から自動生成） |
 
 鍵や接続文字列はコードに書かず、必ず Vercel の環境変数に入れてください。
+
+## 集計結果の自動発信（週報）
+
+毎週月曜の朝9時（日本時間）に、直近7日間の集計を SNS に自動で投稿します（本番のデプロイでのみ動きます）。
+鍵を設定した SNS にだけ投稿し、投稿者が少ない週は発信しません。運営者メニューで内容の下見と「今すぐ発信」ができます。
+
+| 名前 | 役割 |
+|---|---|
+| `CRON_SECRET` | 定期実行の合言葉（長いランダムな文字列）。必須 |
+| `KG_SITE_URL` | 投稿に載せるアプリのURL（例：`https://example.com/voices`） |
+| `KG_DIGEST_COUNTRIES` | 発信する国（カンマ区切り。既定は `JP`、`ALL` で全世界） |
+| `KG_DIGEST_MIN_USERS` | この人数より投稿者が少ない週は発信しない（既定は 30） |
+| `X_API_KEY` / `X_API_SECRET` / `X_ACCESS_TOKEN` / `X_ACCESS_SECRET` | X（旧Twitter）に投稿するための鍵 |
+| `BSKY_HANDLE` / `BSKY_APP_PASSWORD` | Bluesky のアカウント名とアプリパスワード |
+| `MASTODON_URL` / `MASTODON_TOKEN` | Mastodon のサーバーURLとアクセストークン |

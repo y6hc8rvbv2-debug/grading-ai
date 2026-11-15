@@ -258,3 +258,5 @@ font { vertical-align: inherit; }
 .tabbar .nav-t { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px; }
 /* 右から左に書く言語（アラビア語など）：画面の配置はそのまま、文章だけ右寄せ・右始まりにする */
 .translated-rtl .body, .translated-rtl .prose p, .translated-rtl .prose li, .translated-rtl .quote-body { direction: rtl; text-align: right; }
+.digest { white-space: pre-wrap; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 4px 0 10px; font: inherit; font-size: 13.5px; }
+.card details { margin: 8px 0; } .card .row { margin: 10px 0; }

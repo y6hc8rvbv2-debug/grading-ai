@@ -532,12 +532,37 @@
           try { await api('deleteAccount', { password: pw }); st.me = null; renderChrome(); go('#/'); toast('退会しました。ご利用ありがとうございました。'); } catch (ex) { fail(ex); }
         } })));
     } else box.append(loginWall('ログインするとプロフィールを編集できます。'));
-    if (st.me && st.me.isAdmin) box.append(h('div', { class: 'card' }, h('h2', { text: '運営者メニュー' }), h('a', { class: 'ghost btn', href: '#/admin', text: '通報された投稿・窓口を確認' })));
+    if (st.me && st.me.isAdmin) box.append(h('div', { class: 'card' }, h('h2', { text: '運営者メニュー' }), h('a', { class: 'ghost btn', href: '#/admin', text: '通報の確認・集計の自動発信' })));
     if (st.mode === 'demo') box.append(h('div', { class: 'card' }, h('h2', { text: 'デモデータ' }), h('p', { class: 'muted small', text: 'この端末に保存されたデモ用の投稿・アカウントを消して、最初の状態に戻します。' }),
       h('button', { class: 'ghost', text: 'デモデータを初期化', onclick: () => { if (!confirm('デモデータを初期化しますか？')) return; window.KGDemo.reset(); st.me = null; renderChrome(); go('#/'); } })));
     box.append(h('p', { class: 'center' }, h('a', { href: '#/about', text: '利用ルールとプライバシー' })));
     return box;
   };
+
+  // 運営者：集計結果の自動発信（週報）の下見と、今すぐ発信
+  function digestBox() {
+    const box = h('div', { class: 'card' }, h('h2', { text: '集計結果の自動発信（週報）' }), h('p', { class: 'muted', text: '読み込み中…' }));
+    const load = () => api('adminDigest').then((d) => {
+      const any = d.platforms.some((x) => x.on);
+      const send = h('button', { class: 'primary', text: '今すぐ発信する', disabled: !any, onclick: async () => {
+        if (!confirm('設定済みのSNSに、下の内容を今すぐ投稿します。よろしいですか？')) return;
+        send.disabled = true;
+        try { const out = await api('adminDigestSend'); const skipped = out.results.find((r) => r.skipped);
+          toast(out.results.some((r) => r.ok) ? '発信しました。' : skipped ? '発信しませんでした：' + skipped.skipped : '発信に失敗しました。下の記録を確認してください。'); load(); } catch (e) { fail(e); send.disabled = false; }
+      } });
+      box.replaceChildren(...h('div', {}, h('h2', { text: '集計結果の自動発信（週報）' }),
+        h('p', { class: 'muted small', text: `毎週月曜の朝9時（日本時間）に、直近7日間の集計を自動で投稿します。投稿者が${d.minUsers}人未満の週は発信しません。` }),
+        h('div', { class: 'badges' }, d.platforms.map((x) => h('span', { class: 'badge' + (x.on ? ' st-support' : ''), text: `${x.name}：${x.on ? '設定済み' : '未設定'}` }))),
+        !any && h('p', { class: 'note', text: 'SNSの鍵がまだ設定されていないため、発信は行われません。Vercel の環境変数に鍵を入れると有効になります。' }),
+        d.previews.map((pv) => h('div', {}, h('p', { class: 'field-label', text: `発信される内容（${cName(pv.country)}・投稿者 ${pv.users}人）` }),
+          pv.skip && h('p', { class: 'err', text: '今週は発信されません：' + pv.skip }),
+          h('pre', { class: 'digest notranslate', text: pv.short }), h('details', {}, h('summary', { class: 'small', text: '長い版（Mastodon用）を見る' }), h('pre', { class: 'digest notranslate', text: pv.long })))),
+        h('div', { class: 'row' }, send),
+        d.history.length ? h('details', {}, h('summary', { class: 'small', text: `発信の記録（${d.history.length}件）` }), KGChart.table(['日時', '国', 'SNS', '結果', '詳細'], d.history.map((r) => [new Date(r.at).toLocaleString('ja-JP'), r.country, r.platform, r.ok ? '成功' : '失敗', h('span', { class: 'small', text: r.detail || '' })]))) : null).childNodes);
+    }).catch((e) => box.replaceChildren(h('h2', { text: '集計結果の自動発信（週報）' }), h('p', { class: 'err', text: e.message })));
+    load();
+    return box;
+  }
 
   pages.admin = () => {
     const list = h('div', {}, h('p', { class: 'muted pad', text: '読み込み中…' }));
@@ -557,7 +582,8 @@
         h('h2', { class: 'sub-h', text: `投稿への通報（${out.reports.length}）` }),
         ...(out.reports.length ? out.reports.map((r) => item(r, '@' + r.handle, r.body, 'adminHide')) : [none()]));
     }).catch((e) => list.replaceChildren(h('p', { class: 'err pad', text: e.message })));
-    return h('div', {}, title('通報の確認', '意見の違いではなく、ルール違反かどうかで判断してください。窓口を非表示にしても、投稿そのものは残ります。'), list);
+    return h('div', {}, title('運営者メニュー'), digestBox(),
+      title('通報の確認', '意見の違いではなく、ルール違反かどうかで判断してください。窓口を非表示にしても、投稿そのものは残ります。'), list);
   };
 
   pages.about = () => h('div', { class: 'prose' }, title('クニゴエについて'),

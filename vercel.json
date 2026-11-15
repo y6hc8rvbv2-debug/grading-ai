@@ -40,5 +40,11 @@
       "destination": "/voices/$1",
       "permanent": false
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/voices?action=cron",
+      "schedule": "0 0 * * 1"
+    }
   ]
 }
