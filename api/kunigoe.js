@@ -39,6 +39,12 @@ CREATE TABLE IF NOT EXISTS kg_posts(
 CREATE INDEX IF NOT EXISTS kg_posts_country ON kg_posts(country, id DESC);
 CREATE INDEX IF NOT EXISTS kg_posts_user ON kg_posts(user_id, id DESC);
 CREATE INDEX IF NOT EXISTS kg_posts_parent ON kg_posts(parent_id);
+CREATE TABLE IF NOT EXISTS kg_desks(
+  id BIGSERIAL PRIMARY KEY, country TEXT NOT NULL, type TEXT NOT NULL, name TEXT NOT NULL,
+  posts INT NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE(country, type, name));
+ALTER TABLE kg_posts ADD COLUMN IF NOT EXISTS desk_type TEXT NOT NULL DEFAULT 'country';
+ALTER TABLE kg_posts ADD COLUMN IF NOT EXISTS desk_id BIGINT REFERENCES kg_desks(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS kg_posts_desk ON kg_posts(desk_id, id DESC);
 CREATE TABLE IF NOT EXISTS kg_reactions(
   user_id BIGINT NOT NULL REFERENCES kg_users(id) ON DELETE CASCADE,
   post_id BIGINT NOT NULL REFERENCES kg_posts(id) ON DELETE CASCADE,
@@ -166,8 +172,8 @@ SELECT p.id, p.country, p.kind, p.topic, p.stance, p.emotion, p.sat, p.body, p.p
   (SELECT array_agg(type) FROM kg_reactions r WHERE r.user_id = $1 AND r.post_id = p.id) AS my,
   (SELECT opt FROM kg_votes v WHERE v.user_id = $1 AND v.post_id = p.id) AS myvote,
   q.id AS qid, q.body AS qbody, q.kind AS qkind, q.created_at AS qcreated, q.hidden AS qhidden,
-  qu.handle AS qhandle, qu.name AS qname
-FROM kg_posts p JOIN kg_users u ON u.id = p.user_id
+  qu.handle AS qhandle, qu.name AS qname, p.desk_type, p.desk_id, d.name AS desk_name
+FROM kg_posts p JOIN kg_users u ON u.id = p.user_id LEFT JOIN kg_desks d ON d.id = p.desk_id
 LEFT JOIN kg_posts q ON q.id = p.quote_id LEFT JOIN kg_users qu ON qu.id = q.user_id`;
 function shape(r) {
   const my = r.my || [];
@@ -175,6 +181,7 @@ function shape(r) {
     id: Number(r.id), country: r.country, kind: r.kind, topic: r.topic, stance: r.stance, emotion: r.emotion, sat: r.sat,
     body: r.body, parent: r.parent_id ? Number(r.parent_id) : null, created: new Date(r.created_at).getTime(),
     user: { handle: r.handle, name: r.name }, mine: !!r.mine,
+    desk: r.desk_id ? { id: Number(r.desk_id), type: r.desk_type, name: r.desk_name } : null,
     likes: r.likes, agrees: r.agrees, disagrees: r.disagrees, replies: r.replies, quotes: r.quotes,
     poll: r.poll ? { options: r.poll.options, counts: r.poll_counts, my: r.myvote } : null,
     my: { like: my.includes('like'), bookmark: my.includes('bookmark'), agree: my.includes('agree'), disagree: my.includes('disagree') },
@@ -274,7 +281,9 @@ A.feed = async ({ p, me }) => {
       else {
         w.push('p.parent_id IS NULL');
         const c = countryOf(p.country || 'ALL', true);
-        if (c !== 'ALL') w.push(`p.country = ${add(c)}`);
+        if (p.desk) w.push(`p.desk_id = ${add(idOf(p.desk))}`); // 窓口を指定したときは、その窓口の投稿だけ
+        else if (c !== 'ALL') w.push(`p.country = ${add(c)}`);
+        if (p.deskType) w.push(`p.desk_type = ${add(oneOf(p.deskType, KG.DESK_TYPES))}`);
       }
       if (p.tab === 'following') {
         if (!me) throw new Bad('ログインが必要です。', 401);
@@ -310,19 +319,28 @@ A.post = async ({ p, me, req }) => {
     poll = { options };
   }
   let country = countryOf(p.country), kind = oneOf(p.kind, KG.KINDS), topic = oneOf(p.topic, KG.TOPICS);
+  let deskType = oneOf(p.deskType || 'country', KG.DESK_TYPES), deskId = null;
   if (parentId) { // 返信は元の投稿の国・分野を引き継ぐ
-    const pr = await q('SELECT country, topic FROM kg_posts WHERE id=$1 AND hidden=false', [parentId]);
+    const pr = await q('SELECT country, topic, desk_type, desk_id FROM kg_posts WHERE id=$1 AND hidden=false', [parentId]);
     if (!pr.rows[0]) throw new Bad('返信先の投稿が見つかりません。', 404);
-    country = pr.rows[0].country; topic = pr.rows[0].topic;
+    country = pr.rows[0].country; topic = pr.rows[0].topic; deskType = pr.rows[0].desk_type; deskId = pr.rows[0].desk_id;
+  } else if (deskType !== 'country') {
+    // 窓口（県・市・政治家・政策など）は名前で管理。同じ国・種類・名前なら同じ窓口にまとめる
+    const deskName = str(String(p.deskName || '').normalize('NFKC'), KG.MAX_DESK).replace(/\s+/g, ' ');
+    if (!deskName) throw new Bad('窓口の名前を入力してください。');
+    if (maskPII(deskName) !== deskName) throw new Bad('窓口の名前に連絡先などの個人情報は使えません。');
+    const dr = await q(`INSERT INTO kg_desks(country, type, name, posts) VALUES($1,$2,$3,1)
+      ON CONFLICT(country, type, name) DO UPDATE SET posts = kg_desks.posts + 1 RETURNING id`, [country, deskType, deskName]);
+    deskId = dr.rows[0].id;
   }
   if (quoteId && !(await q('SELECT 1 FROM kg_posts WHERE id=$1 AND hidden=false', [quoteId])).rows[0]) throw new Bad('引用元の投稿が見つかりません。', 404);
   const sat = p.sat ? Number(p.sat) : null;
   if (sat !== null && ![1, 2, 3, 4, 5].includes(sat)) throw new Bad('暮らし向きの値が正しくありません。');
   const r = await q(
-    `INSERT INTO kg_posts(user_id, country, kind, topic, stance, emotion, sat, body, parent_id, quote_id, poll, poll_counts)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+    `INSERT INTO kg_posts(user_id, country, kind, topic, stance, emotion, sat, body, parent_id, quote_id, poll, poll_counts, desk_type, desk_id)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
     [me.id, country, kind, topic, oneOf(p.stance, KG.STANCES, true), oneOf(p.emotion, KG.EMOTIONS, true), sat, body,
-      parentId, quoteId, poll ? JSON.stringify(poll) : null, poll ? poll.options.map(() => 0) : null]);
+      parentId, quoteId, poll ? JSON.stringify(poll) : null, poll ? poll.options.map(() => 0) : null, deskType, deskId]);
   const id = Number(r.rows[0].id);
   const tags = KG.tagsOf(body);
   for (const t of tags) await q('INSERT INTO kg_tags(post_id, tag, country) VALUES($1,$2,$3)', [id, t, country]);
@@ -334,10 +352,11 @@ A.post = async ({ p, me, req }) => {
 
 A.deletePost = async ({ p, me }) => {
   const id = idOf(p.id);
-  const r = await q('DELETE FROM kg_posts WHERE id=$1 AND user_id=$2 RETURNING parent_id, quote_id', [id, me.id]); // 自分の投稿だけ消せる
+  const r = await q('DELETE FROM kg_posts WHERE id=$1 AND user_id=$2 RETURNING parent_id, quote_id, desk_id', [id, me.id]); // 自分の投稿だけ消せる
   if (!r.rows[0]) throw new Bad('削除できません。', 403);
   if (r.rows[0].parent_id) await q('UPDATE kg_posts SET replies = GREATEST(replies - 1, 0) WHERE id=$1', [r.rows[0].parent_id]);
   if (r.rows[0].quote_id) await q('UPDATE kg_posts SET quotes = GREATEST(quotes - 1, 0) WHERE id=$1', [r.rows[0].quote_id]);
+  if (r.rows[0].desk_id && !r.rows[0].parent_id) await q('UPDATE kg_desks SET posts = GREATEST(posts - 1, 0) WHERE id=$1', [r.rows[0].desk_id]);
   return { ok: true };
 };
 
@@ -394,6 +413,22 @@ A.profile = async ({ p, me }) => {
   if (!u) throw new Bad('ユーザーが見つかりません。', 404);
   // 年代・性別・地域は統計にだけ使い、プロフィールには出さない
   return { profile: { handle: u.handle, name: u.name, bio: u.bio, country: u.country, joined: new Date(u.created_at).getTime(), posts: u.posts, followers: u.followers, following: u.following, followed: u.followed, mine: !!me && Number(u.id) === me.id } };
+};
+
+// 窓口の一覧・検索（id を指定すると1件だけ）
+A.desks = async ({ p }) => {
+  const params = [];
+  const add = (v) => { params.push(v); return '$' + params.length; };
+  const w = ['posts > 0'];
+  if (p.id) w.push(`id = ${add(idOf(p.id))}`);
+  else {
+    const c = countryOf(p.country || 'ALL', true);
+    if (c !== 'ALL') w.push(`country = ${add(c)}`);
+    if (p.type) w.push(`type = ${add(oneOf(p.type, KG.DESK_TYPES))}`);
+    if (p.q) w.push(`name ILIKE ${add(like(str(p.q, KG.MAX_DESK)))}`);
+  }
+  const r = await q(`SELECT id, country, type, name, posts FROM kg_desks WHERE ${w.join(' AND ')} ORDER BY posts DESC, id LIMIT 40`, params);
+  return { desks: r.rows.map((x) => ({ ...x, id: Number(x.id) })) };
 };
 
 A.trends = async ({ p }) => {
@@ -460,6 +495,8 @@ A.stats = async ({ p }) => {
   const w = ['p.hidden = false'];
   if (c !== 'ALL') w.push(`p.country = ${add(c)}`);
   if (days) w.push(`p.created_at > now() - make_interval(days => ${add(days)})`);
+  if (p.desk) w.push(`p.desk_id = ${add(idOf(p.desk))}`);
+  if (p.deskType) w.push(`p.desk_type = ${add(oneOf(p.deskType, KG.DESK_TYPES))}`);
   const wNoTopic = w.join(' AND ');
   if (p.topic) w.push(`p.topic = ${add(oneOf(p.topic, KG.TOPICS))}`);
   const W = w.join(' AND ');
@@ -469,7 +506,7 @@ A.stats = async ({ p }) => {
     FROM kg_posts p WHERE ${W} AND p.stance IS NOT NULL ORDER BY p.user_id, p.topic, p.id DESC)`;
   const LATEST_SAT = `WITH l AS (SELECT DISTINCT ON (p.user_id) p.user_id, p.sat
     FROM kg_posts p WHERE ${W} AND p.sat IS NOT NULL ORDER BY p.user_id, p.id DESC)`;
-  const [tot, byDay, byKind, topicCount, topicStance, emo, sat, stDemo, demo, tags, props, countries] = await Promise.all([
+  const [tot, byDay, byKind, topicCount, topicStance, emo, sat, stDemo, demo, tags, props, countries, deskTypes, desks] = await Promise.all([
     q(`SELECT count(*)::int AS posts, count(DISTINCT p.user_id)::int AS users,
          count(*) FILTER (WHERE p.created_at > now() - interval '24 hours')::int AS today FROM kg_posts p WHERE ${W}`, params),
     q(`SELECT to_char(p.created_at AT TIME ZONE 'Asia/Tokyo', 'YYYY-MM-DD') AS d, count(*)::int AS n FROM kg_posts p
@@ -487,12 +524,15 @@ A.stats = async ({ p }) => {
        WHERE ${W} AND p.kind = 'proposal' AND p.parent_id IS NULL ORDER BY (p.agrees - p.disagrees) DESC, p.agrees DESC, p.id DESC LIMIT 10`, params),
     q(`SELECT p.country AS k, count(*)::int AS n, count(DISTINCT p.user_id)::int AS users FROM kg_posts p
        WHERE p.hidden = false ${days ? `AND p.created_at > now() - make_interval(days => $1)` : ''} GROUP BY 1 ORDER BY n DESC LIMIT 15`, days ? [days] : []),
+    q(`SELECT p.desk_type AS k, count(*)::int AS n FROM kg_posts p WHERE ${W} AND p.parent_id IS NULL GROUP BY 1`, params),
+    q(`SELECT d.id, d.type, d.name, d.country, count(*)::int AS n, count(DISTINCT p.user_id)::int AS users
+       FROM kg_posts p JOIN kg_desks d ON d.id = p.desk_id WHERE ${W} AND p.parent_id IS NULL GROUP BY d.id ORDER BY n DESC, d.id LIMIT 15`, params),
   ]);
   return KG.buildStats({
     totals: tot.rows[0], byDay: byDay.rows, byKind: byKind.rows, topicCount: topicCount.rows, topicStance: topicStance.rows,
     emotions: emo.rows, sat: sat.rows, stanceDemo: stDemo.rows, demo: demo.rows, tags: tags.rows,
     proposals: props.rows.map((x) => ({ id: Number(x.id), body: x.body.slice(0, 120), topic: x.topic, agrees: x.agrees, disagrees: x.disagrees, handle: x.handle })),
-    countries: countries.rows,
+    countries: countries.rows, deskTypes: deskTypes.rows, desks: desks.rows.map((x) => ({ ...x, id: Number(x.id) })),
   });
 };
 

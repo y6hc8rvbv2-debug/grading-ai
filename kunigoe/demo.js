@@ -1,7 +1,7 @@
 // クニゴエ：デモモード（データベース未接続のとき用）
 // サーバーと同じ操作を、この端末の中だけで再現する。投稿は localStorage に保存され、他の人には見えない。
 (function () {
-  const KEY = 'kg_demo_v2';
+  const KEY = 'kg_demo_v3';
   const DAY = 864e5;
   class Bad extends Error {}
 
@@ -74,6 +74,15 @@
     ['reform', 'ネット投票の導入に賛成ですか？ #ネット投票', ['賛成', '条件つきで賛成', '反対']],
   ];
 
+  // 見本の「窓口」（実在の個人名は使わない）
+  const DESKS = {
+    JP: [['pref', '東京都'], ['pref', '大阪府'], ['pref', '北海道'], ['pref', '福岡県'], ['city', '横浜市'], ['city', '札幌市'],
+      ['politician', '総理大臣'], ['politician', '財務大臣'], ['policy', '消費税減税'], ['policy', '児童手当の拡充'], ['policy', '防衛費の増額'],
+      ['theme', '少子化'], ['theme', '物価高'], ['theme', '働き方'], ['other', 'デジタル庁']],
+    US: [['state', 'カリフォルニア州'], ['state', 'テキサス州'], ['politician', '大統領'], ['theme', '気候変動']],
+    '*': [['politician', '首相・大統領'], ['policy', '最低賃金の引き上げ'], ['theme', '気候変動'], ['city', '首都']],
+  };
+
   function rng(seed) { // 毎回同じ見本データになる乱数
     let s = seed;
     return () => { s = (s * 1664525 + 1013904223) % 4294967296; return s / 4294967296; };
@@ -91,13 +100,21 @@
     const base = (u, t, created) => ({
       id: 0, uid: u.id, country: u.country, kind: t[0], topic: t[1], stance: t[2], emotion: t[3], sat: t[4], body: t[5],
       parent: null, quote: null, poll: null, pollCounts: null, likes: 0, agrees: 0, disagrees: 0, replies: 0, quotes: 0, created,
+      deskType: 'country', deskId: null,
     });
+    const desks = [];
+    const deskFor = (country, type, name) => {
+      let d = desks.find((x) => x.country === country && x.type === type && x.name === name);
+      if (!d) { d = { id: desks.length + 1, country, type, name, posts: 0 }; desks.push(d); }
+      d.posts++; return d;
+    };
     for (let i = 0; i < 420; i++) {
       const u = pick(users), t = pick(T).slice();
       // 年代によって暮らし向きや立場が少し変わるようにして、統計に傾向が出るようにする
       if (t[4]) t[4] = Math.max(1, Math.min(5, t[4] + (R() < 0.3 ? 1 : 0) - (R() < 0.3 ? 1 : 0) - (['20s', '30s'].includes(u.age) && R() < 0.3 ? 1 : 0)));
       if (R() < 0.15) t[2] = pick(['support', 'neutral', 'oppose']);
       const p = base(u, t, now - Math.pow(R(), 1.6) * 30 * DAY);
+      if (R() < 0.5) { const [type, name] = pick(DESKS[u.country] || DESKS['*']); p.deskType = type; p.deskId = deskFor(u.country, type, name).id; }
       p.likes = Math.floor(Math.pow(R(), 3) * 60);
       if (p.kind === 'opinion' || p.kind === 'proposal') { p.agrees = Math.floor(Math.pow(R(), 2) * 80); p.disagrees = Math.floor(Math.pow(R(), 2) * 40); }
       posts.push(p);
@@ -112,17 +129,17 @@
     const tops = posts.slice();
     for (let i = 0; i < 70; i++) {
       const parent = pick(tops), u = pick(users);
-      posts.push({ ...base(u, ['opinion', parent.topic, null, null, null, pick(REPLIES)], Math.min(now - 6e4, parent.created + R() * 2 * DAY)), id: posts.length + 1, country: parent.country, parent: parent.id });
+      posts.push({ ...base(u, ['opinion', parent.topic, null, null, null, pick(REPLIES)], Math.min(now - 6e4, parent.created + R() * 2 * DAY)), id: posts.length + 1, country: parent.country, parent: parent.id, deskType: parent.deskType, deskId: parent.deskId });
       parent.replies++;
     }
-    return { users, posts, my: {}, votes: {}, follows: {}, me: null, nextId: posts.length + 1 };
+    return { users, posts, desks, my: {}, votes: {}, follows: {}, me: null, nextId: posts.length + 1 };
   }
 
   let S;
   function load() {
     if (S) return S;
     try { S = JSON.parse(localStorage.getItem(KEY)); } catch { S = null; }
-    if (!S || !S.posts) S = seed();
+    if (!S || !S.posts || !S.desks) S = seed();
     return S;
   }
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { /* 保存できなくても動作は続ける */ } };
@@ -137,6 +154,7 @@
     return {
       id: p.id, country: p.country, kind: p.kind, topic: p.topic, stance: p.stance, emotion: p.emotion, sat: p.sat, body: p.body,
       parent: p.parent, created: p.created, user: { handle: u.handle, name: u.name }, mine: !!m && m.id === p.uid,
+      desk: p.deskId ? (({ id, type, name }) => ({ id, type, name }))(S.desks.find((d) => d.id === p.deskId) || {}) : null,
       likes: p.likes, agrees: p.agrees, disagrees: p.disagrees, replies: p.replies, quotes: p.quotes,
       poll: p.poll ? { options: p.poll.options, counts: p.pollCounts, my: S.votes[p.id] ?? null } : null,
       my: { like: has('like'), bookmark: has('bookmark'), agree: has('agree'), disagree: has('disagree') },
@@ -184,7 +202,9 @@
           if (p.user) list = list.filter((x) => userOf(x.uid).handle === p.user);
           else {
             list = list.filter((x) => !x.parent);
-            if (p.country && p.country !== 'ALL') list = list.filter((x) => x.country === p.country);
+            if (p.desk) list = list.filter((x) => x.deskId === Number(p.desk));
+            else if (p.country && p.country !== 'ALL') list = list.filter((x) => x.country === p.country);
+            if (p.deskType) list = list.filter((x) => x.deskType === p.deskType);
           }
           if (p.tab === 'following') { needMe(); list = list.filter((x) => S.follows[userOf(x.uid).handle]); }
           if (p.kind) list = list.filter((x) => x.kind === p.kind);
@@ -206,7 +226,16 @@
       const parent = p.parent ? byId(p.parent) : null;
       const options = Array.isArray(p.poll) ? p.poll.map((o) => String(o).trim().slice(0, 40)).filter(Boolean) : [];
       if (options.length === 1 || options.length > 4) throw new Bad('アンケートの選択肢は2〜4個にしてください。');
+      let deskType = p.deskType || 'country', deskId = null;
+      if (parent) { deskType = parent.deskType; deskId = parent.deskId; } else if (deskType !== 'country') {
+        const name = String(p.deskName || '').normalize('NFKC').trim().replace(/\s+/g, ' ').slice(0, KG.MAX_DESK);
+        if (!name) throw new Bad('窓口の名前を入力してください。');
+        let d = S.desks.find((x) => x.country === p.country && x.type === deskType && x.name === name);
+        if (!d) { d = { id: Math.max(0, ...S.desks.map((x) => x.id)) + 1, country: p.country, type: deskType, name, posts: 0 }; S.desks.push(d); }
+        d.posts++; deskId = d.id;
+      }
       const post = {
+        deskType, deskId,
         id: S.nextId++, uid: u.id, country: parent ? parent.country : p.country, kind: p.kind, topic: parent ? parent.topic : p.topic,
         stance: p.stance || null, emotion: p.emotion || null, sat: p.sat ? Number(p.sat) : null, body,
         parent: parent ? parent.id : null, quote: p.quote ? byId(p.quote).id : null,
@@ -222,6 +251,7 @@
       const u = needMe(), post = byId(p.id);
       if (post.uid !== u.id) throw new Bad('削除できません。');
       if (post.parent) { const x = S.posts.find((y) => y.id === post.parent); if (x) x.replies = Math.max(0, x.replies - 1); }
+      if (post.deskId && !post.parent) { const d = S.desks.find((x) => x.id === post.deskId); if (d) d.posts = Math.max(0, d.posts - 1); }
       S.posts = S.posts.filter((x) => x.id !== post.id && x.parent !== post.id);
       return { ok: true };
     },
@@ -257,6 +287,16 @@
       const m = me();
       return { profile: { handle: u.handle, name: u.name, bio: u.bio, country: u.country, joined: u.joined, posts: S.posts.filter((x) => x.uid === u.id).length, followers: (u.id * 7) % 40 + (S.follows[u.handle] ? 1 : 0), following: m && m.id === u.id ? Object.keys(S.follows).length : (u.id * 3) % 25, followed: !!S.follows[u.handle], mine: !!m && m.id === u.id } };
     },
+    desks(p) {
+      let list = S.desks.filter((d) => d.posts > 0);
+      if (p.id) list = list.filter((d) => d.id === Number(p.id));
+      else {
+        if (p.country && p.country !== 'ALL') list = list.filter((d) => d.country === p.country);
+        if (p.type) list = list.filter((d) => d.type === p.type);
+        if (p.q) list = list.filter((d) => d.name.toLowerCase().includes(String(p.q).toLowerCase()));
+      }
+      return { desks: list.sort((a, b) => b.posts - a.posts || a.id - b.id).slice(0, 40) };
+    },
     trends(p) { return { tags: tagCount(S.posts.filter((x) => x.created > Date.now() - 7 * DAY && (!p.country || p.country === 'ALL' || x.country === p.country)), 10) }; },
     notifications() {
       const u = needMe(), mine = new Set(S.posts.filter((x) => x.uid === u.id).map((x) => x.id));
@@ -267,7 +307,7 @@
     report() { needMe(); return { ok: true }; },
     stats(p) {
       const days = Number(p.days ?? 30), since = days ? Date.now() - days * DAY : 0;
-      const inC = (x) => !p.country || p.country === 'ALL' || x.country === p.country;
+      const inC = (x) => (!p.country || p.country === 'ALL' || x.country === p.country) && (!p.desk || x.deskId === Number(p.desk)) && (!p.deskType || x.deskType === p.deskType);
       const all = S.posts.filter((x) => x.created > since);
       const noTopic = all.filter(inC), list = p.topic ? noTopic.filter((x) => x.topic === p.topic) : noTopic;
       const count = (rows, keyFn) => { const m = new Map(); rows.forEach((r) => { const k = keyFn(r); if (k != null) m.set(k, (m.get(k) || 0) + 1); }); return [...m].map(([k, n]) => ({ k, n })); };
@@ -279,7 +319,11 @@
       const dstr = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
       const cm = new Map();
       all.forEach((x) => { const c = cm.get(x.country) || { k: x.country, n: 0, u: new Set() }; c.n++; c.u.add(x.uid); cm.set(x.country, c); });
+      const dm = new Map();
+      list.filter((x) => x.deskId && !x.parent).forEach((x) => { const c = dm.get(x.deskId) || { n: 0, u: new Set() }; c.n++; c.u.add(x.uid); dm.set(x.deskId, c); });
       return KG.buildStats({
+        deskTypes: count(list.filter((x) => !x.parent), (x) => x.deskType),
+        desks: [...dm].map(([id, c]) => { const d = S.desks.find((x) => x.id === id); return { id, type: d.type, name: d.name, country: d.country, n: c.n, users: c.u.size }; }).sort((a, b) => b.n - a.n).slice(0, 15),
         totals: { posts: list.length, users: uids.length, today: list.filter((x) => x.created > Date.now() - DAY).length },
         byDay: count(list.filter((x) => x.created > Date.now() - 90 * DAY), (x) => dstr(x.created)).map((x) => ({ d: x.k, n: x.n })).sort((a, b) => (a.d < b.d ? -1 : 1)),
         byKind: count(list, (x) => x.kind), topicCount: count(noTopic, (x) => x.topic), emotions: count(list, (x) => x.emotion),

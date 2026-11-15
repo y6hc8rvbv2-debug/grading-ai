@@ -33,6 +33,17 @@
     { k: 'disaster', name: '防災・復興' }, { k: 'agri', name: '農林水産・食' }, { k: 'digital', name: 'デジタル・行政' },
     { k: 'reform', name: '政治改革・選挙' }, { k: 'other', name: 'その他' },
   ];
+  // 意見の窓口（どこ・誰・何に向けた声か）。国以外は、名前を付けて窓口を作れる
+  const DESK_TYPES = [
+    { k: 'country', name: '国', icon: '🏛️', eg: '' },
+    { k: 'state', name: '州', icon: '🗺️', eg: '例：カリフォルニア州' },
+    { k: 'pref', name: '県', icon: '🗾', eg: '例：大阪府、福岡県' },
+    { k: 'city', name: '市', icon: '🏙️', eg: '例：横浜市、世田谷区' },
+    { k: 'politician', name: '政治家', icon: '🧑‍💼', eg: '例：総理大臣、〇〇議員' },
+    { k: 'policy', name: '政策', icon: '📑', eg: '例：消費税減税、児童手当の拡充' },
+    { k: 'theme', name: '社会テーマ', icon: '🌱', eg: '例：少子化、働き方' },
+    { k: 'other', name: 'その他', icon: '📮', eg: '例：〇〇省、〇〇委員会' },
+  ];
   const STANCES = [
     { k: 'support', name: '支持', icon: '👍' },
     { k: 'neutral', name: 'どちらともいえない', icon: '🤔' },
@@ -85,14 +96,14 @@
       stanceByAge: guard(AGES.map((a) => stanceRow(raw.stanceDemo, 'age', a.k))),
       stanceByGender: guard(GENDERS.map((g) => stanceRow(raw.stanceDemo, 'gender', g.k))),
       demo: { age: demoBy('age', AGES), gender: demoBy('gender', GENDERS), area: demoBy('area', AREAS) },
-      tags: raw.tags, proposals: raw.proposals, countries: raw.countries, minCell: MIN_CELL,
+      tags: raw.tags, proposals: raw.proposals, countries: raw.countries, deskTypes: raw.deskTypes || [], desks: raw.desks || [], minCell: MIN_CELL,
     };
   }
 
   return {
     buildStats,
-    COUNTRIES, KINDS, TOPICS, STANCES, EMOTIONS, AGES, GENDERS, AREAS, SAT_LABELS,
+    COUNTRIES, KINDS, TOPICS, DESK_TYPES, STANCES, EMOTIONS, AGES, GENDERS, AREAS, SAT_LABELS,
     keys, nameOf, country, tagsOf, TAG_RE,
-    MAX_BODY: 500, MIN_CELL: 3,
+    MAX_BODY: 500, MAX_DESK: 30, MIN_CELL: 3,
   };
 });

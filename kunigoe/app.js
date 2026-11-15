@@ -64,6 +64,8 @@
     return h('span', { class: `av av${n}${big ? ' av-big' : ''}`, text: [...(user.name || user.handle)][0] || '?', 'aria-hidden': 'true' });
   }
   const cName = (code) => { const c = KG.country(code); return c ? `${c.flag} ${c.name}` : code; };
+  const deskType = (k) => KG.DESK_TYPES.find((t) => t.k === k) || KG.DESK_TYPES[0];
+  const deskLabel = (d) => `${deskType(d.type).icon} ${deskType(d.type).name}：${d.name}`;
   const go = (hash) => { if (location.hash === hash) route(); else location.hash = hash; };
 
   function modal(title, body, opts = {}) {
@@ -165,6 +167,7 @@
   function badges(p) {
     const kind = KG.KINDS.find((k) => k.k === p.kind), stance = KG.STANCES.find((s) => s.k === p.stance), emo = KG.EMOTIONS.find((e) => e.k === p.emotion);
     return h('div', { class: 'badges' },
+      p.desk && !p.parent && h('a', { class: 'badge desk', href: '#/desk/' + p.desk.id, text: deskLabel(p.desk), title: 'この窓口の投稿を見る', onclick: (e) => e.stopPropagation() }),
       kind && !p.parent && h('span', { class: 'badge kind-' + p.kind, text: `${kind.icon} ${kind.name}` }),
       !p.parent && h('a', { class: 'badge', href: '#/search?topic=' + p.topic, text: KG.nameOf(KG.TOPICS, p.topic), onclick: (e) => e.stopPropagation() }),
       stance && h('span', { class: 'badge st-' + p.stance, text: `${stance.icon} 政策を${stance.name}` }),
@@ -250,12 +253,13 @@
   }
 
   // ---------- 投稿フォーム ----------
-  function openCompose({ parent, quote } = {}) {
+  function openCompose({ parent, quote, desk } = {}) {
     if (!requireLogin('投稿するには登録（無料）が必要です。')) return;
     const simple = !!parent;
     const draft = simple || quote ? {} : store.get('kg_draft', {});
-    const d = { kind: draft.kind || 'opinion', topic: draft.topic || 'economy', stance: draft.stance || null, emotion: draft.emotion || null, sat: draft.sat || null, body: draft.body || '' };
-    let country = st.country === 'ALL' ? st.me.country : st.country;
+    const d = { kind: draft.kind || 'opinion', topic: draft.topic || 'economy', stance: draft.stance || null, emotion: draft.emotion || null, sat: draft.sat || null, body: draft.body || '',
+      deskType: desk ? desk.type : draft.deskType || 'country', deskName: desk ? desk.name : draft.deskName || '' };
+    let country = desk ? desk.country : st.country === 'ALL' ? st.me.country : st.country;
     const saveDraft = () => { if (!simple && !quote) store.set('kg_draft', d); };
     const text = h('textarea', { rows: simple ? 4 : 5, maxLength: KG.MAX_BODY, value: d.body, placeholder: simple ? '返信を書く' : 'いまの暮らし、感じていること、政策への意見や提案を書いてみましょう。\n#ハッシュタグ も使えます。' });
     const count = h('span', { class: 'muted small' });
@@ -265,7 +269,27 @@
     const setHint = () => { hint.textContent = (KG.KINDS.find((k) => k.k === d.kind) || {}).hint || ''; };
     setHint();
     const topic = select(KG.TOPICS, d.topic); topic.addEventListener('change', () => { d.topic = topic.value; saveDraft(); });
-    const cSel = countrySelect(country); cSel.addEventListener('change', () => { country = cSel.value; });
+    const cSel = countrySelect(country); cSel.addEventListener('change', () => { country = cSel.value; suggest(); });
+    // 意見の窓口：国以外を選んだら名前を入力（すでにある窓口は候補に出る）
+    const deskList = h('datalist', { id: 'kg-desk-list' });
+    const deskName = h('input', { type: 'text', maxLength: KG.MAX_DESK, value: d.deskName, list: 'kg-desk-list', autocomplete: 'off' });
+    const deskHint = h('small', { class: 'muted' });
+    const deskField = h('label', { class: 'field' }, h('span', { class: 'field-label', text: '窓口の名前' }), deskName, deskList, deskHint);
+    let sugTimer;
+    const suggest = () => {
+      clearTimeout(sugTimer);
+      if (d.deskType === 'country') return;
+      sugTimer = setTimeout(() => api('desks', { country, type: d.deskType, q: deskName.value.trim() }).then((out) => deskList.replaceChildren(...out.desks.map((x) => h('option', { value: x.name })))).catch(() => {}), 250);
+    };
+    const drawDesk = () => {
+      const t = deskType(d.deskType);
+      deskField.hidden = d.deskType === 'country';
+      deskName.placeholder = t.eg;
+      deskHint.textContent = d.deskType === 'politician' ? '政治家への声は、公人としての活動や政策についての意見に限ります。私生活への言及や中傷はできません。' : 'すでにある窓口は候補に表示されます。なければ新しく作られます。';
+      suggest();
+    };
+    deskName.addEventListener('input', () => { d.deskName = deskName.value; saveDraft(); suggest(); });
+    drawDesk();
     const pollBox = h('div', { class: 'poll-edit' }); let pollOn = false;
     const pollInputs = [];
     const drawPoll = () => {
@@ -285,6 +309,7 @@
             : { ...d, country, quote: quote && quote.id, poll: pollOn ? pollInputs.map((i) => i.value) : null };
           const out = await api('post', p);
           if (!simple && !quote) store.set('kg_draft', {});
+          if (desk) { close(); toast('投稿しました。'); route(); return; }
           close(); toast(simple ? '返信しました。' : '投稿しました。');
           if (simple) go('#/p/' + parent.id); else if (location.hash.replace(/^#\/?/, '') === '') { const list = $('.feed-list'); if (list && (st.country === 'ALL' || st.country === out.post.country)) list.prepend(postCard(out.post)); } else go('#/');
         } catch (ex) { err.textContent = ex.message; } finally { submit.disabled = false; }
@@ -293,7 +318,9 @@
     parent && h('p', { class: 'muted small', text: `@${parent.user.handle} さんへの返信` }),
     !simple && [
       h('div', { class: 'field' }, h('span', { class: 'field-label', text: '何を伝えますか？' }), chips(KG.KINDS, d.kind, (v) => { d.kind = v; setHint(); saveDraft(); }, { required: true }), hint),
-      h('div', { class: 'grid2' }, field('対象の国', cSel), field('政策分野', topic))],
+      h('div', { class: 'grid2' }, field('対象の国', cSel), field('政策分野', topic)),
+      h('div', { class: 'field' }, h('span', { class: 'field-label', text: '意見の窓口（どこ・誰・何に向けた声ですか？）' }), chips(KG.DESK_TYPES, d.deskType, (v) => { d.deskType = v; saveDraft(); drawDesk(); }, { required: true })),
+      deskField],
     text, h('div', { class: 'row between' }, h('span', { class: 'muted small', text: '氏名・住所・電話番号などの個人情報は書かないでください。' }), count),
     quote && h('div', { class: 'quote' }, h('span', { class: 'muted small', text: `${quote.user.name} @${quote.user.handle}` }), h('span', { class: 'quote-body', text: quote.body })),
     !simple && [
@@ -336,21 +363,62 @@
   const title = (text, sub) => h('div', { class: 'page-head' }, h('h1', { text }), sub && h('p', { class: 'muted', text: sub }));
 
   pages.home = () => {
-    const state = store.get('kg_home', { tab: 'latest', kind: '', topic: '' });
+    const state = store.get('kg_home', { tab: 'latest', kind: '', topic: '', deskType: '' });
     const box = h('div');
     const draw = () => {
       store.set('kg_home', state);
       const topic = select(KG.TOPICS, state.topic, 'すべての分野'); topic.addEventListener('change', () => { state.topic = topic.value; draw(); });
+      const deskSel = select(KG.DESK_TYPES, state.deskType, 'すべての窓口'); deskSel.setAttribute('aria-label', '窓口の種類'); deskSel.addEventListener('change', () => { state.deskType = deskSel.value; draw(); });
       box.replaceChildren(
         h('div', { class: 'tabs sticky' }, [['latest', '新着'], ['popular', '人気'], ['following', 'フォロー中']].map(([k, n]) =>
           h('button', { class: 'tab' + (state.tab === k ? ' on' : ''), text: n, onclick: () => { if (k === 'following' && !requireLogin('フォロー中の投稿を見るにはログインが必要です。')) return; state.tab = k; draw(); } }))),
         h('button', { class: 'compose-teaser', onclick: () => openCompose() }, st.me ? avatar(st.me) : h('span', { class: 'av av0', text: '声' }), h('span', { text: `${cName(st.country === 'ALL' ? (st.me ? st.me.country : 'JP') : st.country)} の政策に、あなたの声を届けよう` })),
-        h('div', { class: 'filters' }, chips([{ k: '', name: 'すべて' }, ...KG.KINDS], state.kind, (v) => { state.kind = v || ''; draw(); }, { required: true }), topic),
-        feedView({ country: st.country, tab: state.tab, kind: state.kind, topic: state.topic },
+        h('div', { class: 'filters' }, chips([{ k: '', name: 'すべて' }, ...KG.KINDS], state.kind, (v) => { state.kind = v || ''; draw(); }, { required: true }), deskSel, topic),
+        feedView({ country: st.country, tab: state.tab, kind: state.kind, topic: state.topic, deskType: state.deskType },
           state.tab === 'following' ? 'フォロー中の人の投稿がここに並びます。気になる人をフォローしてみましょう。' : null));
     };
     draw();
     return box;
+  };
+
+  // 窓口の一覧（種類ごとに、投稿の多い順）
+  pages.desks = () => {
+    const f = { type: '', q: '' };
+    const list = h('div', { class: 'desk-list' });
+    const q = h('input', { type: 'search', placeholder: '窓口の名前でさがす（例：大阪、消費税）', 'aria-label': '窓口の名前でさがす' });
+    let timer;
+    const load = async () => {
+      try {
+        const out = await api('desks', { country: st.country, type: f.type, q: f.q });
+        list.replaceChildren(...out.desks.map((d) => h('a', { class: 'desk-row', href: '#/desk/' + d.id },
+          h('span', { class: 'desk-icon', text: deskType(d.type).icon }),
+          h('span', { class: 'desk-main' }, h('b', { text: d.name }), h('small', { class: 'muted', text: `${deskType(d.type).name}・${cName(d.country)}` })),
+          h('span', { class: 'muted small', text: d.posts.toLocaleString() + '件' }))));
+        if (!out.desks.length) list.replaceChildren(h('p', { class: 'muted center pad', text: 'この条件の窓口はまだありません。「声を届ける」から新しい窓口を作れます。' }));
+      } catch (e) { list.replaceChildren(h('p', { class: 'err pad', text: e.message })); }
+    };
+    q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { f.q = q.value.trim(); load(); }, 250); });
+    load();
+    const c = st.country === 'ALL' ? null : KG.country(st.country);
+    return h('div', {}, title('意見の窓口', '国・州・県・市・政治家・政策・社会テーマなど、声を届ける先ごとに投稿と統計を見られます。'),
+      h('div', { class: 'filters' }, chips([{ k: '', name: 'すべて' }, ...KG.DESK_TYPES.filter((t) => t.k !== 'country')], '', (v) => { f.type = v || ''; load(); }, { required: true })),
+      h('div', { class: 'search-bar' }, q),
+      c && h('a', { class: 'desk-row', href: '#/' }, h('span', { class: 'desk-icon', text: '🏛️' }), h('span', { class: 'desk-main' }, h('b', { text: c.name + '（国全体）' }), h('small', { class: 'muted', text: '国・' + cName(c.code) })), h('span', { class: 'muted small', text: 'ホームへ' })),
+      list);
+  };
+
+  // 1つの窓口のページ
+  pages.desk = (id) => {
+    const head = h('div', { class: 'profile' }, h('p', { class: 'muted center', text: '読み込み中…' }));
+    api('desks', { id }).then((out) => {
+      const d = out.desks[0];
+      if (!d) { head.replaceChildren(h('h1', { text: '窓口が見つかりません' })); return; }
+      head.replaceChildren(
+        h('div', { class: 'row' }, h('button', { class: 'icon-btn', 'aria-label': '戻る', text: '←', onclick: () => history.back() }), h('span', { class: 'muted', text: `${deskType(d.type).icon} ${deskType(d.type).name}の窓口・${cName(d.country)}` })),
+        h('h1', { text: d.name }), h('p', { class: 'muted', text: `${d.posts.toLocaleString()}件の声` }),
+        h('div', { class: 'row' }, h('button', { class: 'primary', text: '✏️ この窓口に声を届ける', onclick: () => openCompose({ desk: d }) }), h('a', { class: 'ghost btn', href: '#/stats?desk=' + d.id, text: '📊 統計を見る' })));
+    }).catch((e) => head.replaceChildren(h('p', { class: 'err', text: e.message })));
+    return h('div', {}, head, feedView({ desk: id }, 'この窓口にはまだ投稿がありません。'));
   };
 
   pages.post = (id) => {
@@ -482,7 +550,7 @@
   };
 
   pages.about = () => h('div', { class: 'prose' }, title('クニゴエについて'),
-    h('h2', { text: 'クニゴエとは' }), h('p', { text: '国を選んで、その国の政策に対する「生活の現状」「気持ち」「意見」「政策提言」を届ける、政治に特化した市民の声のSNSです。集まった声は自動で集計され、誰でも統計として見ることができます。' }),
+    h('h2', { text: 'クニゴエとは' }), h('p', { text: '国を選び、さらに州・県・市・政治家・政策・社会テーマなどの「窓口」を選んで、政策に対する「生活の現状」「気持ち」「意見」「政策提言」を届ける、政治に特化した市民の声のSNSです。集まった声は自動で集計され、誰でも統計として見ることができます。' }),
     h('h2', { text: '利用ルール' }), h('ul', {}, ['特定の個人や集団への誹謗中傷・差別・脅迫はしない', '氏名・住所・電話番号など、自分や他人の個人情報を書かない', '事実と異なる情報を、事実であるかのように広めない', '同じ内容の連続投稿や、なりすまし・多重登録による水増しをしない', '意見の違う相手にも敬意を払う（反対は「反対」ボタンで示せます）'].map((t) => h('li', { text: t }))),
     h('p', { text: 'ルールに反する投稿は、通報をもとに運営が確認し、非表示にすることがあります。立場や意見の内容を理由に非表示にすることはありません。' }),
     h('h2', { text: 'プライバシー' }), h('ul', {}, ['メールアドレス・電話番号・本名は集めません（ユーザーIDとパスワードだけで使えます）', 'パスワードは復元できない形（ハッシュ）で保存します', '年代・性別・お住まいの区分は任意で、集計にだけ使い、プロフィールには表示しません', '集計では、3人未満の少人数の区分は表示しません（個人が推測されるのを防ぐため）', '投稿に含まれるメールアドレスや電話番号らしき文字列は、自動で伏せ字にします', '退会すると、投稿や属性を含むすべてのデータが削除されます', '広告用の追跡（トラッキング）は行いません'].map((t) => h('li', { text: t }))),
@@ -500,16 +568,21 @@
   }
   const empty = () => h('p', { class: 'muted', text: 'この条件ではまだ十分なデータがありません。' });
 
-  pages.stats = () => {
-    const f = store.get('kg_stats', { days: 30, topic: '' });
+  pages.stats = (qs) => {
+    const f = store.get('kg_stats', { days: 30, topic: '', deskType: '' });
+    const deskId = Number(qs.get('desk')) || null;
     const out = h('div', { class: 'stats' }, h('p', { class: 'muted center', text: '集計中…' }));
     const country = countrySelect(st.country, true);
     country.addEventListener('change', () => { setCountry(country.value); });
     const days = h('select', { 'aria-label': '期間' }, [[7, '直近7日'], [30, '直近30日'], [90, '直近90日'], [0, '全期間']].map(([v, t]) => h('option', { value: v, text: t })));
     days.value = f.days;
     const topic = select(KG.TOPICS, f.topic, 'すべての分野');
-    const reload = () => { f.days = Number(days.value); f.topic = topic.value; store.set('kg_stats', f); load(); };
-    days.addEventListener('change', reload); topic.addEventListener('change', reload);
+    const deskSel = select(KG.DESK_TYPES, deskId ? '' : f.deskType, 'すべての窓口'); deskSel.setAttribute('aria-label', '窓口の種類');
+    const reload = () => { f.days = Number(days.value); f.topic = topic.value; if (!deskId) f.deskType = deskSel.value; store.set('kg_stats', f); load(); };
+    days.addEventListener('change', reload); topic.addEventListener('change', reload); deskSel.addEventListener('change', reload);
+    // 特定の窓口だけの統計（窓口ページの「統計を見る」から来たとき）
+    const deskChip = h('p', { class: 'note', hidden: !deskId });
+    if (deskId) api('desks', { id: deskId }).then((o) => { const d = o.desks[0]; if (d) deskChip.replaceChildren(`窓口「${deskLabel(d)}」（${cName(d.country)}）に届いた声だけを集計しています。 `, h('a', { href: '#/stats', text: '絞り込みを解除' })); }).catch(() => {});
     let csvRows = [];
     const csvBtn = h('button', { class: 'ghost', text: '⬇ CSVで保存', onclick: () => {
       const esc = (v) => { let s = String(v ?? ''); if (/^[=+\-@]/.test(s)) s = "'" + s; return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
@@ -520,7 +593,7 @@
 
     async function load() {
       let s;
-      try { s = await api('stats', { country: st.country, days: f.days, topic: f.topic }); } catch (e) { out.replaceChildren(h('p', { class: 'err', text: e.message })); return; }
+      try { s = await api('stats', { country: deskId ? 'ALL' : st.country, days: f.days, topic: f.topic, desk: deskId, deskType: deskId ? '' : f.deskType }); } catch (e) { out.replaceChildren(h('p', { class: 'err', text: e.message })); return; }
       const C = KGChart, nm = KG.nameOf, total = s.totals.posts;
       csvRows = [['クニゴエ 統計', cName(st.country === 'ALL' ? '' : st.country) || 'すべての国', days.selectedOptions[0].textContent, topic.selectedOptions[0].textContent], []];
       const csv = (name, cols, rows) => { csvRows.push([name], cols, ...rows, []); return { cols, rows }; };
@@ -538,6 +611,11 @@
       const kinds = ordered(s.byKind, KG.KINDS);
       cards.push(chartCard('声の種類', '投稿の内訳', total ? C.hbar(kinds.map((x, i) => ({ label: nm(KG.KINDS, x.k), value: x.n, color: V('s' + (i + 1)), note: C.pct(x.n, total) + '%' }))) : empty(),
         csv('声の種類', ['種類', '投稿数', '割合(%)'], kinds.map((x) => [nm(KG.KINDS, x.k), x.n, C.pct(x.n, total)]))));
+
+      // 窓口の種類
+      const dts = ordered(s.deskTypes, KG.DESK_TYPES), dTotal = dts.reduce((a, x) => a + x.n, 0);
+      if (!deskId) cards.push(chartCard('声の届け先（窓口の種類）', '返信を除く投稿の内訳', dTotal ? C.hbar(dts.map((x) => ({ label: `${deskType(x.k).icon} ${deskType(x.k).name}`, value: x.n, note: C.pct(x.n, dTotal) + '%' }))) : empty(),
+        csv('声の届け先（窓口の種類）', ['窓口の種類', '投稿数', '割合(%)'], dts.map((x) => [deskType(x.k).name, x.n, C.pct(x.n, dTotal)]))));
 
       // 3. 気持ち
       const emos = ordered(s.emotions, KG.EMOTIONS), eTotal = emos.reduce((a, x) => a + x.n, 0);
@@ -581,6 +659,9 @@
       csv('賛同の多い政策提言', ['順位', '提言', '分野', '賛同', '反対'], s.proposals.map((p, i) => [i + 1, p.body, nm(KG.TOPICS, p.topic), p.agrees, p.disagrees]));
       cards.push(h('div', { class: 'span2' }, h('section', { class: 'card chart-card' }, h('h2', { text: '賛同の多い政策提言' }), h('p', { class: 'muted small', text: '賛同から反対を引いた数が多い順' }),
         s.proposals.length ? C.table(['提言', '分野', '賛同', '反対'], s.proposals.map((p) => [link('#/p/' + p.id, p.body), nm(KG.TOPICS, p.topic), p.agrees, p.disagrees])) : empty())));
+      csv('声の多い窓口', ['順位', '種類', '窓口', '国', '投稿数', '投稿者数'], s.desks.map((d, i) => [i + 1, deskType(d.type).name, d.name, (KG.country(d.country) || {}).name || d.country, d.n, d.users]));
+      if (!deskId) cards.push(h('section', { class: 'card chart-card' }, h('h2', { text: '声の多い窓口' }), h('p', { class: 'muted small', text: '国以外の窓口（州・県・市・政治家・政策・社会テーマなど）' }),
+        s.desks.length ? C.table(['窓口', '種類', '投稿数', '投稿者数'], s.desks.map((d) => [link('#/desk/' + d.id, d.name), deskType(d.type).name, d.n, d.users])) : empty()));
       const cTotal = s.countries.reduce((a, x) => a + x.n, 0);
       cards.push(h('div', { class: 'span2' }, chartCard('国別の投稿数', '国の絞り込みに関係なく、上位15か国を表示', s.countries.length ? C.hbar(s.countries.map((x) => ({ label: cName(x.k), value: x.n, note: `${x.users}人` }))) : empty(),
         csv('国別の投稿数', ['国', '投稿数', '投稿者数', '割合(%)'], s.countries.map((x) => [(KG.country(x.k) || {}).name || x.k, x.n, x.users, C.pct(x.n, cTotal)])))));
@@ -596,7 +677,7 @@
     }
     load();
     return h('div', {}, title('みんなの声の統計', '集まった声を、表とグラフで見える化します。'),
-      h('div', { class: 'filters stats-filters' }, country, days, topic, csvBtn), out);
+      h('div', { class: 'filters stats-filters' }, !deskId && country, days, !deskId && deskSel, topic, csvBtn), deskChip, out);
   };
 
   // ---------- 画面の枠 ----------
@@ -611,7 +692,7 @@
     q.addEventListener('input', draw); draw();
     const close = modal('国をえらぶ', h('div', { class: 'modal-body' }, q, grid), { wide: true });
   }
-  const NAV = [['#/', '🏠', 'ホーム'], ['#/search', '🔍', 'さがす'], ['#/stats', '📊', '統計'], ['#/notifs', '🔔', '通知'], ['#/bookmarks', '🔖', 'ブックマーク'], ['#/settings', '⚙️', '設定']];
+  const NAV = [['#/', '🏠', 'ホーム'], ['#/desks', '🏛️', '窓口'], ['#/search', '🔍', 'さがす'], ['#/stats', '📊', '統計'], ['#/notifs', '🔔', '通知'], ['#/bookmarks', '🔖', 'ブックマーク'], ['#/settings', '⚙️', '設定']];
   function renderChrome() {
     const cur = '#/' + (location.hash.replace(/^#\/?/, '').split(/[/?]/)[0] || '');
     const links = (list) => list.map(([href, icon, name]) => h('a', { class: 'nav-item' + (cur === href ? ' on' : ''), href, 'aria-current': cur === href ? 'page' : null }, h('span', { class: 'nav-i', text: icon }), h('span', { class: 'nav-t', text: name })));
@@ -621,7 +702,7 @@
       h('button', { class: 'primary block nav-post', text: '✏️ 声を届ける', onclick: () => openCompose() }),
       st.me ? h('a', { class: 'me', href: '#/u/' + st.me.handle }, avatar(st.me), h('span', {}, h('b', { text: st.me.name }), h('small', { class: 'muted', text: '@' + st.me.handle })))
         : h('button', { class: 'ghost block', text: 'ログイン / 新規登録', onclick: () => openAuth('login') }));
-    $('#tabbar').replaceChildren(...links([NAV[0], NAV[1], NAV[2], NAV[3], st.me ? ['#/u/' + st.me.handle, '👤', 'マイページ'] : NAV[5]]));
+    $('#tabbar').replaceChildren(...links([NAV[0], NAV[1], NAV[2], NAV[3], NAV[4], st.me ? ['#/u/' + st.me.handle, '👤', 'マイページ'] : NAV[6]]));
     $('#side').replaceChildren(trendsBox(), h('section', { class: 'side-card' }, h('h2', { text: 'クニゴエとは' }), h('p', { class: 'small', text: '国を選んで、政策への「暮らしの実情・気持ち・意見・提言」を届ける市民の声のSNS。集まった声は統計として誰でも見られます。' }), h('a', { class: 'small', href: '#/about', text: '利用ルールとプライバシー' })));
     $('#demo-banner').hidden = st.mode !== 'demo';
   }
@@ -636,7 +717,7 @@
     const [name, ...rest] = path.split('/');
     const arg = decodeURIComponent(rest.join('/') || '');
     const qs = new URLSearchParams(query);
-    const table = { '': () => pages.home(), search: () => pages.search('', qs), tag: () => pages.search(arg, qs), stats: () => pages.stats(), notifs: () => pages.notifs(), bookmarks: () => pages.bookmarks(), u: () => pages.user(arg.toLowerCase()), p: () => pages.post(Number(arg)), settings: () => pages.settings(), about: () => pages.about(), admin: () => pages.admin() };
+    const table = { '': () => pages.home(), search: () => pages.search('', qs), tag: () => pages.search(arg, qs), stats: () => pages.stats(qs), desks: () => pages.desks(), desk: () => pages.desk(Number(arg)), notifs: () => pages.notifs(), bookmarks: () => pages.bookmarks(), u: () => pages.user(arg.toLowerCase()), p: () => pages.post(Number(arg)), settings: () => pages.settings(), about: () => pages.about(), admin: () => pages.admin() };
     document.body.classList.toggle('wide-page', name === 'stats');
     $('#main').replaceChildren((table[name] || table[''])());
     renderChrome();
