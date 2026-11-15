@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="クニゴエ（KuniGoe）：国を選んで、政策に暮らしの実情・気持ち・意見・提言を届ける市民の声のSNS。集まった声は統計として誰でも見られます。">
+<meta name="theme-color" content="#1f66c1">
+<meta name="referrer" content="no-referrer">
+<title>KuniGoe（クニゴエ）｜Voices of Citizens</title>
+<link rel="icon" href="/voices/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/voices/apple-touch-icon.png">
+<link rel="stylesheet" href="/voices/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="logo" href="#/" aria-label="KuniGoe ホーム"><img src="/voices/icon.svg" alt="" width="28" height="28"><span class="logo-text notranslate" translate="no">KuniGoe<small>Voices of Citizens</small></span></a>
+  <div class="top-right">
+    <button id="country-btn" class="country-btn" aria-label="国をえらぶ"></button>
+    <button id="lang-btn" class="country-btn lang-btn notranslate" translate="no" aria-label="Language / 言語" title="Language / 言語"></button>
+  </div>
+</header>
+<p id="demo-banner" class="demo-banner" hidden>デモモード：見本の投稿は架空のものです。あなたの投稿はこの端末だけに保存され、他の人には見えません。</p>
+<div class="layout">
+  <nav id="nav" class="nav" aria-label="メニュー"></nav>
+  <main id="main"><p class="muted center">読み込み中…</p></main>
+  <aside id="side" class="side"></aside>
+</div>
+<nav id="tabbar" class="tabbar" aria-label="メニュー"></nav>
+<button id="fab" class="fab" aria-label="声を届ける">✏️</button>
+<div id="modal-root"></div>
+<div id="toast" class="toast" role="status" hidden></div>
+<div id="kg-gt" class="kg-gt" aria-hidden="true"></div>
+<noscript><p class="center">クニゴエを使うには JavaScript を有効にしてください。</p></noscript>
+<script src="/voices/shared.js"></script>
+<script src="/voices/demo.js"></script>
+<script src="/voices/charts.js"></script>
+<script src="/voices/app.js"></script>
+<script src="/voices/i18n.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="60 70 392 400" role="img" aria-label="KuniGoe">
+  <path fill="#1a4fa3" d="M152 96h208a64 64 0 0 1 64 64v136a64 64 0 0 1-64 64H250l-86 74a10 10 0 0 1-16.500-7.600V360a64 64 0 0 1-59.500-63.800V160a64 64 0 0 1 64-64z"/>
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#ffffff" opacity="1" stroke-width="50" stroke-dasharray="178.0 465.0" stroke-dashoffset="0.0" transform="rotate(-90 256 228)"/>
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#ffffff" opacity=".78" stroke-width="50" stroke-dasharray="117.5 465.0" stroke-dashoffset="-186.0" transform="rotate(-90 256 228)"/>
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#ffffff" opacity=".56" stroke-width="50" stroke-dasharray="80.3 465.0" stroke-dashoffset="-311.5" transform="rotate(-90 256 228)"/>
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#ffffff" opacity=".36" stroke-width="50" stroke-dasharray="57.1 465.0" stroke-dashoffset="-399.9" transform="rotate(-90 256 228)"/>
+</svg>
