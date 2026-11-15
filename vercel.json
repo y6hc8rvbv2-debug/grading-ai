@@ -1,10 +1,10 @@
 {
   "framework": null,
-  "buildCommand": "mkdir -p public && cp -r kunigoe index.html public/ && rm -f public/kunigoe/README.md",
+  "buildCommand": "mkdir -p public && cp -r voices index.html public/ && rm -f public/voices/README.md",
   "outputDirectory": "public",
   "headers": [
     {
-      "source": "/kunigoe/(.*)",
+      "source": "/voices/(.*)",
       "headers": [
         {
           "key": "Content-Security-Policy",
@@ -27,6 +27,18 @@
           "value": "camera=(), microphone=(), geolocation=()"
         }
       ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/kunigoe",
+      "destination": "/voices",
+      "permanent": false
+    },
+    {
+      "source": "/kunigoe/(.*)",
+      "destination": "/voices/$1",
+      "permanent": false
     }
   ]
 }

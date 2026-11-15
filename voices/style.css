@@ -1,4 +1,4 @@
-/* クニゴエ：見た目の定義。色は変数にまとめ、ライト／ダークの両方に対応 */
+/* 市民の声：見た目の定義。色は変数にまとめ、ライト／ダークの両方に対応 */
 :root {
   color-scheme: light;
   --bg: #f4f5f7; --surface: #ffffff; --surface-2: #f0f2f5; --line: #dfe2e7;
@@ -241,3 +241,5 @@ main { min-width: 0; background: var(--surface); min-height: calc(100vh - 54px);
 .search-bar:has(> input:only-child) { padding-top: 10px; }
 .stats > .note, .note[hidden] + .stats { margin-top: 0; }
 #main > div > .note { margin: 12px 16px 0; }
+.logo-text { display: flex; flex-direction: column; line-height: 1.15; }
+.logo-text small { font-size: 10.5px; font-weight: 600; color: var(--text-3); letter-spacing: .02em; }

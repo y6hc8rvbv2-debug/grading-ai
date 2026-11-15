@@ -1,4 +1,4 @@
-// クニゴエ：画面側の本体
+// 市民の声：画面側の本体
 // 利用者が書いた文字は必ず textContent で表示する（HTMLとして解釈させない＝XSS対策）
 (function () {
   'use strict';
@@ -34,9 +34,9 @@
     let res;
     if (action === 'stats' || action === 'trends') { // 集計は GET にして CDN キャッシュを効かせる
       const qs = new URLSearchParams({ action, ...Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== '')) });
-      res = await fetch('/api/kunigoe?' + qs);
+      res = await fetch('/api/voices?' + qs);
     } else {
-      res = await fetch('/api/kunigoe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ action, ...params }) });
+      res = await fetch('/api/voices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ action, ...params }) });
     }
     let data = null;
     try { data = await res.json(); } catch { /* JSON でない応答 */ }
@@ -146,7 +146,7 @@
       body.replaceChildren(form);
       handle.focus();
     };
-    close = modal('クニゴエへようこそ', body);
+    close = modal('市民の声へようこそ', body);
     draw(tab);
   }
 
@@ -240,7 +240,7 @@
   async function share(p) {
     const url = location.origin + location.pathname + '#/p/' + p.id;
     try {
-      if (navigator.share) await navigator.share({ title: 'クニゴエ', text: p.body.slice(0, 80), url });
+      if (navigator.share) await navigator.share({ title: '市民の声', text: p.body.slice(0, 80), url });
       else { await navigator.clipboard.writeText(url); toast('リンクをコピーしました。'); }
     } catch { /* 共有を取り消した場合など */ }
   }
@@ -549,12 +549,12 @@
     return h('div', {}, title('通報の確認', '意見の違いではなく、ルール違反かどうかで判断してください。'), list);
   };
 
-  pages.about = () => h('div', { class: 'prose' }, title('クニゴエについて'),
-    h('h2', { text: 'クニゴエとは' }), h('p', { text: '国を選び、さらに州・県・市・政治家・政策・社会テーマなどの「窓口」を選んで、政策に対する「生活の現状」「気持ち」「意見」「政策提言」を届ける、政治に特化した市民の声のSNSです。集まった声は自動で集計され、誰でも統計として見ることができます。' }),
+  pages.about = () => h('div', { class: 'prose' }, title('市民の声について'),
+    h('h2', { text: '「市民の声」とは' }), h('p', { text: '国を選び、さらに州・県・市・政治家・政策・社会テーマなどの「窓口」を選んで、政策に対する「生活の現状」「気持ち」「意見」「政策提言」を届ける、政治に特化した市民の声のSNSです。集まった声は自動で集計され、誰でも統計として見ることができます。' }),
     h('h2', { text: '利用ルール' }), h('ul', {}, ['特定の個人や集団への誹謗中傷・差別・脅迫はしない', '氏名・住所・電話番号など、自分や他人の個人情報を書かない', '事実と異なる情報を、事実であるかのように広めない', '同じ内容の連続投稿や、なりすまし・多重登録による水増しをしない', '意見の違う相手にも敬意を払う（反対は「反対」ボタンで示せます）'].map((t) => h('li', { text: t }))),
     h('p', { text: 'ルールに反する投稿は、通報をもとに運営が確認し、非表示にすることがあります。立場や意見の内容を理由に非表示にすることはありません。' }),
     h('h2', { text: 'プライバシー' }), h('ul', {}, ['メールアドレス・電話番号・本名は集めません（ユーザーIDとパスワードだけで使えます）', 'パスワードは復元できない形（ハッシュ）で保存します', '年代・性別・お住まいの区分は任意で、集計にだけ使い、プロフィールには表示しません', '集計では、3人未満の少人数の区分は表示しません（個人が推測されるのを防ぐため）', '投稿に含まれるメールアドレスや電話番号らしき文字列は、自動で伏せ字にします', '退会すると、投稿や属性を含むすべてのデータが削除されます', '広告用の追跡（トラッキング）は行いません'].map((t) => h('li', { text: t }))),
-    h('h2', { text: '統計を読むときの注意' }), h('p', { text: 'クニゴエの統計は、自分から投稿した人の声の集計です。無作為に選んだ人に聞く世論調査とは違い、利用者の年代や関心にかたよりがあります。「社会全体の割合」ではなく「ここに集まった声の傾向」としてお読みください。立場と暮らし向きは、同じ人が何度投稿しても1人1回（最新の回答）として数えています。' }));
+    h('h2', { text: '統計を読むときの注意' }), h('p', { text: '市民の声の統計は、自分から投稿した人の声の集計です。無作為に選んだ人に聞く世論調査とは違い、利用者の年代や関心にかたよりがあります。「社会全体の割合」ではなく「ここに集まった声の傾向」としてお読みください。立場と暮らし向きは、同じ人が何度投稿しても1人1回（最新の回答）として数えています。' }));
 
   // ---------- 統計ページ ----------
   const V = (name) => `var(--${name})`;
@@ -587,7 +587,7 @@
     const csvBtn = h('button', { class: 'ghost', text: '⬇ CSVで保存', onclick: () => {
       const esc = (v) => { let s = String(v ?? ''); if (/^[=+\-@]/.test(s)) s = "'" + s; return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
       const blob = new Blob(['﻿' + csvRows.map((r) => r.map(esc).join(',')).join('\r\n')], { type: 'text/csv' });
-      const a = h('a', { href: URL.createObjectURL(blob), download: `kunigoe_${st.country}_${new Date().toISOString().slice(0, 10)}.csv` });
+      const a = h('a', { href: URL.createObjectURL(blob), download: `voices_of_citizens_${st.country}_${new Date().toISOString().slice(0, 10)}.csv` });
       document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     } });
 
@@ -595,7 +595,7 @@
       let s;
       try { s = await api('stats', { country: deskId ? 'ALL' : st.country, days: f.days, topic: f.topic, desk: deskId, deskType: deskId ? '' : f.deskType }); } catch (e) { out.replaceChildren(h('p', { class: 'err', text: e.message })); return; }
       const C = KGChart, nm = KG.nameOf, total = s.totals.posts;
-      csvRows = [['クニゴエ 統計', cName(st.country === 'ALL' ? '' : st.country) || 'すべての国', days.selectedOptions[0].textContent, topic.selectedOptions[0].textContent], []];
+      csvRows = [['市民の声 統計', cName(st.country === 'ALL' ? '' : st.country) || 'すべての国', days.selectedOptions[0].textContent, topic.selectedOptions[0].textContent], []];
       const csv = (name, cols, rows) => { csvRows.push([name], cols, ...rows, []); return { cols, rows }; };
       const sorted = (list) => list.slice().sort((a, b) => b.n - a.n);
       const ordered = (list, defs) => defs.map((d) => list.find((x) => x.k === d.k) || { k: d.k, n: 0 });
@@ -703,7 +703,7 @@
       st.me ? h('a', { class: 'me', href: '#/u/' + st.me.handle }, avatar(st.me), h('span', {}, h('b', { text: st.me.name }), h('small', { class: 'muted', text: '@' + st.me.handle })))
         : h('button', { class: 'ghost block', text: 'ログイン / 新規登録', onclick: () => openAuth('login') }));
     $('#tabbar').replaceChildren(...links([NAV[0], NAV[1], NAV[2], NAV[3], NAV[4], st.me ? ['#/u/' + st.me.handle, '👤', 'マイページ'] : NAV[6]]));
-    $('#side').replaceChildren(trendsBox(), h('section', { class: 'side-card' }, h('h2', { text: 'クニゴエとは' }), h('p', { class: 'small', text: '国を選んで、政策への「暮らしの実情・気持ち・意見・提言」を届ける市民の声のSNS。集まった声は統計として誰でも見られます。' }), h('a', { class: 'small', href: '#/about', text: '利用ルールとプライバシー' })));
+    $('#side').replaceChildren(trendsBox(), h('section', { class: 'side-card' }, h('h2', { text: '「市民の声」とは' }), h('p', { class: 'small', text: '国を選んで、政策への「暮らしの実情・気持ち・意見・提言」を届ける市民の声のSNS。集まった声は統計として誰でも見られます。' }), h('a', { class: 'small', href: '#/about', text: '利用ルールとプライバシー' })));
     $('#demo-banner').hidden = st.mode !== 'demo';
   }
   function applyTheme() {

@@ -1,9 +1,9 @@
-// クニゴエのサーバー側（Vercel サーバーレス関数・1ファイルに集約して無料枠に収める）
+// 市民の声のサーバー側（Vercel サーバーレス関数・1ファイルに集約して無料枠に収める）
 // データベース：PostgreSQL（Neon / Supabase などの無料枠）。DATABASE_URL が未設定のときは
 // 「未設定」と返し、画面側はデモモード（端末内保存）で動く。
 const crypto = require('crypto');
 const { Pool } = require('pg');
-const KG = require('../kunigoe/shared.js');
+const KG = require('../voices/shared.js');
 
 const DB_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 // セッション署名用の秘密鍵。未設定なら DB 接続文字列（これ自体が秘密）から導出する
@@ -17,7 +17,7 @@ function db() {
   if (!pool) {
     const local = /@(localhost|127\.0\.0\.1)[:/]/.test(DB_URL);
     pool = new Pool({ connectionString: DB_URL, max: 3, idleTimeoutMillis: 10000, ssl: local ? false : { rejectUnauthorized: true } });
-    pool.on('error', (e) => console.error('[kunigoe] db pool error', e.message));
+    pool.on('error', (e) => console.error('[voices] db pool error', e.message));
   }
   return pool;
 }
@@ -140,7 +140,7 @@ async function rateLimit(key, limit, windowSec) {
   if (r.rows[0].n > limit) throw new Bad('操作が多すぎます。しばらく待ってからもう一度お試しください。', 429);
 }
 const log = (ev, uid, iph, detail) => {
-  console.log(`[kunigoe] ${ev} uid=${uid || '-'} ${detail || ''}`);
+  console.log(`[voices] ${ev} uid=${uid || '-'} ${detail || ''}`);
   return q('INSERT INTO kg_logs(ev, uid, iph, detail) VALUES($1,$2,$3,$4)', [ev, uid || null, iph, String(detail || '').slice(0, 200)]).catch(() => {});
 };
 
@@ -567,7 +567,7 @@ async function handler(req, res) {
     res.status(200).json(out);
   } catch (e) {
     if (e instanceof Bad) return res.status(e.status).json({ error: e.message });
-    console.error('[kunigoe] error', e); // 詳細はサーバーのログにだけ残し、利用者には出さない
+    console.error('[voices] error', e); // 詳細はサーバーのログにだけ残し、利用者には出さない
     res.status(500).json({ error: 'サーバーでエラーが起きました。時間をおいてもう一度お試しください。' });
   }
 }
