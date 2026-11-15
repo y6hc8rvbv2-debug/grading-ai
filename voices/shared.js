@@ -1,4 +1,4 @@
-// 市民の声：画面側とサーバー側で共通に使う「選択肢の定義」
+// クニゴエ：画面側とサーバー側で共通に使う「選択肢の定義」
 // （国・投稿の種類・政策分野など。ここに個人情報や秘密の値は書かない）
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();

@@ -1,4 +1,4 @@
-// 市民の声のサーバー側（Vercel サーバーレス関数・1ファイルに集約して無料枠に収める）
+// クニゴエのサーバー側（Vercel サーバーレス関数・1ファイルに集約して無料枠に収める）
 // データベース：PostgreSQL（Neon / Supabase などの無料枠）。DATABASE_URL が未設定のときは
 // 「未設定」と返し、画面側はデモモード（端末内保存）で動く。
 const crypto = require('crypto');

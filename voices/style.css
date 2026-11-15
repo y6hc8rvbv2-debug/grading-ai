@@ -1,4 +1,4 @@
-/* 市民の声：見た目の定義。色は変数にまとめ、ライト／ダークの両方に対応 */
+/* クニゴエ：見た目の定義。色は変数にまとめ、ライト／ダークの両方に対応 */
 :root {
   color-scheme: light;
   --bg: #f4f5f7; --surface: #ffffff; --surface-2: #f0f2f5; --line: #dfe2e7;

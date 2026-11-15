@@ -1,4 +1,4 @@
-// 市民の声：グラフ部品（外部ライブラリなし。色は style.css の変数で明暗テーマに対応）
+// クニゴエ：グラフ部品（外部ライブラリなし。色は style.css の変数で明暗テーマに対応）
 (function () {
   const SVG = 'http://www.w3.org/2000/svg';
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
