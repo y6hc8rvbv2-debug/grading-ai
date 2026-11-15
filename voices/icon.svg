@@ -1,15 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="KuniGoe">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#2f86e0"/>
-      <stop offset="1" stop-color="#1a4fa3"/>
+      <stop offset="0" stop-color="#2b93f5"/>
+      <stop offset="1" stop-color="#3a49d6"/>
     </linearGradient>
   </defs>
   <rect width="512" height="512" rx="116" fill="url(#bg)"/>
   <!-- 吹き出し＝市民の声 -->
   <path fill="#fff" d="M152 96h208a64 64 0 0 1 64 64v136a64 64 0 0 1-64 64H250l-86 74a10 10 0 0 1-16.500-7.600V360a64 64 0 0 1-59.500-63.800V160a64 64 0 0 1 64-64z"/>
-  <!-- 円グラフ＝集まった声の割合（統計） -->
-  <circle cx="256" cy="228" r="74" fill="none" stroke="#1f66c1" stroke-width="50" stroke-dasharray="224.5 465.0" stroke-dashoffset="0.0" opacity="1" transform="rotate(-90 256 228)"/>
-  <circle cx="256" cy="228" r="74" fill="none" stroke="#1f66c1" stroke-width="50" stroke-dasharray="131.5 465.0" stroke-dashoffset="-232.5" opacity=".66" transform="rotate(-90 256 228)"/>
-  <circle cx="256" cy="228" r="74" fill="none" stroke="#1f66c1" stroke-width="50" stroke-dasharray="85.0 465.0" stroke-dashoffset="-372.0" opacity=".4" transform="rotate(-90 256 228)"/>
+  <!-- 円グラフ＝集まった声の割合（統計）。さまざまな立場の声を、色の違いで表す -->
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#f26a2e" stroke-width="50" stroke-dasharray="178.0 465.0" stroke-dashoffset="0.0" transform="rotate(-90 256 228)"/>
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#17b07b" stroke-width="50" stroke-dasharray="117.5 465.0" stroke-dashoffset="-186.0" transform="rotate(-90 256 228)"/>
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#f5b301" stroke-width="50" stroke-dasharray="80.3 465.0" stroke-dashoffset="-311.5" transform="rotate(-90 256 228)"/>
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#e8508f" stroke-width="50" stroke-dasharray="57.1 465.0" stroke-dashoffset="-399.9" transform="rotate(-90 256 228)"/>
 </svg>
