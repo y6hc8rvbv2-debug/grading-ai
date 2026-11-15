@@ -244,12 +244,13 @@
       else { await navigator.clipboard.writeText(url); toast('リンクをコピーしました。'); }
     } catch { /* 共有を取り消した場合など */ }
   }
-  function openReport(p) {
+  function openReport(p, isDesk) {
     if (!requireLogin()) return;
-    const reason = h('select', {}, ['誹謗中傷・差別的な内容', '個人情報が書かれている', 'デマ・明らかな虚偽', 'スパム・宣伝', '暴力や違法行為をあおる内容', 'その他'].map((t) => h('option', { text: t })));
+    const reasons = isDesk ? ['中傷・差別的な名前', '個人情報が含まれている', '公人ではない個人の名前', 'スパム・宣伝', 'その他'] : ['誹謗中傷・差別的な内容', '個人情報が書かれている', 'デマ・明らかな虚偽', 'スパム・宣伝', '暴力や違法行為をあおる内容', 'その他'];
+    const reason = h('select', {}, reasons.map((t) => h('option', { text: t })));
     const body = h('div', { class: 'modal-body' }, h('p', { class: 'muted', text: '意見が違うことだけを理由にした通報はできません。ルール違反と思われる理由を選んでください。' }), field('理由', reason),
-      h('button', { class: 'primary block', text: '通報する', onclick: async () => { try { await api('report', { id: p.id, reason: reason.value }); close(); toast('通報を受け付けました。運営が確認します。'); } catch (e) { fail(e); } } }));
-    const close = modal('投稿を通報', body);
+      h('button', { class: 'primary block', text: '通報する', onclick: async () => { try { await api(isDesk ? 'reportDesk' : 'report', { id: p.id, reason: reason.value }); close(); toast('通報を受け付けました。運営が確認します。'); } catch (e) { fail(e); } } }));
+    const close = modal(isDesk ? '窓口を通報' : '投稿を通報', body);
   }
 
   // ---------- 投稿フォーム ----------
@@ -416,7 +417,8 @@
       head.replaceChildren(
         h('div', { class: 'row' }, h('button', { class: 'icon-btn', 'aria-label': '戻る', text: '←', onclick: () => history.back() }), h('span', { class: 'muted', text: `${deskType(d.type).icon} ${deskType(d.type).name}の窓口・${cName(d.country)}` })),
         h('h1', { text: d.name }), h('p', { class: 'muted', text: `${d.posts.toLocaleString()}件の声` }),
-        h('div', { class: 'row' }, h('button', { class: 'primary', text: '✏️ この窓口に声を届ける', onclick: () => openCompose({ desk: d }) }), h('a', { class: 'ghost btn', href: '#/stats?desk=' + d.id, text: '📊 統計を見る' })));
+        h('div', { class: 'row' }, h('button', { class: 'primary', text: '✏️ この窓口に声を届ける', onclick: () => openCompose({ desk: d }) }), h('a', { class: 'ghost btn', href: '#/stats?desk=' + d.id, text: '📊 統計を見る' }),
+          h('button', { class: 'icon-btn', 'aria-label': 'この窓口を通報', title: 'この窓口を通報', text: '🚩', onclick: () => openReport(d, true) })));
     }).catch((e) => head.replaceChildren(h('p', { class: 'err', text: e.message })));
     return h('div', {}, head, feedView({ desk: id }, 'この窓口にはまだ投稿がありません。'));
   };
@@ -530,7 +532,7 @@
           try { await api('deleteAccount', { password: pw }); st.me = null; renderChrome(); go('#/'); toast('退会しました。ご利用ありがとうございました。'); } catch (ex) { fail(ex); }
         } })));
     } else box.append(loginWall('ログインするとプロフィールを編集できます。'));
-    if (st.me && st.me.isAdmin) box.append(h('div', { class: 'card' }, h('h2', { text: '運営者メニュー' }), h('a', { class: 'ghost btn', href: '#/admin', text: '通報された投稿を確認' })));
+    if (st.me && st.me.isAdmin) box.append(h('div', { class: 'card' }, h('h2', { text: '運営者メニュー' }), h('a', { class: 'ghost btn', href: '#/admin', text: '通報された投稿・窓口を確認' })));
     if (st.mode === 'demo') box.append(h('div', { class: 'card' }, h('h2', { text: 'デモデータ' }), h('p', { class: 'muted small', text: 'この端末に保存されたデモ用の投稿・アカウントを消して、最初の状態に戻します。' }),
       h('button', { class: 'ghost', text: 'デモデータを初期化', onclick: () => { if (!confirm('デモデータを初期化しますか？')) return; window.KGDemo.reset(); st.me = null; renderChrome(); go('#/'); } })));
     box.append(h('p', { class: 'center' }, h('a', { href: '#/about', text: '利用ルールとプライバシー' })));
@@ -538,21 +540,30 @@
   };
 
   pages.admin = () => {
-    const list = h('div', {}, h('p', { class: 'muted', text: '読み込み中…' }));
+    const list = h('div', {}, h('p', { class: 'muted pad', text: '読み込み中…' }));
+    // 通報1件ぶんのカード（投稿・窓口で共通）。ボタンで非表示／再表示を切り替える
+    const item = (r, head, body, action) => {
+      const state = h('span', { class: 'badge' + (r.hidden ? ' st-oppose' : ''), text: r.hidden ? '非表示中' : '表示中' });
+      const btn = h('button', { class: 'ghost', text: r.hidden ? '再表示する' : '非表示にする', onclick: async () => {
+        try { await api(action, { id: r.id, hidden: !r.hidden }); r.hidden = !r.hidden; btn.textContent = r.hidden ? '再表示する' : '非表示にする'; state.textContent = r.hidden ? '非表示中' : '表示中'; state.className = 'badge' + (r.hidden ? ' st-oppose' : ''); toast(r.hidden ? '非表示にしました。' : '再表示しました。'); } catch (e) { fail(e); }
+      } });
+      return h('div', { class: 'card' }, h('div', { class: 'row between' }, h('span', { class: 'muted small', text: `${head}・通報 ${r.n}件` }), state), h('p', { class: 'body', text: body }), h('ul', {}, r.reasons.map((x) => h('li', { class: 'small', text: x }))), btn);
+    };
     api('adminReports').then((out) => {
-      list.replaceChildren(...out.reports.map((r) => {
-        const btn = h('button', { class: 'ghost', text: r.hidden ? '再表示する' : '非表示にする', onclick: async () => { try { await api('adminHide', { id: r.id, hidden: !r.hidden }); r.hidden = !r.hidden; btn.textContent = r.hidden ? '再表示する' : '非表示にする'; } catch (e) { fail(e); } } });
-        return h('div', { class: 'card' }, h('p', { class: 'muted small', text: `@${r.handle}・通報 ${r.n}件` }), h('p', { class: 'body', text: r.body }), h('ul', {}, r.reasons.map((x) => h('li', { class: 'small', text: x }))), btn);
-      }));
-      if (!out.reports.length) list.replaceChildren(h('p', { class: 'muted', text: '通報はありません。' }));
-    }).catch((e) => list.replaceChildren(h('p', { class: 'err', text: e.message })));
-    return h('div', {}, title('通報の確認', '意見の違いではなく、ルール違反かどうかで判断してください。'), list);
+      const none = () => h('p', { class: 'muted pad', text: '通報はありません。' });
+      list.replaceChildren(
+        h('h2', { class: 'sub-h', text: `窓口への通報（${out.desks.length}）` }),
+        ...(out.desks.length ? out.desks.map((d) => item(d, `${deskType(d.type).name}の窓口・${cName(d.country)}・投稿 ${d.posts}件`, d.name, 'adminHideDesk')) : [none()]),
+        h('h2', { class: 'sub-h', text: `投稿への通報（${out.reports.length}）` }),
+        ...(out.reports.length ? out.reports.map((r) => item(r, '@' + r.handle, r.body, 'adminHide')) : [none()]));
+    }).catch((e) => list.replaceChildren(h('p', { class: 'err pad', text: e.message })));
+    return h('div', {}, title('通報の確認', '意見の違いではなく、ルール違反かどうかで判断してください。窓口を非表示にしても、投稿そのものは残ります。'), list);
   };
 
   pages.about = () => h('div', { class: 'prose' }, title('市民の声について'),
     h('h2', { text: '「市民の声」とは' }), h('p', { text: '国を選び、さらに州・県・市・政治家・政策・社会テーマなどの「窓口」を選んで、政策に対する「生活の現状」「気持ち」「意見」「政策提言」を届ける、政治に特化した市民の声のSNSです。集まった声は自動で集計され、誰でも統計として見ることができます。' }),
     h('h2', { text: '利用ルール' }), h('ul', {}, ['特定の個人や集団への誹謗中傷・差別・脅迫はしない', '氏名・住所・電話番号など、自分や他人の個人情報を書かない', '事実と異なる情報を、事実であるかのように広めない', '同じ内容の連続投稿や、なりすまし・多重登録による水増しをしない', '意見の違う相手にも敬意を払う（反対は「反対」ボタンで示せます）'].map((t) => h('li', { text: t }))),
-    h('p', { text: 'ルールに反する投稿は、通報をもとに運営が確認し、非表示にすることがあります。立場や意見の内容を理由に非表示にすることはありません。' }),
+    h('p', { text: 'ルールに反する投稿や、不適切な名前の窓口は、通報をもとに運営が確認し、非表示にすることがあります。立場や意見の内容を理由に非表示にすることはありません。' }),
     h('h2', { text: 'プライバシー' }), h('ul', {}, ['メールアドレス・電話番号・本名は集めません（ユーザーIDとパスワードだけで使えます）', 'パスワードは復元できない形（ハッシュ）で保存します', '年代・性別・お住まいの区分は任意で、集計にだけ使い、プロフィールには表示しません', '集計では、3人未満の少人数の区分は表示しません（個人が推測されるのを防ぐため）', '投稿に含まれるメールアドレスや電話番号らしき文字列は、自動で伏せ字にします', '退会すると、投稿や属性を含むすべてのデータが削除されます', '広告用の追跡（トラッキング）は行いません'].map((t) => h('li', { text: t }))),
     h('h2', { text: '統計を読むときの注意' }), h('p', { text: '市民の声の統計は、自分から投稿した人の声の集計です。無作為に選んだ人に聞く世論調査とは違い、利用者の年代や関心にかたよりがあります。「社会全体の割合」ではなく「ここに集まった声の傾向」としてお読みください。立場と暮らし向きは、同じ人が何度投稿しても1人1回（最新の回答）として数えています。' }));
 

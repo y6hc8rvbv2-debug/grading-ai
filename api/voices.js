@@ -45,6 +45,11 @@ CREATE TABLE IF NOT EXISTS kg_desks(
 ALTER TABLE kg_posts ADD COLUMN IF NOT EXISTS desk_type TEXT NOT NULL DEFAULT 'country';
 ALTER TABLE kg_posts ADD COLUMN IF NOT EXISTS desk_id BIGINT REFERENCES kg_desks(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS kg_posts_desk ON kg_posts(desk_id, id DESC);
+ALTER TABLE kg_desks ADD COLUMN IF NOT EXISTS hidden BOOLEAN NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS kg_desk_reports(
+  id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES kg_users(id) ON DELETE CASCADE,
+  desk_id BIGINT NOT NULL REFERENCES kg_desks(id) ON DELETE CASCADE, reason TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE(user_id, desk_id));
 CREATE TABLE IF NOT EXISTS kg_reactions(
   user_id BIGINT NOT NULL REFERENCES kg_users(id) ON DELETE CASCADE,
   post_id BIGINT NOT NULL REFERENCES kg_posts(id) ON DELETE CASCADE,
@@ -172,7 +177,7 @@ SELECT p.id, p.country, p.kind, p.topic, p.stance, p.emotion, p.sat, p.body, p.p
   (SELECT array_agg(type) FROM kg_reactions r WHERE r.user_id = $1 AND r.post_id = p.id) AS my,
   (SELECT opt FROM kg_votes v WHERE v.user_id = $1 AND v.post_id = p.id) AS myvote,
   q.id AS qid, q.body AS qbody, q.kind AS qkind, q.created_at AS qcreated, q.hidden AS qhidden,
-  qu.handle AS qhandle, qu.name AS qname, p.desk_type, p.desk_id, d.name AS desk_name
+  qu.handle AS qhandle, qu.name AS qname, p.desk_type, p.desk_id, d.name AS desk_name, d.hidden AS desk_hidden
 FROM kg_posts p JOIN kg_users u ON u.id = p.user_id LEFT JOIN kg_desks d ON d.id = p.desk_id
 LEFT JOIN kg_posts q ON q.id = p.quote_id LEFT JOIN kg_users qu ON qu.id = q.user_id`;
 function shape(r) {
@@ -181,7 +186,7 @@ function shape(r) {
     id: Number(r.id), country: r.country, kind: r.kind, topic: r.topic, stance: r.stance, emotion: r.emotion, sat: r.sat,
     body: r.body, parent: r.parent_id ? Number(r.parent_id) : null, created: new Date(r.created_at).getTime(),
     user: { handle: r.handle, name: r.name }, mine: !!r.mine,
-    desk: r.desk_id ? { id: Number(r.desk_id), type: r.desk_type, name: r.desk_name } : null,
+    desk: r.desk_id && !r.desk_hidden ? { id: Number(r.desk_id), type: r.desk_type, name: r.desk_name } : null,
     likes: r.likes, agrees: r.agrees, disagrees: r.disagrees, replies: r.replies, quotes: r.quotes,
     poll: r.poll ? { options: r.poll.options, counts: r.poll_counts, my: r.myvote } : null,
     my: { like: my.includes('like'), bookmark: my.includes('bookmark'), agree: my.includes('agree'), disagree: my.includes('disagree') },
@@ -281,7 +286,7 @@ A.feed = async ({ p, me }) => {
       else {
         w.push('p.parent_id IS NULL');
         const c = countryOf(p.country || 'ALL', true);
-        if (p.desk) w.push(`p.desk_id = ${add(idOf(p.desk))}`); // 窓口を指定したときは、その窓口の投稿だけ
+        if (p.desk) w.push(`p.desk_id = ${add(idOf(p.desk))} AND d.hidden = false`); // 窓口を指定したときは、その窓口の投稿だけ
         else if (c !== 'ALL') w.push(`p.country = ${add(c)}`);
         if (p.deskType) w.push(`p.desk_type = ${add(oneOf(p.deskType, KG.DESK_TYPES))}`);
       }
@@ -330,7 +335,8 @@ A.post = async ({ p, me, req }) => {
     if (!deskName) throw new Bad('窓口の名前を入力してください。');
     if (maskPII(deskName) !== deskName) throw new Bad('窓口の名前に連絡先などの個人情報は使えません。');
     const dr = await q(`INSERT INTO kg_desks(country, type, name, posts) VALUES($1,$2,$3,1)
-      ON CONFLICT(country, type, name) DO UPDATE SET posts = kg_desks.posts + 1 RETURNING id`, [country, deskType, deskName]);
+      ON CONFLICT(country, type, name) DO UPDATE SET posts = kg_desks.posts + 1 RETURNING id, hidden`, [country, deskType, deskName]);
+    if (dr.rows[0].hidden) throw new Bad('この窓口は運営により非表示になっているため、利用できません。', 403);
     deskId = dr.rows[0].id;
   }
   if (quoteId && !(await q('SELECT 1 FROM kg_posts WHERE id=$1 AND hidden=false', [quoteId])).rows[0]) throw new Bad('引用元の投稿が見つかりません。', 404);
@@ -419,7 +425,7 @@ A.profile = async ({ p, me }) => {
 A.desks = async ({ p }) => {
   const params = [];
   const add = (v) => { params.push(v); return '$' + params.length; };
-  const w = ['posts > 0'];
+  const w = ['posts > 0', 'hidden = false'];
   if (p.id) w.push(`id = ${add(idOf(p.id))}`);
   else {
     const c = countryOf(p.country || 'ALL', true);
@@ -469,6 +475,17 @@ A.report = async ({ p, me, req }) => {
   return { ok: true };
 };
 
+A.reportDesk = async ({ p, me, req }) => {
+  await rateLimit('report:' + me.id, 10, 3600);
+  const id = idOf(p.id);
+  const reason = str(p.reason, 200);
+  if (!reason) throw new Bad('理由を入力してください。');
+  if (!(await q('SELECT 1 FROM kg_desks WHERE id=$1 AND hidden=false', [id])).rows[0]) throw new Bad('窓口が見つかりません。', 404);
+  await q('INSERT INTO kg_desk_reports(user_id, desk_id, reason) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [me.id, id, reason]);
+  log('report_desk', me.id, ipHash(req), 'desk=' + id);
+  return { ok: true };
+};
+
 // 管理者（環境変数 KG_ADMINS に書いたユーザーIDだけ）
 const adminOnly = (me) => { if (!me || !ADMINS.includes(me.handle)) throw new Bad('権限がありません。', 403); };
 A.adminReports = async ({ me }) => {
@@ -477,7 +494,18 @@ A.adminReports = async ({ me }) => {
     `SELECT p.id, p.body, p.hidden, u.handle, count(*)::int AS n, array_agg(r.reason) AS reasons
      FROM kg_reports r JOIN kg_posts p ON p.id = r.post_id JOIN kg_users u ON u.id = p.user_id
      GROUP BY p.id, u.handle ORDER BY max(r.created_at) DESC LIMIT 100`);
-  return { reports: r.rows.map((x) => ({ ...x, id: Number(x.id) })) };
+  const d = await q(
+    `SELECT d.id, d.type, d.name, d.country, d.posts, d.hidden, count(*)::int AS n, array_agg(r.reason) AS reasons
+     FROM kg_desk_reports r JOIN kg_desks d ON d.id = r.desk_id
+     GROUP BY d.id ORDER BY max(r.created_at) DESC LIMIT 100`);
+  return { reports: r.rows.map((x) => ({ ...x, id: Number(x.id) })), desks: d.rows.map((x) => ({ ...x, id: Number(x.id) })) };
+};
+// 窓口を非表示にすると、一覧・検索・統計から消え、投稿に付いた窓口名も表示されなくなる（投稿そのものは残る）
+A.adminHideDesk = async ({ p, me, req }) => {
+  adminOnly(me);
+  await q('UPDATE kg_desks SET hidden = $2 WHERE id = $1', [idOf(p.id), !!p.hidden]);
+  log('admin_hide_desk', me.id, ipHash(req), `desk=${p.id} hidden=${!!p.hidden}`);
+  return { ok: true };
 };
 A.adminHide = async ({ p, me, req }) => {
   adminOnly(me);
@@ -526,7 +554,7 @@ A.stats = async ({ p }) => {
        WHERE p.hidden = false ${days ? `AND p.created_at > now() - make_interval(days => $1)` : ''} GROUP BY 1 ORDER BY n DESC LIMIT 15`, days ? [days] : []),
     q(`SELECT p.desk_type AS k, count(*)::int AS n FROM kg_posts p WHERE ${W} AND p.parent_id IS NULL GROUP BY 1`, params),
     q(`SELECT d.id, d.type, d.name, d.country, count(*)::int AS n, count(DISTINCT p.user_id)::int AS users
-       FROM kg_posts p JOIN kg_desks d ON d.id = p.desk_id WHERE ${W} AND p.parent_id IS NULL GROUP BY d.id ORDER BY n DESC, d.id LIMIT 15`, params),
+       FROM kg_posts p JOIN kg_desks d ON d.id = p.desk_id WHERE ${W} AND p.parent_id IS NULL AND d.hidden = false GROUP BY d.id ORDER BY n DESC, d.id LIMIT 15`, params),
   ]);
   return KG.buildStats({
     totals: tot.rows[0], byDay: byDay.rows, byKind: byKind.rows, topicCount: topicCount.rows, topicStance: topicStance.rows,
@@ -536,7 +564,7 @@ A.stats = async ({ p }) => {
   });
 };
 
-const NEED_LOGIN = new Set(['updateProfile', 'changePassword', 'deleteAccount', 'post', 'deletePost', 'react', 'vote', 'follow', 'notifications', 'report', 'adminReports', 'adminHide']);
+const NEED_LOGIN = new Set(['updateProfile', 'changePassword', 'deleteAccount', 'post', 'deletePost', 'react', 'vote', 'follow', 'notifications', 'report', 'reportDesk', 'adminReports', 'adminHide', 'adminHideDesk']);
 const CACHEABLE_GET = new Set(['stats', 'trends']); // 誰が見ても同じ集計は CDN に短時間キャッシュ（DB負荷と費用を抑える）
 
 async function handler(req, res) {

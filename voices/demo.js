@@ -305,6 +305,7 @@
       return { items: items.sort((a, b) => b.at - a.at).slice(0, 40) };
     },
     report() { needMe(); return { ok: true }; },
+    reportDesk() { needMe(); return { ok: true }; },
     stats(p) {
       const days = Number(p.days ?? 30), since = days ? Date.now() - days * DAY : 0;
       const inC = (x) => (!p.country || p.country === 'ALL' || x.country === p.country) && (!p.desk || x.deskId === Number(p.desk)) && (!p.deskType || x.deskType === p.deskType);
