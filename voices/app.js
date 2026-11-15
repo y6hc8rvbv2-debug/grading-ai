@@ -61,7 +61,7 @@
   }
   function avatar(user, big) {
     let n = 0; for (const c of user.handle) n = (n * 31 + c.charCodeAt(0)) % 6;
-    return h('span', { class: `av av${n}${big ? ' av-big' : ''}`, text: [...(user.name || user.handle)][0] || '?', 'aria-hidden': 'true' });
+    return h('span', { class: `av av${n}${big ? ' av-big' : ''} notranslate`, text: [...(user.name || user.handle)][0] || '?', 'aria-hidden': 'true' });
   }
   const cName = (code) => { const c = KG.country(code); return c ? `${c.flag} ${c.name}` : code; };
   const deskType = (k) => KG.DESK_TYPES.find((t) => t.k === k) || KG.DESK_TYPES[0];
@@ -182,7 +182,7 @@
         const share = KGChart.pct(p.poll.counts[i], total);
         if (!voted) return h('button', { class: 'poll-opt', text: o, onclick: async () => { if (!requireLogin('投票するにはログインが必要です。')) return; try { card.update((await api('vote', { id: p.id, opt: i })).post); } catch (e) { fail(e); } } });
         const fill = h('span', { class: 'poll-fill' }); fill.style.width = share + '%';
-        return h('div', { class: 'poll-res' + (p.poll.my === i ? ' mine' : '') }, fill, h('span', { class: 'poll-name', text: (p.poll.my === i ? '✓ ' : '') + o }), h('span', { class: 'poll-pct', text: share + '%' }));
+        return h('div', { class: 'poll-res' + (p.poll.my === i ? ' mine' : '') }, fill, h('span', { class: 'poll-name', text: (p.poll.my === i ? '✓ ' : '') + o }), h('span', { class: 'poll-pct notranslate', text: share + '%' }));
       }),
       h('small', { class: 'muted', text: `${total.toLocaleString()}票${voted ? '' : '・投票すると結果が見られます'}` }));
   }
@@ -192,7 +192,7 @@
     const act = (icon, label, count, on, fn, cls) => h('button', {
       class: 'act' + (on ? ' on' : '') + (cls ? ' ' + cls : ''), 'aria-label': label, title: label, 'aria-pressed': on == null ? null : String(!!on),
       onclick: (e) => { e.stopPropagation(); fn(); },
-    }, h('span', { class: 'act-i', text: icon }), count != null && h('span', { class: 'act-n', text: count ? count.toLocaleString() : '' }));
+    }, h('span', { class: 'act-i', text: icon }), count != null && h('span', { class: 'act-n notranslate', text: count ? count.toLocaleString() : '' }));
     const react = async (type) => { if (!requireLogin()) return; try { card.update((await api('react', { id: p.id, type })).post); } catch (e) { fail(e); } };
     function menu() {
       const items = h('div', { class: 'modal-body menu-list' });
@@ -210,7 +210,7 @@
         h('a', { class: 'av-link', href: '#/u/' + p.user.handle, onclick: (e) => e.stopPropagation(), 'aria-label': p.user.name + 'のプロフィール' }, avatar(p.user)),
         h('div', { class: 'post-main' },
           h('header', { class: 'post-head' },
-            h('a', { class: 'name', href: '#/u/' + p.user.handle, text: p.user.name, onclick: (e) => e.stopPropagation() }),
+            h('a', { class: 'name notranslate', href: '#/u/' + p.user.handle, text: p.user.name, onclick: (e) => e.stopPropagation() }),
             h('span', { class: 'muted', text: `@${p.user.handle}・${ago(p.created)}` }),
             (st.country === 'ALL' || opts.showCountry) && h('span', { class: 'muted', text: '・' + cName(p.country) }),
             h('button', { class: 'icon-btn more', 'aria-label': 'メニュー', text: '⋯', onclick: (e) => { e.stopPropagation(); menu(); } })),
@@ -373,7 +373,7 @@
       box.replaceChildren(
         h('div', { class: 'tabs sticky' }, [['latest', '新着'], ['popular', '人気'], ['following', 'フォロー中']].map(([k, n]) =>
           h('button', { class: 'tab' + (state.tab === k ? ' on' : ''), text: n, onclick: () => { if (k === 'following' && !requireLogin('フォロー中の投稿を見るにはログインが必要です。')) return; state.tab = k; draw(); } }))),
-        h('button', { class: 'compose-teaser', onclick: () => openCompose() }, st.me ? avatar(st.me) : h('span', { class: 'av av0', text: '声' }), h('span', { text: `${cName(st.country === 'ALL' ? (st.me ? st.me.country : 'JP') : st.country)} の政策に、あなたの声を届けよう` })),
+        h('button', { class: 'compose-teaser', onclick: () => openCompose() }, st.me ? avatar(st.me) : h('span', { class: 'av av0 notranslate', text: '声' }), h('span', { text: `${cName(st.country === 'ALL' ? (st.me ? st.me.country : 'JP') : st.country)} の政策に、あなたの声を届けよう` })),
         h('div', { class: 'filters' }, chips([{ k: '', name: 'すべて' }, ...KG.KINDS], state.kind, (v) => { state.kind = v || ''; draw(); }, { required: true }), deskSel, topic),
         feedView({ country: st.country, tab: state.tab, kind: state.kind, topic: state.topic, deskType: state.deskType },
           state.tab === 'following' ? 'フォロー中の人の投稿がここに並びます。気になる人をフォローしてみましょう。' : null));
@@ -492,7 +492,7 @@
         try { const out = await api('follow', { handle }); u.followed = out.following; followBtn.className = u.followed ? 'ghost' : 'primary'; followBtn.textContent = u.followed ? 'フォロー中' : 'フォローする'; } catch (e) { fail(e); }
       } });
       head.replaceChildren(h('div', { class: 'row between' }, avatar(u, true), u.mine ? h('a', { class: 'ghost btn', href: '#/settings', text: 'プロフィールを編集' }) : followBtn),
-        h('h1', { text: u.name }), h('p', { class: 'muted', text: `@${u.handle}・${cName(u.country)}・${new Date(u.joined).getFullYear()}年${new Date(u.joined).getMonth() + 1}月から利用` }),
+        h('h1', { class: 'notranslate', text: u.name }), h('p', { class: 'muted', text: `@${u.handle}・${cName(u.country)}・${new Date(u.joined).getFullYear()}年${new Date(u.joined).getMonth() + 1}月から利用` }),
         u.bio && h('p', { class: 'body', text: u.bio }),
         h('p', { class: 'counts' }, h('span', {}, h('b', { text: u.posts.toLocaleString() }), ' 投稿'), h('span', {}, h('b', { text: u.following.toLocaleString() }), ' フォロー中'), h('span', {}, h('b', { text: u.followers.toLocaleString() }), ' フォロワー')));
     }).catch((e) => head.replaceChildren(h('p', { class: 'err', text: e.message })));
@@ -564,7 +564,7 @@
     h('h2', { text: 'クニゴエとは' }), h('p', { text: '国を選び、さらに州・県・市・政治家・政策・社会テーマなどの「窓口」を選んで、政策に対する「生活の現状」「気持ち」「意見」「政策提言」を届ける、政治に特化した市民の声のSNSです。集まった声は自動で集計され、誰でも統計として見ることができます。' }),
     h('h2', { text: '利用ルール' }), h('ul', {}, ['特定の個人や集団への誹謗中傷・差別・脅迫はしない', '氏名・住所・電話番号など、自分や他人の個人情報を書かない', '事実と異なる情報を、事実であるかのように広めない', '同じ内容の連続投稿や、なりすまし・多重登録による水増しをしない', '意見の違う相手にも敬意を払う（反対は「反対」ボタンで示せます）'].map((t) => h('li', { text: t }))),
     h('p', { text: 'ルールに反する投稿や、不適切な名前の窓口は、通報をもとに運営が確認し、非表示にすることがあります。立場や意見の内容を理由に非表示にすることはありません。' }),
-    h('h2', { text: 'プライバシー' }), h('ul', {}, ['メールアドレス・電話番号・本名は集めません（ユーザーIDとパスワードだけで使えます）', 'パスワードは復元できない形（ハッシュ）で保存します', '年代・性別・お住まいの区分は任意で、集計にだけ使い、プロフィールには表示しません', '集計では、3人未満の少人数の区分は表示しません（個人が推測されるのを防ぐため）', '投稿に含まれるメールアドレスや電話番号らしき文字列は、自動で伏せ字にします', '退会すると、投稿や属性を含むすべてのデータが削除されます', '広告用の追跡（トラッキング）は行いません'].map((t) => h('li', { text: t }))),
+    h('h2', { text: 'プライバシー' }), h('ul', {}, ['メールアドレス・電話番号・本名は集めません（ユーザーIDとパスワードだけで使えます）', 'パスワードは復元できない形（ハッシュ）で保存します', '年代・性別・お住まいの区分は任意で、集計にだけ使い、プロフィールには表示しません', '集計では、3人未満の少人数の区分は表示しません（個人が推測されるのを防ぐため）', '投稿に含まれるメールアドレスや電話番号らしき文字列は、自動で伏せ字にします', '退会すると、投稿や属性を含むすべてのデータが削除されます', '広告用の追跡（トラッキング）は行いません', '画面の言語を日本語以外にしたときだけ、自動翻訳のために画面の文字（投稿を含む）が Google に送られます。日本語のままなら送られません'].map((t) => h('li', { text: t }))),
     h('h2', { text: '統計を読むときの注意' }), h('p', { text: 'クニゴエの統計は、自分から投稿した人の声の集計です。無作為に選んだ人に聞く世論調査とは違い、利用者の年代や関心にかたよりがあります。「社会全体の割合」ではなく「ここに集まった声の傾向」としてお読みください。立場と暮らし向きは、同じ人が何度投稿しても1人1回（最新の回答）として数えています。' }));
 
   // ---------- 統計ページ ----------
@@ -648,7 +648,7 @@
       const SAT_C = ['c-sat1', 'c-sat2', 'c-sat3', 'c-sat4', 'c-sat5'].map(V);
       const satParts = KG.SAT_LABELS.map((name, i) => ({ name, value: s.sat.dist[i], color: SAT_C[i], dark: i === 0 || i === 4 }));
       cards.push(chartCard('暮らし向き', `回答者 ${s.sat.n.toLocaleString()}人（1人1回・最新の回答）`,
-        s.sat.n ? h('div', {}, h('div', { class: 'hero' }, h('span', { class: 'hero-n', text: s.sat.avg.toFixed(2) }), h('span', { class: 'muted', text: '／5　平均（1＝とても苦しい、5＝とてもゆとりがある）' })), C.stacked([{ label: '全体', parts: satParts }])) : empty(),
+        s.sat.n ? h('div', {}, h('div', { class: 'hero' }, h('span', { class: 'hero-n notranslate', text: s.sat.avg.toFixed(2) }), h('span', { class: 'muted', text: '／5　平均（1＝とても苦しい、5＝とてもゆとりがある）' })), C.stacked([{ label: '全体', parts: satParts }])) : empty(),
         csv('暮らし向き', ['回答', '人数', '割合(%)'], KG.SAT_LABELS.map((n, i) => [n, s.sat.dist[i], C.pct(s.sat.dist[i], s.sat.n)]))));
 
       const satBars = (list, defs) => C.hbar(list.map((x) => ({ label: nm(defs, x.k), value: Math.round(x.avg * 100) / 100, note: `n=${x.n}` })), { max: 5, fmt: (v) => v.toFixed(2) });
@@ -677,7 +677,7 @@
       cards.push(h('div', { class: 'span2' }, chartCard('国別の投稿数', '国の絞り込みに関係なく、上位15か国を表示', s.countries.length ? C.hbar(s.countries.map((x) => ({ label: cName(x.k), value: x.n, note: `${x.users}人` }))) : empty(),
         csv('国別の投稿数', ['国', '投稿数', '投稿者数', '割合(%)'], s.countries.map((x) => [(KG.country(x.k) || {}).name || x.k, x.n, x.users, C.pct(x.n, cTotal)])))));
 
-      const tile = (label, value, sub) => h('div', { class: 'tile' }, h('span', { class: 'tile-l', text: label }), h('span', { class: 'tile-v', text: value }), sub && h('span', { class: 'muted small', text: sub }));
+      const tile = (label, value, sub) => h('div', { class: 'tile' }, h('span', { class: 'tile-l', text: label }), h('span', { class: 'tile-v notranslate', text: value }), sub && h('span', { class: 'muted small', text: sub }));
       const sup = s.topicStance.reduce((a, r) => a + r.support, 0), opp = s.topicStance.reduce((a, r) => a + r.oppose, 0), sn = s.topicStance.reduce((a, r) => a + r.n, 0);
       out.replaceChildren(
         h('div', { class: 'tiles' }, tile('投稿数', total.toLocaleString(), `うち直近24時間 ${s.totals.today.toLocaleString()}件`), tile('投稿した人', s.totals.users.toLocaleString(), '人'),
@@ -711,7 +711,7 @@
     $('#country-btn').replaceChildren(h('span', { class: 'flag', text: c.flag }), h('span', { text: c.name }), h('span', { class: 'muted', text: '▾' }));
     $('#nav').replaceChildren(...links(NAV),
       h('button', { class: 'primary block nav-post', text: '✏️ 声を届ける', onclick: () => openCompose() }),
-      st.me ? h('a', { class: 'me', href: '#/u/' + st.me.handle }, avatar(st.me), h('span', {}, h('b', { text: st.me.name }), h('small', { class: 'muted', text: '@' + st.me.handle })))
+      st.me ? h('a', { class: 'me', href: '#/u/' + st.me.handle }, avatar(st.me), h('span', { class: 'notranslate' }, h('b', { text: st.me.name }), h('small', { class: 'muted', text: '@' + st.me.handle })))
         : h('button', { class: 'ghost block', text: 'ログイン / 新規登録', onclick: () => openAuth('login') }));
     $('#tabbar').replaceChildren(...links([NAV[0], NAV[1], NAV[2], NAV[3], NAV[4], st.me ? ['#/u/' + st.me.handle, '👤', 'マイページ'] : NAV[6]]));
     $('#side').replaceChildren(trendsBox(), h('section', { class: 'side-card' }, h('h2', { text: 'クニゴエとは' }), h('p', { class: 'small', text: '国を選んで、政策への「暮らしの実情・気持ち・意見・提言」を届ける市民の声のSNS。集まった声は統計として誰でも見られます。' }), h('a', { class: 'small', href: '#/about', text: '利用ルールとプライバシー' })));

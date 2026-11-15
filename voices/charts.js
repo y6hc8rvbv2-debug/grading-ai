@@ -24,7 +24,7 @@
       bar.style.width = Math.max(0.5, (it.value / max) * 100) + '%';
       bar.style.background = it.color || 'var(--s1)';
       track.append(bar);
-      const val = el('span', 'hb-val', fmt(it.value));
+      const val = el('span', 'hb-val notranslate', fmt(it.value));
       if (it.note) val.append(el('small', '', ' ' + it.note));
       row.append(el('span', 'hb-label', it.label), track, val);
       box.append(row);
@@ -47,10 +47,10 @@
         seg.style.flexGrow = p.value;
         seg.style.background = p.color;
         seg.title = `${r.label}｜${p.name}：${share}%（${p.value.toLocaleString()}人）`;
-        if (share >= 12) seg.append(el('span', p.dark ? 'on-dark' : 'on-light', Math.round(share) + '%'));
+        if (share >= 12) seg.append(el('span', (p.dark ? 'on-dark' : 'on-light') + ' notranslate', Math.round(share) + '%'));
         bar.append(seg);
       });
-      row.append(el('span', 'sb-label', r.label), bar, el('span', 'sb-n', 'n=' + total.toLocaleString()));
+      row.append(el('span', 'sb-label', r.label), bar, el('span', 'sb-n notranslate', 'n=' + total.toLocaleString()));
       box.append(row);
     });
     return box;
@@ -70,11 +70,11 @@
     const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': '日ごとの投稿数の推移' });
     for (let v = 0; v <= top; v += tick) {
       svg.append(s('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), class: v ? 'ln-grid' : 'ln-axis' }));
-      const t = s('text', { x: L - 6, y: y(v) + 4, 'text-anchor': 'end', class: 'ln-tick' }); t.textContent = v.toLocaleString(); svg.append(t);
+      const t = s('text', { x: L - 6, y: y(v) + 4, 'text-anchor': 'end', class: 'ln-tick notranslate' }); t.textContent = v.toLocaleString(); svg.append(t);
     }
     const md = (d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
     [...new Set([0, Math.floor((points.length - 1) / 2), points.length - 1])].forEach((i, n, arr) => {
-      const t = s('text', { x: x(i), y: H - 8, 'text-anchor': n === 0 ? 'start' : n === arr.length - 1 ? 'end' : 'middle', class: 'ln-tick' });
+      const t = s('text', { x: x(i), y: H - 8, 'text-anchor': n === 0 ? 'start' : n === arr.length - 1 ? 'end' : 'middle', class: 'ln-tick notranslate' });
       t.textContent = md(points[i].d); svg.append(t);
     });
     const path = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.n).toFixed(1)}`).join('');
@@ -83,7 +83,7 @@
     const cross = s('line', { y1: T, y2: H - B, class: 'ln-cross', visibility: 'hidden' });
     const dot = s('circle', { r: 5, class: 'ln-dot', visibility: 'hidden' });
     svg.append(cross, dot);
-    const tip = el('div', 'tip'); tip.hidden = true;
+    const tip = el('div', 'tip notranslate'); tip.hidden = true;
     const move = (ev) => {
       const box = svg.getBoundingClientRect();
       const px = ((ev.clientX - box.left) / box.width) * W;
@@ -110,7 +110,7 @@
     const tb = el('tbody');
     rows.forEach((r) => {
       const tr = el('tr');
-      r.forEach((c, i) => { const td = el('td', i && typeof c !== 'object' ? 'num' : ''); if (c instanceof Node) td.append(c); else td.textContent = c == null ? '—' : typeof c === 'number' ? c.toLocaleString() : c; tr.append(td); });
+      r.forEach((c, i) => { const td = el('td', i && typeof c !== 'object' ? 'num notranslate' : ''); if (c instanceof Node) td.append(c); else td.textContent = c == null ? '—' : typeof c === 'number' ? c.toLocaleString() : c; tr.append(td); });
       tb.append(tr);
     });
     t.append(thead, tb); wrap.append(t);

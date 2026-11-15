@@ -243,3 +243,18 @@ main { min-width: 0; background: var(--surface); min-height: calc(100vh - 54px);
 #main > div > .note { margin: 12px 16px 0; }
 .logo-text { display: flex; flex-direction: column; line-height: 1.15; }
 .logo-text small { font-size: 10.5px; font-weight: 600; color: var(--text-3); letter-spacing: .02em; }
+
+/* 言語の切り替え（地球儀ボタン）と、Google 翻訳が差し込む部品の調整 */
+.top-right { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.top-right .country-btn { max-width: 42vw; white-space: nowrap; overflow: hidden; }
+.lang-btn .lang-name { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 520px) { .lang-btn .lang-name { display: none; } .lang-btn { padding: 5px 9px; } .logo-text small { display: none; } }
+.kg-gt { position: absolute; left: -9999px; top: 0; width: 1px; height: 1px; overflow: hidden; }
+iframe.skiptranslate, .goog-te-banner-frame, #goog-gt-tt, .goog-te-balloon-frame, .goog-tooltip { display: none !important; }
+body { top: 0 !important; position: static !important; }
+.goog-text-highlight { background: none !important; box-shadow: none !important; }
+font { vertical-align: inherit; }
+.tabbar .nav-item { min-width: 0; }
+.tabbar .nav-t { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px; }
+/* 右から左に書く言語（アラビア語など）：画面の配置はそのまま、文章だけ右寄せ・右始まりにする */
+.translated-rtl .body, .translated-rtl .prose p, .translated-rtl .prose li, .translated-rtl .quote-body { direction: rtl; text-align: right; }
