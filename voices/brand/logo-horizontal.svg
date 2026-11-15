@@ -9,10 +9,10 @@
   <rect width="512" height="512" rx="116" fill="url(#bgl)"/>
   <!-- 吹き出し＝市民の声 -->
   <path fill="#fff" d="M152 96h208a64 64 0 0 1 64 64v136a64 64 0 0 1-64 64H250l-86 74a10 10 0 0 1-16.500-7.600V360a64 64 0 0 1-59.500-63.800V160a64 64 0 0 1 64-64z"/>
-  <!-- 3本の棒＝集まった声の統計（右上がり） -->
-  <rect x="160" y="236" width="48" height="76" rx="14" fill="#1f66c1" opacity=".45"/>
-  <rect x="232" y="196" width="48" height="116" rx="14" fill="#1f66c1" opacity=".72"/>
-  <rect x="304" y="148" width="48" height="164" rx="14" fill="#1f66c1"/>
+  <!-- 円グラフ＝集まった声の割合（統計） -->
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#1f66c1" stroke-width="50" stroke-dasharray="224.5 465.0" stroke-dashoffset="0.0" opacity="1" transform="rotate(-90 256 228)"/>
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#1f66c1" stroke-width="50" stroke-dasharray="131.5 465.0" stroke-dashoffset="-232.5" opacity=".66" transform="rotate(-90 256 228)"/>
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#1f66c1" stroke-width="50" stroke-dasharray="85.0 465.0" stroke-dashoffset="-372.0" opacity=".4" transform="rotate(-90 256 228)"/>
 </svg>
   <g transform="translate(222 26) scale(.9)" fill="none" stroke="#14233b" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"><path d="M0 14V90 M46 14L2 58 M19 43L50 90" transform="translate(0 0)"/><path d="M0 38V68a22 22 0 0 0 44 0V38 M44 62V90" transform="translate(76 0)"/><path d="M0 38V90 M0 60a22 22 0 0 1 44 0V90" transform="translate(142 0)"/><path d="M0 40V90 M0 16v.01" transform="translate(212 0)"/><path d="M68 27A38 38 0 1 0 76 54H46" transform="translate(242 0)"/><path d="M0 64a26 26 0 1 0 52 0a26 26 0 1 0-52 0" transform="translate(338 0)"/><path d="M2 64H50A24 26 0 1 0 42 83" transform="translate(410 0)"/></g>
   <text x="216" y="168" font-family="Arial, 'Liberation Sans', Helvetica, sans-serif" font-size="21" font-weight="700" letter-spacing="6.300" fill="#1f66c1">VOICES OF CITIZENS</text>

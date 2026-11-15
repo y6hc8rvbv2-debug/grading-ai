@@ -9,10 +9,10 @@
   <rect width="512" height="512" rx="116" fill="url(#bgl)"/>
   <!-- 吹き出し＝市民の声 -->
   <path fill="#fff" d="M152 96h208a64 64 0 0 1 64 64v136a64 64 0 0 1-64 64H250l-86 74a10 10 0 0 1-16.500-7.600V360a64 64 0 0 1-59.500-63.800V160a64 64 0 0 1 64-64z"/>
-  <!-- 3本の棒＝集まった声の統計（右上がり） -->
-  <rect x="160" y="236" width="48" height="76" rx="14" fill="#1f66c1" opacity=".45"/>
-  <rect x="232" y="196" width="48" height="116" rx="14" fill="#1f66c1" opacity=".72"/>
-  <rect x="304" y="148" width="48" height="164" rx="14" fill="#1f66c1"/>
+  <!-- 円グラフ＝集まった声の割合（統計） -->
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#1f66c1" stroke-width="50" stroke-dasharray="224.5 465.0" stroke-dashoffset="0.0" opacity="1" transform="rotate(-90 256 228)"/>
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#1f66c1" stroke-width="50" stroke-dasharray="131.5 465.0" stroke-dashoffset="-232.5" opacity=".66" transform="rotate(-90 256 228)"/>
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#1f66c1" stroke-width="50" stroke-dasharray="85.0 465.0" stroke-dashoffset="-372.0" opacity=".4" transform="rotate(-90 256 228)"/>
 </svg>
   <g transform="translate(216 34) scale(.86)" fill="none" stroke="#14233b" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"><path d="M40 8C36 24 26 40 12 52 M34 24H78C75 58 58 80 26 94" transform="translate(0 0)"/><path d="M24 30H76 M10 82H90" transform="translate(112 0)"/><path d="M12 30H72V84H8" transform="translate(224 0)"/><path d="M20 24H80 M50 24V82 M8 82H92" transform="translate(336 0)"/><path d="M306 6L311 19 M322 1L327 14" stroke-width="9.500"/></g>
   <text x="219" y="166" font-family="Arial, 'Liberation Sans', Helvetica, sans-serif" font-size="25" font-weight="700" letter-spacing="13.5" fill="#1f66c1">KUNIGOE</text>
