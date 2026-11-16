@@ -1,9 +1,7 @@
-// AI 呼び出しの窓口（Claude API）。Edge ランタイムで動かし、生成中の文章を少しずつ画面へ流す。
+// AI 呼び出しの窓口（Claude API）。Node.js ランタイムで動かし、生成中の文章を少しずつ画面へ流す。
 // 鍵（ANTHROPIC_API_KEY）はサーバーの環境変数にだけ置き、画面側には渡さない。
 import Anthropic from '@anthropic-ai/sdk';
 import { buildRequest } from './_prompts.js';
-
-export const config = { runtime: 'edge' };
 
 const MODEL = process.env.CLAUDE_MODEL || 'claude-opus-5-5';
 const MAX_BODY = 3_800_000; // Vercel の受信上限（約4MB）より少し小さく
@@ -21,7 +19,7 @@ function tooMany(ip) {
 
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
 
-export default async function handler(request) {
+async function handler(request) {
   if (request.method !== 'POST') return json(405, { error: 'POST のみ対応しています' });
   if (!process.env.ANTHROPIC_API_KEY) return json(503, { error: 'AI_NOT_CONFIGURED' });
 
@@ -89,3 +87,5 @@ export default async function handler(request) {
     headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' },
   });
 }
+
+export default { fetch: handler };
