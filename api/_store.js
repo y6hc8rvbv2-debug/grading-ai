@@ -87,9 +87,23 @@ export async function saveSubscription(sub, fallback = {}) {
   return record;
 }
 // いま有効なプラン（支払いが止まった・解約済みなら無料に戻る）
+// Apple の契約は「有効期限（accessUntil）」も確かめる（通知が届かなかった場合でも期限で切れるように）
 export function effectivePlan(record) {
-  if (record && ACTIVE.has(record.status) && PLANS[record.planCode]) return record.planCode;
-  return 'free';
+  if (!record || !ACTIVE.has(record.status) || !PLANS[record.planCode]) return 'free';
+  if (record.accessUntil && Date.now() > record.accessUntil) return 'free';
+  return record.planCode;
+}
+
+// Apple（iPhoneアプリ内課金）の契約は、Stripe とは別の場所に記録する
+export async function getAppleSubscription(userId) {
+  return parse(await kv('GET', `js:asub:${userId}`));
+}
+// Stripe と Apple のうち、上限の大きい方を有効なプランとする
+const rank = (code) => Object.keys(PLANS).indexOf(code);
+export async function entitlement(userId) {
+  const [stripe, apple] = await Promise.all([getSubscription(userId), getAppleSubscription(userId)]);
+  const a = effectivePlan(stripe); const b = effectivePlan(apple);
+  return { plan: rank(b) > rank(a) ? b : a, stripe, apple, source: rank(b) > rank(a) ? 'apple' : a !== 'free' ? 'stripe' : null };
 }
 
 // ── 今月のAI作成数 ──
@@ -98,7 +112,7 @@ export async function usage(userId) {
 }
 // 枠を1つ使う。上限を超える場合は使わずに例外を投げる
 export async function takeQuota(userId, user) {
-  const plan = effectivePlan(await getSubscription(userId));
+  const { plan } = await entitlement(userId);
   const limit = PLANS[plan].limit;
   if (plan === 'free') {
     const expires = new Date(user.createdAt); expires.setMonth(expires.getMonth() + 3);

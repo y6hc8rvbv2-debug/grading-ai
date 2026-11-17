@@ -5,7 +5,8 @@
 //   個人情報の暗号化 : PII_KEY_V1 / PII_INDEX_KEY（PII Shield）
 //   管理者          : ADMIN_KEY
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import { hasStore, kv, parse, HttpError, need, PLANS, claimUser, getSubscription, saveSubscription, effectivePlan, usage } from './_store.js';
+import { hasStore, kv, parse, HttpError, need, PLANS, claimUser, getSubscription, saveSubscription, entitlement, usage, monthKey } from './_store.js';
+import { hasApple, APPLE_PRODUCTS, verifyTransaction, saveAppleTransaction } from './_apple.js';
 
 const hasStripe = Boolean(process.env.STRIPE_SECRET_KEY);
 const hasPiiKeys = Boolean(process.env.PII_KEY_V1 && process.env.PII_INDEX_KEY);
@@ -77,18 +78,51 @@ const actions = {
       admin: Boolean(process.env.ADMIN_KEY),
       googleClientId: process.env.GOOGLE_CLIENT_ID || '',
       webhook: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
+      apple: hasApple && hasStore,
+      appleProducts: hasApple ? APPLE_PRODUCTS : {},
     };
   },
 
   // ── 利用者の契約状態と今月の利用数（サーバーの記録が正。端末の表示はこれに合わせる） ──
   async 'account.sync'(b) {
     const user = await claimUser(b.userId, b.deviceKey);
-    const sub = await getSubscription(b.userId);
-    const plan = effectivePlan(sub);
+    const { plan, stripe: sub, apple, source } = await entitlement(b.userId);
     return {
-      plan, used: await usage(b.userId), limit: PLANS[plan].limit === Infinity ? null : PLANS[plan].limit, createdAt: user.createdAt,
+      plan, source, used: await usage(b.userId), limit: PLANS[plan].limit === Infinity ? null : PLANS[plan].limit, createdAt: user.createdAt,
       subscription: sub && { status: sub.status, planCode: sub.planCode, cancelAtPeriodEnd: sub.cancelAtPeriodEnd, currentPeriodEnd: sub.currentPeriodEnd, customerId: sub.customerId, subscriptionId: sub.subscriptionId },
+      apple: apple && { status: apple.status, planCode: apple.planCode, productId: apple.productId, cancelAtPeriodEnd: apple.cancelAtPeriodEnd, currentPeriodEnd: apple.currentPeriodEnd, environment: apple.environment },
     };
+  },
+
+  // ── iPhoneアプリ内課金：購入・復元した取引を Apple の署名で確かめて記録する ──
+  async 'apple.verify'(b) {
+    need(hasApple, 503, 'APPLE_NOT_CONFIGURED');
+    await claimUser(b.userId, b.deviceKey);
+    const list = (Array.isArray(b.transactions) ? b.transactions : []).filter((x) => typeof x === 'string').slice(0, 20);
+    need(list.length, 400, '購入情報がありません');
+    let saved = 0;
+    for (const jws of list) {
+      let tx;
+      try { tx = await verifyTransaction(jws); } catch { continue; } // 署名が正しくないものは無視
+      if (tx.appAccountToken && tx.appAccountToken !== b.userId && !b.restore) continue; // 他人の購入は記録しない（復元の時だけ付け替える）
+      if (await saveAppleTransaction(tx, null, { userId: b.userId })) saved++;
+    }
+    need(saved, 400, 'APPLE_VERIFY_FAILED');
+    return actions['account.sync'](b);
+  },
+
+  // ── アカウントの削除（App Store の審査基準：アプリ内で削除できること） ──
+  async 'account.delete'(b) {
+    if (!hasStore) return { ok: true };
+    await claimUser(b.userId, b.deviceKey);
+    const { stripe: sub, apple } = await entitlement(b.userId);
+    // Stripe の契約は、期間の終わりで自動更新を止める（Apple の契約は Apple の設定画面で利用者が止める）
+    if (sub?.subscriptionId && hasStripe && ['active', 'trialing', 'past_due'].includes(sub.status)) {
+      await stripe('POST', `subscriptions/${encodeURIComponent(sub.subscriptionId)}`, { cancel_at_period_end: true, metadata: { cancelReason: 'account_deleted' } }).catch(() => {});
+    }
+    if (apple?.subscriptionId) await kv('DEL', `js:aorig:${apple.subscriptionId}`);
+    await kv('DEL', `js:user:${b.userId}`, `js:sub:${b.userId}`, `js:asub:${b.userId}`, `js:buy:${b.userId}`, `js:use:${b.userId}:${monthKey()}`);
+    return { ok: true, appleActive: Boolean(apple && apple.status === 'active' && !apple.cancelAtPeriodEnd) };
   },
 
   // ── 指導案ライブラリ ──
@@ -266,9 +300,9 @@ const actions = {
       let customer = b.customerId || undefined;
       if (hasStore) {
         await claimUser(b.userId, b.deviceKey);
-        const current = await getSubscription(b.userId);
-        // 有効な契約が既にある時は二重に契約させず、プラン変更はお支払い管理画面で行う
-        need(effectivePlan(current) === 'free', 409, 'ALREADY_SUBSCRIBED');
+        const { plan: currentPlan, stripe: current } = await entitlement(b.userId);
+        // 有効な契約（Web・iPhoneアプリのどちらでも）が既にある時は二重に契約させない
+        need(currentPlan === 'free', 409, 'ALREADY_SUBSCRIBED');
         customer = current?.customerId || undefined;
       }
       const meta = { type: 'subscription', planCode: b.planCode, userId: str(b.userId, 80) };

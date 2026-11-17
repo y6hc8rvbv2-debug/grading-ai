@@ -7,6 +7,7 @@ import { formatPrice } from '../lib/options.js';
 import { fmtDate, schoolLabel } from '../lib/util.js';
 import { Button, Card, Input, Select, PageHeader, Empty, Badge, Notice, Modal, Tabs, toast, Stat, ScoreRing, confirmDialog } from '../ui.jsx';
 import { PlanMeta, PlanBody } from './PlanView.jsx';
+import { isIOSApp } from '../lib/iap.js';
 
 export default function LibraryPage({ query }) {
   const cfg = useConfig();
@@ -33,11 +34,13 @@ export default function LibraryPage({ query }) {
   }, [query.session, cfg.stripe]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const subjects = [...new Set((items || []).map((i) => i.plan?.subject).filter(Boolean))];
-  const list = useMemo(() => (items || []).filter((i) => {
+  const owned = (i) => i.price === 0 || s.purchases.some((p) => p.remoteId === i.id) || s.library.some((l) => l.remoteId === i.id);
+  // iPhoneアプリでは、有料の指導案の購入は扱わない（アプリ内のデジタル商品の購入は Apple の課金が必要なため）
+  const ios = isIOSApp();
+  const list = useMemo(() => (items || []).filter((i) => (!ios || i.price === 0 || owned(i))).filter((i) => {
     const k = q.trim().toLowerCase();
     return (!k || [i.plan?.title, i.plan?.unit, i.plan?.subject, i.summary, i.publisherName].join(' ').toLowerCase().includes(k)) && (!price || (price === 'free' ? i.price === 0 : i.price > 0)) && (!subject || i.plan?.subject === subject);
-  }), [items, q, price, subject]);
-  const owned = (i) => i.price === 0 || s.purchases.some((p) => p.remoteId === i.id) || s.library.some((l) => l.remoteId === i.id);
+  }), [items, q, price, subject, ios, s.purchases, s.library]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (cfg.loaded && !cfg.store) {
     return (<div><PageHeader icon={LibIcon} title="指導案ライブラリ" desc="先生どうしで指導案を共有・販売できます" />
@@ -53,7 +56,7 @@ export default function LibraryPage({ query }) {
       {tab === 'browse' && (<>
         <Card className="p-3 mb-4 flex flex-col sm:flex-row gap-2">
           <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute" /><Input className="pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder="タイトル・単元・教科で検索" /></div>
-          <Select className="sm:w-36" value={price} onChange={(e) => setPrice(e.target.value)} options={[{ value: 'free', label: '無料' }, { value: 'paid', label: '有料' }]} placeholder="価格" />
+          {!ios && <Select className="sm:w-36" value={price} onChange={(e) => setPrice(e.target.value)} options={[{ value: 'free', label: '無料' }, { value: 'paid', label: '有料' }]} placeholder="価格" />}
           <Select className="sm:w-36" value={subject} onChange={(e) => setSubject(e.target.value)} options={subjects} placeholder="教科" />
         </Card>
         {items === null ? <p className="text-mute text-sm">読み込み中…</p> : list.length === 0 ? <Card><Empty icon={LibIcon} title="まだ公開された指導案がありません" desc="指導案の詳細画面から「ライブラリに公開」で最初の1件を公開できます。" /></Card> : (

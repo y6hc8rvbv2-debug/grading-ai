@@ -15,6 +15,8 @@ export function syncAccount() {
       ...p, plan: r.plan, serverCreatedAt: r.createdAt,
       stripe: sub ? { customerId: sub.customerId, subscriptionId: sub.subscriptionId } : p.stripe,
       subscription: sub ? { status: sub.status, planCode: sub.planCode, cancelAtPeriodEnd: sub.cancelAtPeriodEnd, currentPeriodEnd: sub.currentPeriodEnd } : null,
+      apple: r.apple || null, // iPhoneアプリ内課金の契約
+      planSource: r.source || null, // 'stripe'（Web）／'apple'（iPhoneアプリ）
       syncedAt: new Date().toISOString(),
     });
     db.set('usage', { ...(getState().usage || {}), [monthKey()]: r.used });

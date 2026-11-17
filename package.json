@@ -8,10 +8,16 @@
     "build": "vite build && node scripts/copy-legacy.mjs",
     "preview": "vite preview",
     "check:pii": "pii-shield-check",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "ios:sync": "cap sync ios",
+    "ios:open": "cap open ios"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
+    "@apple/app-store-server-library": "^3.1.0",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/ios": "^8.6.2",
+    "@capgo/native-purchases": "^8.9.16",
     "docx": "^9.6.1",
     "jszip": "^3.10.1",
     "lucide-react": "^0.469.0",
@@ -24,6 +30,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.2",
     "@tailwindcss/vite": "^4.1.18",
     "@vitejs/plugin-react": "^4.7.0",
     "tailwindcss": "^4.1.18",

@@ -6,6 +6,7 @@ import { navigate, href } from '../lib/router.js';
 import { PLANS, planOf, CURRENCIES, formatPrice, CANCEL_REASONS } from '../lib/options.js';
 import { quota } from '../lib/quota.js';
 import { syncAccount } from '../lib/account.js';
+import { isIOSApp, loadProducts, buy as appleBuy, restore as appleRestore, manage as appleManage, productFor } from '../lib/iap.js';
 import { download, fmtDate, fmtDateTime, cx } from '../lib/util.js';
 import { Button, Card, CardHead, Input, Textarea, Select, Field, PageHeader, Notice, Badge, Tabs, Modal, toast, confirmDialog, Stat, Empty } from '../ui.jsx';
 
@@ -63,6 +64,7 @@ function DisplayTab() {
 
 function DataTab() {
   const s = useStore();
+  const cfg = useConfig();
   const [est, setEst] = useState(null);
   useEffect(() => { navigator.storage?.estimate?.().then(setEst).catch(() => {}); }, []);
   const backup = () => { download(new Blob([JSON.stringify(db.exportAll())], { type: 'application/json' }), `授業スタジオ_バックアップ_${new Date().toISOString().slice(0, 10)}.json`); toast('バックアップを保存しました'); };
@@ -71,6 +73,15 @@ function DataTab() {
     try { const data = JSON.parse(await f.text()); if (!(await confirmDialog('バックアップの内容で、この端末のデータを置き換えます（録画・録音は含まれません）。よろしいですか？', { ok: '復元する' }))) return; db.importAll(data); toast('復元しました'); } catch (err) { toast(err.message || 'ファイルを読み込めませんでした', 'bad'); }
   };
   const wipe = async () => { if (await confirmDialog('この端末に保存した指導案・記録・名簿・録画などをすべて削除します。元に戻せません。', { ok: 'すべて削除', danger: true })) { await db.wipe(); toast('削除しました'); navigate('/'); } };
+  // アカウントの削除：サーバーの記録（契約状態・利用数・購入履歴）も消してから、端末のデータを消す
+  const deleteAccount = async () => {
+    const apple = s.profile?.planSource === 'apple';
+    const msg = `アカウントを削除します。この端末のデータと、サーバーにある契約状態・利用数の記録がすべて消え、元に戻せません。${s.profile?.planSource === 'stripe' ? '\nWebでのご契約は、現在の期間の終わりで自動更新を停止します。' : ''}${apple ? '\niPhoneアプリでのご契約は自動では止まりません。iPhoneの「設定」→ お名前 →「サブスクリプション」で解約してください。' : ''}`;
+    if (!(await confirmDialog(msg, { title: 'アカウントの削除', ok: '削除する', danger: true }))) return;
+    try { if (cfg.store) await api('account.delete'); } catch (e) { toast(e.message, 'bad'); return; }
+    if (apple && isIOSApp()) await appleManage().catch(() => {});
+    await db.wipe(); toast('アカウントを削除しました'); navigate('/');
+  };
   const counts = [['plans', '指導案'], ['notes', 'ノート'], ['behaviors', '観察'], ['reflections', '振り返り'], ['evaluations', '総合評価'], ['materials', '教材'], ['recordings', '録画・録音'], ['roster', '名簿']];
   return (
     <div className="grid lg:grid-cols-2 gap-5 items-start">
@@ -84,7 +95,7 @@ function DataTab() {
           <p className="text-sm text-mute">別の端末へ移す時や、万一に備えて定期的に保存してください。録画・録音は容量が大きいため含まれません（個別にダウンロードしてください）。</p>
           <div className="flex flex-wrap gap-2"><Button icon={Download} onClick={backup}>バックアップを保存</Button><label className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-line text-sm cursor-pointer hover:bg-sunken"><Upload className="size-4" />復元する<input type="file" accept="application/json,.json" className="hidden" onChange={restore} /></label></div>
         </Card>
-        <Card className="p-5 space-y-3 border-bad/30"><h3 className="font-bold text-bad">データの削除</h3><p className="text-sm text-mute">共用の端末で使った後などに。</p><Button variant="danger" icon={Trash2} onClick={wipe}>すべてのデータを削除</Button></Card>
+        <Card className="p-5 space-y-3 border-bad/30"><h3 className="font-bold text-bad">データの削除</h3><p className="text-sm text-mute">共用の端末で使った後などに。</p><div className="flex flex-wrap gap-2"><Button variant="danger" icon={Trash2} onClick={wipe}>この端末のデータを削除</Button><Button variant="danger" icon={Trash2} onClick={deleteAccount}>アカウントを削除</Button></div><p className="text-xs text-mute">「アカウントを削除」は、サーバーにある契約状態などの記録も消します。ライブラリに公開した指導案は、先に公開を取り消してください。</p></Card>
       </div>
     </div>
   );
@@ -117,6 +128,7 @@ function IntegrationsTab() {
     ['個人情報の暗号化（PII Shield）', cfg.pii, 'PII_KEY_V1 / PII_INDEX_KEY', 'お問い合わせフォームの氏名・メール・電話の暗号化保存'],
     ['決済（Stripe）', cfg.stripe, 'STRIPE_SECRET_KEY', '有料プラン・指導案の購入（売上は Stripe に登録した銀行口座へ入金）'],
     ['契約状態の自動反映（Stripe通知）', cfg.webhook && cfg.store, 'STRIPE_WEBHOOK_SECRET', '支払い・更新・支払い失敗・解約を自動で反映し、月の作成数をサーバーで管理（共有データの置き場も必要）'],
+    ['iPhoneアプリ内課金（Apple）', cfg.apple, 'APPLE_BUNDLE_ID / APPLE_APP_ID', 'iPhoneアプリでの有料プランの申し込み（共有データの置き場も必要。手順は docs/IOS-RELEASE.md）'],
     ['Google連携', Boolean(cfg.googleClientId), 'GOOGLE_CLIENT_ID', 'Googleカレンダーへの直接登録・Googleドライブへの保存'],
     ['管理者', cfg.admin, 'ADMIN_KEY', '管理者画面（売上・問い合わせ・公開物の管理）'],
   ];
@@ -136,6 +148,60 @@ function IntegrationsTab() {
 
 // ── プラン（サブスクリプション） ──
 export function Subscription({ query }) {
+  if (isIOSApp()) return <AppleSubscription />;
+  return <WebSubscription query={query} />;
+}
+
+// ── iPhoneアプリ：Apple のアプリ内課金で申し込む（App Store の審査基準 3.1.1・3.1.2 に沿った表示） ──
+function AppleSubscription() {
+  const cfg = useConfig();
+  const s = useStore();
+  const p = s.profile; const cur = planOf(p.plan); const q = quota(s);
+  const [products, setProducts] = useState(null);
+  const [busy, setBusy] = useState('');
+  useEffect(() => { if (cfg.apple) loadProducts().then(setProducts).catch((e) => { setProducts({}); toast(e.message, 'bad'); }); }, [cfg.apple]);
+  const webPlan = p.planSource === 'stripe';
+  const run = async (key, fn, done) => { setBusy(key); try { const r = await fn(); if (r && done) toast(done); } catch (e) { toast(e.message, 'bad'); } finally { setBusy(''); } };
+  const apple = p.apple;
+  return (
+    <div>
+      <PageHeader icon={CreditCard} title="プラン" desc="すべてのプランで全機能を使えます。違いは毎月AIで作成できる指導案の数です" />
+      {!cfg.apple && cfg.loaded && <Notice tone="warn" className="mb-5">アプリ内でのお申し込みは準備中です。</Notice>}
+      {webPlan && <Notice tone="mute" className="mb-5">ご契約中のプランは、Web版でお申し込みいただいたものです。この端末でもそのままお使いいただけます。</Notice>}
+      {apple?.status === 'past_due' && <Notice tone="bad" className="mb-5">お支払いが確認できていません。iPhoneの「設定」→ お名前 →「お支払いと配送先」で、お支払い方法をご確認ください。</Notice>}
+      <div className="grid sm:grid-cols-3 gap-3 mb-6">
+        <Stat label="現在のプラン" value={cur.name} icon={Crown} hint={apple?.currentPeriodEnd && p.planSource === 'apple' ? (apple.cancelAtPeriodEnd ? `自動更新オフ（${fmtDate(apple.currentPeriodEnd * 1000)}まで利用可）` : `次回更新 ${fmtDate(apple.currentPeriodEnd * 1000)}`) : ''} />
+        <Stat label="今月のAI作成" value={`${q.used}件`} hint={`上限 ${q.limit === Infinity ? '無制限' : `${q.limit}件`}`} />
+        <Stat label="残り" value={q.left === Infinity ? '無制限' : `${q.left}件`} hint={q.trial.isFree ? (q.trial.expired ? '無料期間終了' : `無料期間 残り${q.trial.daysRemaining}日`) : ''} />
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4">{PLANS.filter((pl) => pl.price > 0).map((pl) => {
+        const product = products?.[productFor(pl.code)];
+        const mine = pl.code === cur.code;
+        return (
+          <Card key={pl.code} className={cx('p-5 flex flex-col', mine && 'ring-2 ring-brand')}>
+            <h3 className="font-bold">{product?.title || pl.name}</h3>
+            <p className="mt-2"><span className="text-2xl font-bold">{product?.priceString || '—'}</span><span className="text-sm text-mute">／月（1か月ごとの自動更新）</span></p>
+            <p className="text-sm text-mute mt-1">{pl.desc}</p>
+            <Button className="mt-4" variant={mine ? 'soft' : 'primary'} disabled={mine || webPlan || !product || Boolean(busy)} loading={busy === pl.code}
+              onClick={() => run(pl.code, () => appleBuy(pl.code), `${pl.name}をご契約いただきました`)}>{mine ? 'ご利用中' : '申し込む'}</Button>
+          </Card>
+        );
+      })}</div>
+      <div className="flex flex-wrap gap-2 mt-5">
+        <Button variant="outline" loading={busy === 'restore'} disabled={!cfg.apple || Boolean(busy)} onClick={() => run('restore', appleRestore, '購入を復元しました')}>購入を復元</Button>
+        <Button variant="outline" icon={ExternalLink} disabled={!cfg.apple} onClick={() => appleManage().catch((e) => toast(e.message, 'bad'))}>プランの変更・解約（Appleの設定）</Button>
+      </div>
+      <div className="text-xs text-mute mt-5 space-y-1.5 leading-relaxed">
+        <p>・お支払いは購入の確定時に Apple ID に請求されます。</p>
+        <p>・現在の期間が終わる24時間前までに自動更新をオフにしない限り、同じ料金で1か月ごとに自動更新されます。更新料金は期間終了前の24時間以内に請求されます。</p>
+        <p>・プランの変更や解約（自動更新のオフ）は、上のボタンまたは iPhone の「設定」→ お名前 →「サブスクリプション」から行えます。</p>
+        <p><a className="underline" href={href('/legal/terms')}>利用規約</a>・<a className="underline" href={href('/legal/privacy')}>プライバシーポリシー</a>・<a className="underline" href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/" target="_blank" rel="noreferrer">Apple標準使用許諾契約（EULA）</a></p>
+      </div>
+    </div>
+  );
+}
+
+function WebSubscription({ query }) {
   const cfg = useConfig();
   const s = useStore();
   const { currency } = useDisplay();
@@ -166,6 +232,7 @@ export function Subscription({ query }) {
   const choose = async (plan) => {
     if (plan.code === 'free') { if (subscribed) setCancel(true); return; }
     if (subscribed) { toast('ご契約中のプランの変更は「お支払い情報の管理」から行えます。いったん解約して、期間終了後に申し込み直すこともできます。'); return; }
+    if (p.planSource === 'apple') { toast('iPhoneアプリでご契約中です。プランの変更・解約は iPhone の「設定」→ お名前 →「サブスクリプション」から行えます。'); return; }
     setBusy(plan.code);
     try { const { url } = await api('stripe.checkout', { kind: 'subscription', planCode: plan.code, customerId: p.stripe?.customerId }); location.href = url; } catch (e) { toast(e.message, 'bad'); setBusy(''); }
   };
@@ -176,6 +243,7 @@ export function Subscription({ query }) {
       <PageHeader icon={CreditCard} title="プラン" desc="すべてのプランで全機能を使えます。違いは毎月AIで作成できる指導案の数です" />
       {!cfg.stripe && cfg.loaded && <Notice tone="warn" className="mb-5">決済（Stripe）が未設定のため、いまは有料プランへの申し込みはできません。管理者が <code>STRIPE_SECRET_KEY</code> を設定すると利用できます。</Notice>}
       {status?.status === 'past_due' && <Notice tone="bad" className="mb-5">お支払いが確認できていません。Stripe が数日間自動で再請求します。カードの有効期限などをご確認のうえ、「お支払い情報の管理」から更新してください。支払いが完了しないまま期限を過ぎると、無料コースに戻ります。</Notice>}
+      {p.planSource === 'apple' && <Notice tone="mute" className="mb-5">iPhoneアプリでご契約中のプランです。プランの変更・解約は iPhone の「設定」→ お名前 →「サブスクリプション」から行えます。</Notice>}
       {cfg.stripe && !cfg.store && cfg.loaded && <Notice tone="mute" className="mb-5">共有データの置き場が未設定のため、契約状態はこの端末にだけ記録されます。支払い失敗や解約を自動で反映するには、共有データの置き場と <code>STRIPE_WEBHOOK_SECRET</code> の設定が必要です。</Notice>}
       <div className="grid sm:grid-cols-3 gap-3 mb-6">
         <Stat label="現在のプラン" value={cur.name} icon={Crown} hint={status ? (status.cancelAtPeriodEnd ? `解約予定（${fmtDate(status.currentPeriodEnd * 1000)}まで利用可）` : `次回更新 ${fmtDate(status.currentPeriodEnd * 1000)}`) : ''} />
