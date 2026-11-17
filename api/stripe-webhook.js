@@ -4,8 +4,6 @@
 //   Stripe 側の送信先: https://（公開URL）/api/stripe-webhook
 import { hasStore, kv, parse, hmacSha256, sameText, saveSubscription } from './_store.js';
 
-export const config = { runtime: 'edge' };
-
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const TOLERANCE = 300; // 署名の有効期限（秒）。古い通知の使い回しを防ぐ
 
@@ -34,7 +32,7 @@ async function recordPurchase(meta) {
   if (item) { item.sales = (item.sales || 0) + 1; await kv('HSET', 'js:lib', item.id, JSON.stringify(item)); }
 }
 
-export default async function handler(request) {
+async function handler(request) {
   if (request.method !== 'POST') return json(405, { error: 'POST only' });
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret || !process.env.STRIPE_SECRET_KEY || !hasStore) return json(503, { error: 'WEBHOOK_NOT_CONFIGURED' });
@@ -87,3 +85,6 @@ export default async function handler(request) {
   }
   return json(200, { received: true });
 }
+
+// Vercel の Node.js ランタイムで、Web 標準の Request/Response として動かす（Edge ランタイムはこのプロジェクトでデプロイに失敗したため使わない）
+export default { fetch: handler };

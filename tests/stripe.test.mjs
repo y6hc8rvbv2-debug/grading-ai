@@ -29,7 +29,8 @@ globalThis.fetch = async (url, init = {}) => {
   throw new Error('unexpected fetch ' + url);
 };
 
-const { default: hook } = await import(ROOT + '/api/stripe-webhook.js');
+const { default: mod } = await import(ROOT + '/api/stripe-webhook.js');
+const hook = mod.fetch;
 const store = await import(ROOT + '/api/_store.js');
 const send = (event, { secret = 'whsec_test', t = Math.floor(Date.now() / 1000) } = {}) => {
   const raw = JSON.stringify(event);

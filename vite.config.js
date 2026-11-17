@@ -19,7 +19,8 @@ function localApi() {
           if (url.pathname === '/api/ai' || url.pathname === '/api/stripe-webhook') {
             const mod = await server.ssrLoadModule(`${url.pathname}.js`);
             const body = await readBody(req);
-            const response = await mod.default(new Request(url, { method: req.method, headers: req.headers, body: req.method === 'POST' ? body : undefined }));
+            const fn = mod.default.fetch || mod.default;
+            const response = await fn(new Request(url, { method: req.method, headers: req.headers, body: req.method === 'POST' ? body : undefined }));
             res.statusCode = response.status;
             response.headers.forEach((v, k) => res.setHeader(k, v));
             if (response.body) for await (const chunk of response.body) res.write(chunk);
