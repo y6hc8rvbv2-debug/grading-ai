@@ -2,6 +2,7 @@
 // 鍵（ANTHROPIC_API_KEY）はサーバーの環境変数にだけ置き、画面側には渡さない。
 import Anthropic from '@anthropic-ai/sdk';
 import { buildRequest } from './_prompts.js';
+import { hasStore, claimUser, takeQuota, refundQuota, HttpError } from './_store.js';
 
 const MODEL = process.env.CLAUDE_MODEL || 'claude-opus-5-5';
 const MAX_BODY = 3_800_000; // Vercel の受信上限（約4MB）より少し小さく
@@ -41,6 +42,19 @@ async function handler(request) {
   const req = buildRequest(body.task, body.payload);
   if (!req) return json(400, { error: '未対応のタスクです' });
 
+  // 指導案の作成は、契約プランの月の上限をサーバー側で数える（共有データの置き場がある時）
+  let charged = null;
+  if (body.task === 'generatePlan' && hasStore) {
+    try {
+      const user = await claimUser(body.userId, body.deviceKey);
+      await takeQuota(body.userId, user);
+      charged = body.userId;
+    } catch (err) {
+      if (err instanceof HttpError) return json(err.status, { error: err.message });
+      return json(502, { error: '利用状況を確認できませんでした。時間をおいてお試しください。' });
+    }
+  }
+
   const client = new Anthropic();
   const encoder = new TextEncoder();
 
@@ -66,8 +80,10 @@ async function handler(request) {
         });
         messageStream.on('text', (delta) => send({ t: delta }));
         const final = await messageStream.finalMessage();
-        if (final.stop_reason === 'refusal') send({ error: 'この内容にはAIが応答できませんでした。入力内容を見直してお試しください。' });
-        else send({ done: true, stop: final.stop_reason, model: final.model });
+        if (final.stop_reason === 'refusal') {
+          if (charged) await refundQuota(charged).catch(() => {});
+          send({ error: 'この内容にはAIが応答できませんでした。入力内容を見直してお試しください。' });
+        } else send({ done: true, stop: final.stop_reason, model: final.model });
       } catch (err) {
         let message = 'AIの呼び出しに失敗しました。時間をおいてお試しください。';
         if (err instanceof Anthropic.AuthenticationError) message = 'APIキーが正しくありません。管理者が ANTHROPIC_API_KEY を確認してください。';
@@ -75,6 +91,7 @@ async function handler(request) {
         else if (err instanceof Anthropic.BadRequestError) message = 'AIに送った内容を処理できませんでした（画像の形式やサイズをご確認ください）。';
         else if (err instanceof Anthropic.APIConnectionError) message = 'AIサービスに接続できませんでした。';
         console.error('[ai] failed', body.task, err?.status, err?.name);
+        if (charged) await refundQuota(charged).catch(() => {}); // 失敗した作成は数えない
         send({ error: message });
       } finally {
         clearInterval(beat);

@@ -5,6 +5,7 @@ import { useConfig, api } from '../lib/api.js';
 import { navigate, href } from '../lib/router.js';
 import { PLANS, planOf, CURRENCIES, formatPrice, CANCEL_REASONS } from '../lib/options.js';
 import { quota } from '../lib/quota.js';
+import { syncAccount } from '../lib/account.js';
 import { download, fmtDate, fmtDateTime, cx } from '../lib/util.js';
 import { Button, Card, CardHead, Input, Textarea, Select, Field, PageHeader, Notice, Badge, Tabs, Modal, toast, confirmDialog, Stat, Empty } from '../ui.jsx';
 
@@ -114,7 +115,8 @@ function IntegrationsTab() {
     ['AI（Claude）', cfg.ai, 'ANTHROPIC_API_KEY', '指導案・分析・教材などの生成'],
     ['共有データの置き場', cfg.store, 'KV_REST_API_URL / KV_REST_API_TOKEN', 'ライブラリ・利用者の声・機能提案・QR提出（VercelのUpstash for Redis連携で自動設定）'],
     ['個人情報の暗号化（PII Shield）', cfg.pii, 'PII_KEY_V1 / PII_INDEX_KEY', 'お問い合わせフォームの氏名・メール・電話の暗号化保存'],
-    ['決済（Stripe）', cfg.stripe, 'STRIPE_SECRET_KEY', '有料プラン・指導案の購入'],
+    ['決済（Stripe）', cfg.stripe, 'STRIPE_SECRET_KEY', '有料プラン・指導案の購入（売上は Stripe に登録した銀行口座へ入金）'],
+    ['契約状態の自動反映（Stripe通知）', cfg.webhook && cfg.store, 'STRIPE_WEBHOOK_SECRET', '支払い・更新・支払い失敗・解約を自動で反映し、月の作成数をサーバーで管理（共有データの置き場も必要）'],
     ['Google連携', Boolean(cfg.googleClientId), 'GOOGLE_CLIENT_ID', 'Googleカレンダーへの直接登録・Googleドライブへの保存'],
     ['管理者', cfg.admin, 'ADMIN_KEY', '管理者画面（売上・問い合わせ・公開物の管理）'],
   ];
@@ -139,20 +141,31 @@ export function Subscription({ query }) {
   const { currency } = useDisplay();
   const p = s.profile; const cur = planOf(p.plan); const q = quota(s);
   const [busy, setBusy] = useState('');
-  const [status, setStatus] = useState(null);
+  const [status, setStatus] = useState(p.subscription || null);
+  useEffect(() => { if (p.subscription) setStatus(p.subscription); }, [p.subscription]);
   const [cancel, setCancel] = useState(false);
 
   useEffect(() => {
     if (!query.session || !cfg.stripe) return;
     api('stripe.verify', { sessionId: query.session }).then((r) => {
-      if (r.paid && r.type === 'subscription') { db.set('profile', { ...p, plan: r.planCode, stripe: { customerId: r.customerId, subscriptionId: r.subscriptionId } }); toast(`${planOf(r.planCode).name}にお申し込みいただきました`); }
+      if (r.paid && r.type === 'subscription') {
+        // 共有データの置き場がある時はサーバーの記録（Stripeの通知で更新）を取り込む。無い時は端末にだけ記録する
+        if (cfg.store) syncAccount(); else db.set('profile', { ...p, plan: r.planCode, stripe: { customerId: r.customerId, subscriptionId: r.subscriptionId } });
+        toast(`${planOf(r.planCode).name}にお申し込みいただきました`);
+      }
       navigate('/subscription', { replace: true });
     }).catch((e) => toast(e.message, 'bad'));
   }, [query.session, cfg.stripe]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (cfg.stripe && p.stripe?.subscriptionId) api('stripe.status', { subscriptionId: p.stripe.subscriptionId }).then(setStatus).catch(() => {}); }, [cfg.stripe, p.stripe?.subscriptionId]);
+  // 画面を開いた時に、Stripe の最新の契約状態を確認する（サーバーの記録も更新される）
+  useEffect(() => {
+    if (!cfg.stripe || !p.stripe?.subscriptionId) return;
+    api('stripe.status', { subscriptionId: p.stripe.subscriptionId }).then((st) => { setStatus(st); if (cfg.store) syncAccount(); }).catch(() => {});
+  }, [cfg.stripe, cfg.store, p.stripe?.subscriptionId]);
+  const subscribed = Boolean(p.stripe?.subscriptionId) && status && ['active', 'trialing', 'past_due'].includes(status.status);
 
   const choose = async (plan) => {
-    if (plan.code === 'free') { if (p.stripe?.subscriptionId) { setCancel(true); return; } return; }
+    if (plan.code === 'free') { if (subscribed) setCancel(true); return; }
+    if (subscribed) { toast('ご契約中のプランの変更は「お支払い情報の管理」から行えます。いったん解約して、期間終了後に申し込み直すこともできます。'); return; }
     setBusy(plan.code);
     try { const { url } = await api('stripe.checkout', { kind: 'subscription', planCode: plan.code, customerId: p.stripe?.customerId }); location.href = url; } catch (e) { toast(e.message, 'bad'); setBusy(''); }
   };
@@ -162,6 +175,8 @@ export function Subscription({ query }) {
     <div>
       <PageHeader icon={CreditCard} title="プラン" desc="すべてのプランで全機能を使えます。違いは毎月AIで作成できる指導案の数です" />
       {!cfg.stripe && cfg.loaded && <Notice tone="warn" className="mb-5">決済（Stripe）が未設定のため、いまは有料プランへの申し込みはできません。管理者が <code>STRIPE_SECRET_KEY</code> を設定すると利用できます。</Notice>}
+      {status?.status === 'past_due' && <Notice tone="bad" className="mb-5">お支払いが確認できていません。Stripe が数日間自動で再請求します。カードの有効期限などをご確認のうえ、「お支払い情報の管理」から更新してください。支払いが完了しないまま期限を過ぎると、無料コースに戻ります。</Notice>}
+      {cfg.stripe && !cfg.store && cfg.loaded && <Notice tone="mute" className="mb-5">共有データの置き場が未設定のため、契約状態はこの端末にだけ記録されます。支払い失敗や解約を自動で反映するには、共有データの置き場と <code>STRIPE_WEBHOOK_SECRET</code> の設定が必要です。</Notice>}
       <div className="grid sm:grid-cols-3 gap-3 mb-6">
         <Stat label="現在のプラン" value={cur.name} icon={Crown} hint={status ? (status.cancelAtPeriodEnd ? `解約予定（${fmtDate(status.currentPeriodEnd * 1000)}まで利用可）` : `次回更新 ${fmtDate(status.currentPeriodEnd * 1000)}`) : ''} />
         <Stat label="今月のAI作成" value={`${q.used}件`} hint={`上限 ${q.limit === Infinity ? '無制限' : `${q.limit}件`}`} />
@@ -176,12 +191,12 @@ export function Subscription({ query }) {
             <p className="mt-2"><span className="text-3xl font-bold">{pl.price ? formatPrice(pl.price, currency) : '0円'}</span>{pl.price > 0 && <span className="text-sm text-mute">／月</span>}</p>
             <p className="text-sm text-mute mt-1">{pl.desc}</p>
             <ul className="mt-4 space-y-2 text-sm flex-1">{pl.features.map((f) => <li key={f} className="flex gap-2"><Check className="size-4 text-good shrink-0 mt-0.5" />{f}</li>)}</ul>
-            <Button className="mt-5" variant={mine ? 'soft' : pl.popular ? 'primary' : 'outline'} disabled={mine || (pl.price > 0 && !cfg.stripe) || (pl.code === 'free' && !p.stripe?.subscriptionId)} loading={busy === pl.code} onClick={() => choose(pl)}>{mine ? 'ご利用中' : pl.price ? '申し込む' : '無料に戻す'}</Button>
+            <Button className="mt-5" variant={mine ? 'soft' : pl.popular ? 'primary' : 'outline'} disabled={mine || (pl.price > 0 && !cfg.stripe) || (pl.code === 'free' && !subscribed)} loading={busy === pl.code} onClick={() => choose(pl)}>{mine ? 'ご利用中' : pl.price ? '申し込む' : '無料に戻す'}</Button>
           </Card>
         );
       })}</div>
       {p.stripe?.customerId && cfg.stripe && (
-        <Card className="p-5 mt-6 flex flex-wrap items-center gap-3"><p className="flex-1 text-sm">お支払い方法の変更・領収書の確認は、Stripeの管理画面から行えます。</p><Button variant="outline" icon={ExternalLink} loading={busy === 'portal'} onClick={portal}>お支払い情報の管理</Button>{!status?.cancelAtPeriodEnd && <Button variant="danger" onClick={() => setCancel(true)}>解約する</Button>}</Card>
+        <Card className="p-5 mt-6 flex flex-wrap items-center gap-3"><p className="flex-1 text-sm">お支払い方法の変更・領収書の確認は、Stripeの管理画面から行えます。</p><Button variant="outline" icon={ExternalLink} loading={busy === 'portal'} onClick={portal}>お支払い情報の管理</Button>{subscribed && !status?.cancelAtPeriodEnd && <Button variant="danger" onClick={() => setCancel(true)}>解約する</Button>}</Card>
       )}
       <p className="text-xs text-mute mt-4">表示価格は税込です。通貨の換算は参考値で、お支払いは日本円です。<a className="underline" href={href('/contact')}>学校・教育委員会での導入のご相談</a></p>
       <CancelModal open={cancel} onClose={() => setCancel(false)} onDone={(st) => setStatus(st)} />
@@ -196,7 +211,7 @@ function CancelModal({ open, onClose, onDone }) {
   const [busy, setBusy] = useState(false);
   const go = async () => {
     setBusy(true);
-    try { await api('stripe.cancel', { subscriptionId: p.stripe.subscriptionId, reason, comment }); const st = await api('stripe.status', { subscriptionId: p.stripe.subscriptionId }); onDone(st); toast('解約を受け付けました。期間の終わりまでご利用いただけます'); onClose(); } catch (e) { toast(e.message, 'bad'); } finally { setBusy(false); }
+    try { await api('stripe.cancel', { subscriptionId: p.stripe.subscriptionId, reason, comment }); const st = await api('stripe.status', { subscriptionId: p.stripe.subscriptionId }); onDone(st); syncAccount(); toast('解約を受け付けました。期間の終わりまでご利用いただけます'); onClose(); } catch (e) { toast(e.message, 'bad'); } finally { setBusy(false); }
   };
   return (
     <Modal open={open} onClose={onClose} title="解約の手続き" footer={<><Button variant="outline" onClick={onClose}>やめる</Button><Button variant="danger" loading={busy} onClick={go}>解約する</Button></>}>

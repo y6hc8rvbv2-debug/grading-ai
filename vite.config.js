@@ -16,8 +16,8 @@ function localApi() {
       server.middlewares.use(async (req, res, next) => {
         const url = new URL(req.url, 'http://localhost');
         try {
-          if (url.pathname === '/api/ai') {
-            const mod = await server.ssrLoadModule('/api/ai.js');
+          if (url.pathname === '/api/ai' || url.pathname === '/api/stripe-webhook') {
+            const mod = await server.ssrLoadModule(`${url.pathname}.js`);
             const body = await readBody(req);
             const response = await mod.default(new Request(url, { method: req.method, headers: req.headers, body: req.method === 'POST' ? body : undefined }));
             res.statusCode = response.status;

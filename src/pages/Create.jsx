@@ -4,6 +4,7 @@ import { useStore, db, getDisplay } from '../lib/store.js';
 import { navigate, href } from '../lib/router.js';
 import { runAi } from '../lib/ai.js';
 import { quota, countUsage } from '../lib/quota.js';
+import { syncAccount } from '../lib/account.js';
 import { cx } from '../lib/util.js';
 import { detectNeeds } from '../lib/content.js';
 import { SCHOOL_TYPES, GRADES, SUBJECTS, CLASS_FORMATS, THEORIES, THEORY_NAMES, MATERIALS, TOOLS, EVALUATIONS, EXPERIENTIAL, COMMUNICATION, EMPTY_FORM, PRESETS, LANGUAGES } from '../lib/options.js';
@@ -55,11 +56,11 @@ export default function CreatePlan({ query }) {
       const { result, demo } = await runAi('generatePlan', payload, { onText: setStream });
       const plan = db.add('plans', { ...form, title: form.title || result.title || `${form.subject}「${form.unit}」`, generatedContent: result, demo, tags: [], adoptedPapers: papers });
       db.add('versions', { planId: plan.id, label: '初版', content: result, reason: 'AIで作成' });
-      if (!demo) countUsage();
+      if (!demo) { countUsage(); syncAccount(); }
       localStorage.removeItem(DRAFT);
       toast('指導案ができました');
       navigate(`/plans/${plan.id}`);
-    } catch (e) { setError(e.message); } finally { setBusy(false); }
+    } catch (e) { setError(e.message); syncAccount(); } finally { setBusy(false); }
   };
   const blank = () => {
     if (!valid) { toast('校種・学年・教科・単元は必須です', 'bad'); return; }

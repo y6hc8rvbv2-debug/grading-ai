@@ -1,6 +1,6 @@
 // AI（Claude）の呼び出し。サーバーに鍵が設定されていない時は、画面確認用の「見本」を返す。
-import { getConfig } from './api.js';
-import { getDisplay } from './store.js';
+import { getConfig, friendly } from './api.js';
+import { getDisplay, getState } from './store.js';
 import { demo } from './demo.js';
 
 const TEXT_TASKS = new Set(['material', 'assistant']);
@@ -27,7 +27,7 @@ export async function runAi(task, payload, { onText, signal } = {}) {
   if (getConfig().loaded && !getConfig().ai) return runDemo(task, payload, onText);
   let r;
   try {
-    r = await fetch('/api/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, signal, body: JSON.stringify({ task, payload, accessCode: getDisplay().accessCode }) });
+    r = await fetch('/api/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, signal, body: JSON.stringify({ task, payload, accessCode: getDisplay().accessCode, userId: getState().profile?.id, deviceKey: getState().profile?.deviceKey }) });
   } catch (e) {
     if (e.name === 'AbortError') throw e;
     throw new Error('サーバーに接続できませんでした。通信環境をご確認ください。');
@@ -36,7 +36,7 @@ export async function runAi(task, payload, { onText, signal } = {}) {
     const d = await r.json().catch(() => ({}));
     if (d.error === 'AI_NOT_CONFIGURED') return runDemo(task, payload, onText);
     if (d.error === 'ACCESS_CODE_REQUIRED') throw new Error('アクセスコードが必要です。「設定 → AI接続」で入力してください。');
-    throw new Error(d.error || `AIの呼び出しに失敗しました（${r.status}）`);
+    throw new Error(friendly(d.error) || `AIの呼び出しに失敗しました（${r.status}）`);
   }
   const reader = r.body.getReader(); const dec = new TextDecoder();
   let buf = ''; let text = ''; let finished = false;

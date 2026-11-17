@@ -5,25 +5,11 @@
 //   個人情報の暗号化 : PII_KEY_V1 / PII_INDEX_KEY（PII Shield）
 //   管理者          : ADMIN_KEY
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { hasStore, kv, parse, HttpError, need, PLANS, claimUser, getSubscription, saveSubscription, effectivePlan, usage } from './_store.js';
 
-const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-const hasStore = Boolean(KV_URL && KV_TOKEN);
 const hasStripe = Boolean(process.env.STRIPE_SECRET_KEY);
 const hasPiiKeys = Boolean(process.env.PII_KEY_V1 && process.env.PII_INDEX_KEY);
 
-// 月額プランの金額はサーバー側で固定する（画面から金額を書き換えられないようにするため）
-const PLANS = {
-  mini: { name: 'ミニコース', amount: 500 },
-  individual: { name: '個人・塾コース', amount: 1980 },
-  school: { name: '学校コース', amount: 4980 },
-  government: { name: '行政コース', amount: 9980 },
-};
-
-class HttpError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
-}
-const need = (cond, status, message) => { if (!cond) throw new HttpError(status, message); };
 const sha = (v) => createHash('sha256').update(String(v)).digest('hex');
 const str = (v, max = 2000) => String(v ?? '').slice(0, max).trim();
 const safeEqual = (a, b) => {
@@ -31,14 +17,6 @@ const safeEqual = (a, b) => {
   return timingSafeEqual(x, y);
 };
 
-async function kv(...cmd) {
-  need(hasStore, 503, 'STORE_NOT_CONFIGURED');
-  const r = await fetch(KV_URL, { method: 'POST', headers: { authorization: `Bearer ${KV_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify(cmd) });
-  const data = await r.json();
-  if (!r.ok || data.error) throw new HttpError(502, '共有データの保存先でエラーが発生しました');
-  return data.result;
-}
-const parse = (v) => { try { return JSON.parse(v); } catch { return null; } };
 const hashAll = async (key) => {
   const flat = (await kv('HGETALL', key)) || [];
   const out = [];
@@ -74,7 +52,16 @@ async function stripe(method, path, params) {
   return data;
 }
 
-const publicItem = ({ ownerHash, ...rest }) => rest;
+// 一覧などで返す時は、本人確認に使う値（端末鍵のハッシュ・利用者ID）を外す
+const publicItem = ({ ownerHash, ownerId, ...rest }) => rest;
+// 本人の契約ID。共有データの置き場がある時はサーバーの記録だけを使い、画面から送られた値は信用しない
+async function myStripeIds(b) {
+  if (!hasStore) return { customerId: str(b.customerId, 80), subscriptionId: str(b.subscriptionId, 80) };
+  await claimUser(b.userId, b.deviceKey);
+  const rec = await getSubscription(b.userId);
+  return { customerId: rec?.customerId, subscriptionId: rec?.subscriptionId };
+}
+
 const isAdmin = (b) => Boolean(process.env.ADMIN_KEY) && typeof b.adminKey === 'string' && safeEqual(b.adminKey, process.env.ADMIN_KEY);
 
 const actions = {
@@ -89,6 +76,18 @@ const actions = {
       pii: hasPiiKeys,
       admin: Boolean(process.env.ADMIN_KEY),
       googleClientId: process.env.GOOGLE_CLIENT_ID || '',
+      webhook: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
+    };
+  },
+
+  // ── 利用者の契約状態と今月の利用数（サーバーの記録が正。端末の表示はこれに合わせる） ──
+  async 'account.sync'(b) {
+    const user = await claimUser(b.userId, b.deviceKey);
+    const sub = await getSubscription(b.userId);
+    const plan = effectivePlan(sub);
+    return {
+      plan, used: await usage(b.userId), limit: PLANS[plan].limit === Infinity ? null : PLANS[plan].limit, createdAt: user.createdAt,
+      subscription: sub && { status: sub.status, planCode: sub.planCode, cancelAtPeriodEnd: sub.cancelAtPeriodEnd, currentPeriodEnd: sub.currentPeriodEnd, customerId: sub.customerId, subscriptionId: sub.subscriptionId },
     };
   },
 
@@ -105,6 +104,7 @@ const actions = {
     const item = parse(await kv('HGET', 'js:lib', str(b.id, 80)));
     need(item, 404, '公開された指導案が見つかりません');
     const owner = item.ownerHash === sha(b.deviceKey);
+    if (!owner && item.price > 0) await claimUser(b.userId, b.deviceKey); // 他人の利用者IDで購入済みを装えないように
     const bought = owner || item.price === 0 || (b.userId && (await kv('SISMEMBER', `js:buy:${str(b.userId, 80)}`, item.id)) === 1);
     need(bought, 402, 'PURCHASE_REQUIRED');
     return publicItem(item);
@@ -134,6 +134,7 @@ const actions = {
   async 'lib.claimFree'(b) {
     const item = parse(await kv('HGET', 'js:lib', str(b.id, 80)));
     need(item && item.price === 0, 400, '無料の指導案ではありません');
+    await claimUser(b.userId, b.deviceKey);
     await kv('SADD', `js:buy:${str(b.userId, 80)}`, item.id);
     return { ok: true };
   },
@@ -261,11 +262,22 @@ const actions = {
     const base = `${origin}/#`;
     if (b.kind === 'subscription') {
       const plan = PLANS[b.planCode];
-      need(plan, 400, 'プランが正しくありません');
+      need(plan && plan.amount > 0, 400, 'プランが正しくありません');
+      let customer = b.customerId || undefined;
+      if (hasStore) {
+        await claimUser(b.userId, b.deviceKey);
+        const current = await getSubscription(b.userId);
+        // 有効な契約が既にある時は二重に契約させず、プラン変更はお支払い管理画面で行う
+        need(effectivePlan(current) === 'free', 409, 'ALREADY_SUBSCRIBED');
+        customer = current?.customerId || undefined;
+      }
+      const meta = { type: 'subscription', planCode: b.planCode, userId: str(b.userId, 80) };
       const session = await stripe('POST', 'checkout/sessions', {
-        mode: 'subscription', customer: b.customerId || undefined,
+        mode: 'subscription', customer, client_reference_id: str(b.userId, 80),
         line_items: { 0: { quantity: 1, price_data: { currency: 'jpy', unit_amount: plan.amount, recurring: { interval: 'month' }, product_data: { name: `授業スタジオ ${plan.name}` } } } },
-        metadata: { type: 'subscription', planCode: b.planCode, userId: str(b.userId, 80) },
+        metadata: meta,
+        // 契約そのものにも利用者IDを付ける（毎月の更新・解約の通知から、どの利用者の契約か分かるように）
+        subscription_data: { metadata: meta },
         success_url: `${base}/subscription?session={CHECKOUT_SESSION_ID}`, cancel_url: `${base}/subscription`,
       });
       return { url: session.url };
@@ -273,6 +285,7 @@ const actions = {
     const item = parse(await kv('HGET', 'js:lib', str(b.id, 80)));
     need(item && item.price > 0, 400, '購入できる指導案が見つかりません');
     need(item.ownerHash !== sha(b.deviceKey), 400, '自分の指導案は購入できません');
+    await claimUser(b.userId, b.deviceKey);
     const session = await stripe('POST', 'checkout/sessions', {
       mode: 'payment',
       line_items: { 0: { quantity: 1, price_data: { currency: 'jpy', unit_amount: item.price, product_data: { name: `学習指導案: ${str(item.plan?.title, 80)}` } } } },
@@ -285,6 +298,10 @@ const actions = {
     const session = await stripe('GET', `checkout/sessions/${encodeURIComponent(str(b.sessionId, 120))}`);
     const paid = session.payment_status === 'paid';
     const meta = session.metadata || {};
+    if (paid && meta.type === 'subscription' && hasStore && session.subscription) {
+      // 通知（Webhook）より先に画面が戻ってきても、すぐ反映されるようにここでも記録する
+      await saveSubscription(await stripe('GET', `subscriptions/${encodeURIComponent(session.subscription)}`), { userId: meta.userId, planCode: meta.planCode });
+    }
     if (paid && meta.type === 'purchase' && hasStore) {
       const added = await kv('SADD', `js:buy:${meta.userId}`, meta.itemId);
       if (added === 1) {
@@ -295,18 +312,23 @@ const actions = {
     return { paid, type: meta.type, planCode: meta.planCode, itemId: meta.itemId, customerId: session.customer, subscriptionId: session.subscription, amount: session.amount_total };
   },
   async 'stripe.portal'(b, origin) {
-    need(b.customerId, 400, '契約情報が見つかりません');
-    const portal = await stripe('POST', 'billing_portal/sessions', { customer: str(b.customerId, 80), return_url: `${origin}/#/subscription` });
+    const { customerId } = await myStripeIds(b);
+    need(customerId, 400, '契約情報が見つかりません');
+    const portal = await stripe('POST', 'billing_portal/sessions', { customer: customerId, return_url: `${origin}/#/subscription` });
     return { url: portal.url };
   },
   async 'stripe.status'(b) {
-    need(b.subscriptionId, 400, '契約情報が見つかりません');
-    const sub = await stripe('GET', `subscriptions/${encodeURIComponent(str(b.subscriptionId, 80))}`);
-    return { status: sub.status, cancelAtPeriodEnd: sub.cancel_at_period_end, currentPeriodEnd: sub.current_period_end };
+    const { subscriptionId } = await myStripeIds(b);
+    need(subscriptionId, 400, '契約情報が見つかりません');
+    const sub = await stripe('GET', `subscriptions/${encodeURIComponent(subscriptionId)}`);
+    if (hasStore) await saveSubscription(sub, { userId: str(b.userId, 80) });
+    return { status: sub.status, cancelAtPeriodEnd: sub.cancel_at_period_end, currentPeriodEnd: sub.current_period_end || sub.items?.data?.[0]?.current_period_end };
   },
   async 'stripe.cancel'(b) {
-    need(b.subscriptionId, 400, '契約情報が見つかりません');
-    await stripe('POST', `subscriptions/${encodeURIComponent(str(b.subscriptionId, 80))}`, { cancel_at_period_end: true, metadata: { cancelReason: str(b.reason, 80), cancelComment: str(b.comment, 400) } });
+    const { subscriptionId } = await myStripeIds(b);
+    need(subscriptionId, 400, '契約情報が見つかりません');
+    const sub = await stripe('POST', `subscriptions/${encodeURIComponent(subscriptionId)}`, { cancel_at_period_end: true, metadata: { cancelReason: str(b.reason, 80), cancelComment: str(b.comment, 400) } });
+    if (hasStore) await saveSubscription(sub, { userId: str(b.userId, 80) });
     return { ok: true };
   },
 
