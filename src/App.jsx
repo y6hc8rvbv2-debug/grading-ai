@@ -136,9 +136,7 @@ function Shell({ path, query }) {
 
 const Brand = () => (
   <a href={href('/')} className="flex items-center gap-2.5 px-5 h-16 shrink-0">
-    <span className="grid place-items-center size-9 rounded-xl bg-brand text-on-brand shadow-sm">
-      <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round"><path d="M5 18V8l7-3 7 3v10l-7 3z" /><path d="M12 11v10" /></svg>
-    </span>
+    <img src="/brand/logo-mark.svg" alt="" className="size-10 rounded-xl shadow-sm" />
     <span className="leading-tight"><span className="block font-display font-bold text-[1.05rem]">授業スタジオ</span><span className="block text-[0.68rem] text-mute">Lesson Studio · with Claude</span></span>
   </a>
 );

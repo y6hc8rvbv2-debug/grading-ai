@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFF8EC"/><stop offset="1" stop-color="#FDEBD3"/></linearGradient>
+    <linearGradient id="l1" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FF6B5A"/><stop offset="1" stop-color="#FF8A4C"/></linearGradient>
+    <linearGradient id="l2" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FFB627"/><stop offset="1" stop-color="#FFCF3F"/></linearGradient>
+    <linearGradient id="l3" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#22C3A6"/><stop offset="1" stop-color="#14A38B"/></linearGradient>
+    <linearGradient id="r1" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3BA3F5"/><stop offset="1" stop-color="#2F7FE8"/></linearGradient>
+    <linearGradient id="r2" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7C5CF2"/><stop offset="1" stop-color="#9B5CF2"/></linearGradient>
+    <linearGradient id="r3" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#F25CA8"/><stop offset="1" stop-color="#E8457F"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- 表紙（本の底） -->
+  <path d="M256 356 C214 328 160 318 90 326 L90 382 C160 372 214 384 256 412 C298 384 352 372 422 382 L422 326 C352 318 298 328 256 356 Z" fill="#0F5F59"/>
+  <!-- 左のページ：導入・展開・まとめ の3色の帯 -->
+  <g>
+    <path d="M248 176 C210 150 160 142 104 150 L104 214 C160 206 210 214 248 240 Z" fill="url(#l1)"/>
+    <path d="M248 252 C210 226 160 218 104 226 L104 290 C160 282 210 290 248 316 Z" fill="url(#l2)"/>
+    <path d="M248 328 C210 302 160 294 104 302 L104 366 C160 358 210 366 248 392 Z" fill="url(#l3)"/>
+  </g>
+  <!-- 右のページ -->
+  <g>
+    <path d="M264 176 C302 150 352 142 408 150 L408 214 C352 206 302 214 264 240 Z" fill="url(#r1)"/>
+    <path d="M264 252 C302 226 352 218 408 226 L408 290 C352 282 302 290 264 316 Z" fill="url(#r2)"/>
+    <path d="M264 328 C302 302 352 294 408 302 L408 366 C352 358 302 366 264 392 Z" fill="url(#r3)"/>
+  </g>
+  <!-- ひらめきの星（AI） -->
+  <path d="M256 40 C267 86 282 100 328 110 C282 120 267 134 256 180 C245 134 230 120 184 110 C230 100 245 86 256 40 Z" fill="#FFC531"/>
+  <path d="M256 78 C261 98 268 104 288 110 C268 116 261 122 256 142 C251 122 244 116 224 110 C244 104 251 98 256 78 Z" fill="#FFE07A"/>
+  <circle cx="338" cy="70" r="12" fill="#22C3A6"/>
+  <circle cx="176" cy="78" r="9" fill="#FF6B5A"/>
+</svg>

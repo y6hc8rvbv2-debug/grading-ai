@@ -17,7 +17,7 @@ export default function Shared({ data }) {
   const save = () => { const { id, createdAt, updatedAt, ...rest } = plan; const p = db.add('plans', { ...rest, tags: [...(rest.tags || []), '共有'], bookmarked: false }); toast('自分の指導案に保存しました'); navigate(`/plans/${p.id}`); };
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-      <div className="flex items-center gap-2 mb-6 no-print"><a href={href('/')} className="font-display font-bold">授業スタジオ</a><Badge>共有された指導案</Badge></div>
+      <div className="flex items-center gap-2 mb-6 no-print"><a href={href('/')} className="flex items-center gap-2 font-display font-bold"><img src="/brand/logo-mark.svg" alt="" className="size-8 rounded-lg" />授業スタジオ</a><Badge>共有された指導案</Badge></div>
       <div className="flex flex-col md:flex-row md:items-end gap-4 mb-6">
         <div className="flex-1"><div className="flex gap-1.5 mb-2"><Badge tone="brand">{plan.subject}</Badge><Badge>{[schoolLabel(plan.schoolType), plan.grade && `${plan.grade}年`].filter(Boolean).join(' ')}</Badge></div><h1 className="text-3xl font-bold">{plan.title}</h1></div>
         <div className="flex flex-wrap gap-2 no-print">

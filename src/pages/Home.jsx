@@ -30,12 +30,13 @@ export function Welcome() {
     <div className="min-h-screen">
       <div className="max-w-6xl mx-auto px-5 sm:px-8">
         <header className="h-16 flex items-center gap-2.5">
-          <span className="grid place-items-center size-9 rounded-xl bg-brand text-on-brand"><svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round"><path d="M5 18V8l7-3 7 3v10l-7 3z" /><path d="M12 11v10" /></svg></span>
+          <img src="/brand/logo-mark.svg" alt="" className="size-10 rounded-xl shadow-sm" />
           <span className="font-display font-bold text-lg">授業スタジオ</span>
           <Badge tone="brand" className="ml-1">with Claude</Badge>
         </header>
         <section className="grid lg:grid-cols-[1.15fr_1fr] gap-10 items-center py-10 sm:py-16">
           <div>
+            <img src="/brand/logo-mark.svg" alt="授業スタジオのロゴ" className="size-20 rounded-[22px] shadow-lg shadow-black/10 mb-5" />
             <p className="text-brand-strong font-bold text-sm mb-3">先生のための授業づくりアプリ</p>
             <h1 className="text-4xl sm:text-5xl font-bold leading-[1.2] tracking-tight">指導案づくりから、<br />授業の振り返りまで<br /><span className="text-brand">ひとつの場所で。</span></h1>
             <p className="mt-5 text-mute leading-relaxed max-w-xl">条件を選ぶだけで、学習指導要領に沿った学習指導案をAI（Claude）が作成。授業の記録・評価・改善までを一つのサイクルとして支えます。</p>

@@ -22,7 +22,7 @@ export default function StudentUpload({ code }) {
   return (
     <div className="min-h-screen px-4 py-8 flex justify-center">
       <div className="w-full max-w-md">
-        <div className="text-center mb-6"><span className="inline-grid place-items-center size-12 rounded-2xl bg-brand text-on-brand mb-3"><Camera className="size-6" /></span><h1 className="text-2xl font-bold">ノートを提出</h1>{info && <p className="text-mute mt-1">{[info.grade && `${info.grade}年`, info.subject, info.unit].filter(Boolean).join('・')}</p>}</div>
+        <div className="text-center mb-6"><img src="/brand/logo-mark.svg" alt="授業スタジオ" className="inline-block size-14 rounded-2xl shadow mb-3" /><h1 className="text-2xl font-bold">ノートを提出</h1>{info && <p className="text-mute mt-1">{[info.grade && `${info.grade}年`, info.subject, info.unit].filter(Boolean).join('・')}</p>}</div>
         {!info && !err && <div className="text-center text-mute"><Loader2 className="size-6 animate-spin mx-auto" /></div>}
         {err && <Notice tone="bad" className="mb-4">{err}</Notice>}
         {done ? (
