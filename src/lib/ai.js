@@ -1,7 +1,9 @@
 // AI（Claude）の呼び出し。サーバーに鍵が設定されていない時は、画面確認用の「見本」を返す。
 import { getConfig, friendly } from './api.js';
-import { getDisplay, getState } from './store.js';
+import { getDisplay, getState, db } from './store.js';
+import { requestAiConsent } from '../ui.jsx';
 import { demo } from './demo.js';
+import { apiUrl } from './platform.js';
 
 const TEXT_TASKS = new Set(['material', 'assistant']);
 
@@ -24,10 +26,15 @@ async function runDemo(task, payload, onText) {
 }
 
 export async function runAi(task, payload, { onText, signal } = {}) {
-  if (getConfig().loaded && !getConfig().ai) return runDemo(task, payload, onText);
+  if (getConfig().loaded && !getConfig().ai) return runDemo(task, payload, onText); // 見本はどこにも送信しない
+  // 初めてAIを使う時に、送信先と送る内容を示して同意を得る
+  if (!getState().profile?.aiConsentAt) {
+    if (!(await requestAiConsent())) throw new Error('AI機能を使うには、AIへのデータ送信への同意が必要です（「設定 → AI接続」からも同意できます）。');
+    db.set('profile', { ...getState().profile, aiConsentAt: new Date().toISOString() });
+  }
   let r;
   try {
-    r = await fetch('/api/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, signal, body: JSON.stringify({ task, payload, accessCode: getDisplay().accessCode, userId: getState().profile?.id, deviceKey: getState().profile?.deviceKey }) });
+    r = await fetch(apiUrl('/api/ai'), { method: 'POST', headers: { 'content-type': 'application/json' }, signal, body: JSON.stringify({ task, payload, accessCode: getDisplay().accessCode, userId: getState().profile?.id, deviceKey: getState().profile?.deviceKey }) });
   } catch (e) {
     if (e.name === 'AbortError') throw e;
     throw new Error('サーバーに接続できませんでした。通信環境をご確認ください。');

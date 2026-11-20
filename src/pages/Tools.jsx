@@ -160,7 +160,7 @@ export function TimerPage({ query }) {
           {b && <><Badge tone="brand" className="mb-3">{idx + 1} / {blocks.length}・{b.time}</Badge><h2 className="text-2xl sm:text-3xl font-bold max-w-2xl">{b.activity}</h2></>}
           <div className={cx('font-bold tabular-nums leading-none my-8 text-[clamp(4.5rem,16vw,10rem)]', left === 0 ? 'text-bad' : left <= 60 ? 'text-warn' : 'text-ink')}>{mm}:{ss}</div>
           <div className="w-full max-w-xl h-3 rounded-full bg-sunken overflow-hidden mb-8"><div className="h-full bg-brand transition-all duration-1000" style={{ width: `${ratio * 100}%` }} /></div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap justify-center gap-3">
             <Button size="lg" icon={run ? Pause : Play} onClick={() => setRun(!run)}>{run ? '一時停止' : left === 0 ? '終了' : 'スタート'}</Button>
             <Button size="lg" variant="outline" icon={RotateCcw} onClick={() => { setLeft(total); setRun(false); }}>リセット</Button>
             {blocks.length > 0 && <Button size="lg" variant="soft" icon={SkipForward} disabled={idx >= blocks.length - 1} onClick={() => setIdx(idx + 1)}>次へ</Button>}

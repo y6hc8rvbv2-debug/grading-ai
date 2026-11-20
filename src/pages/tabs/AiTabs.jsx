@@ -56,7 +56,7 @@ export function MaterialsTab({ plan }) {
         {!busy && current && (
           <Card>
             <div className="flex flex-wrap items-center gap-2 px-5 py-3 border-b border-line">
-              <h3 className="font-bold flex-1">{kindName(current.kind)}</h3>
+              <h3 className="font-bold flex-1 min-w-[9rem]">{kindName(current.kind)}</h3>
               <CopyButton text={current.content} />
               <Button size="sm" variant="outline" icon={Printer} onClick={() => { try { printHtml(kindName(current.kind), mdToHtml(current.content)); } catch (e) { toast(e.message, 'bad'); } }}>印刷</Button>
               <Button size="sm" variant="outline" icon={Download} onClick={() => download(new Blob([current.content], { type: 'text/markdown' }), `${safeName(plan.title)}_${kindName(current.kind)}.md`)}>保存</Button>

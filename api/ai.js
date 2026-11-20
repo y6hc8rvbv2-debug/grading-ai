@@ -2,7 +2,7 @@
 // 鍵（ANTHROPIC_API_KEY）はサーバーの環境変数にだけ置き、画面側には渡さない。
 import Anthropic from '@anthropic-ai/sdk';
 import { buildRequest } from './_prompts.js';
-import { hasStore, claimUser, takeQuota, refundQuota, HttpError } from './_store.js';
+import { hasStore, claimUser, takeQuota, refundQuota, HttpError, corsHeaders } from './_store.js';
 
 const MODEL = process.env.CLAUDE_MODEL || 'claude-opus-5-5';
 const MAX_BODY = 3_800_000; // Vercel の受信上限（約4MB）より少し小さく
@@ -21,6 +21,14 @@ function tooMany(ip) {
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
 
 async function handler(request) {
+  const cors = corsHeaders(request.headers.get('origin'));
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+  const res = await respond(request);
+  for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+  return res;
+}
+
+async function respond(request) {
   if (request.method !== 'POST') return json(405, { error: 'POST のみ対応しています' });
   if (!process.env.ANTHROPIC_API_KEY) return json(503, { error: 'AI_NOT_CONFIGURED' });
 

@@ -11,3 +11,5 @@ security-guard/CLAUDE.md
 
 # iPhoneアプリ（Xcode プロジェクト）は Web の公開には不要
 ios
+dist-ios
+mobile

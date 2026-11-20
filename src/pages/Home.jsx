@@ -4,6 +4,7 @@ import { useStore, db, uid, setDisplay } from '../lib/store.js';
 import { href, navigate } from '../lib/router.js';
 import { useConfig } from '../lib/api.js';
 import { quota } from '../lib/quota.js';
+import { isIOSApp } from '../lib/platform.js';
 import { fmtDate, schoolLabel, avg } from '../lib/util.js';
 import { Button, Card, CardHead, Input, Badge, Notice, Stat, Empty } from '../ui.jsx';
 
@@ -167,7 +168,7 @@ export function Dashboard() {
           <Card className="p-5">
             <h3 className="font-bold mb-3 flex items-center gap-2"><Keyboard className="size-4" />便利な使い方</h3>
             <div className="grid grid-cols-2 gap-2 text-sm">
-              <QuickLink icon={Library} to="/library" label="ライブラリ" />
+              {isIOSApp() ? <QuickLink icon={CalendarDays} to="/calendar" label="カレンダー" /> : <QuickLink icon={Library} to="/library" label="ライブラリ" />}
               <QuickLink icon={BookOpen} to="/papers" label="教育論文" />
               <QuickLink icon={Timer} to="/timer" label="授業タイマー" />
               <QuickLink icon={Users} to="/roster" label="名簿" />

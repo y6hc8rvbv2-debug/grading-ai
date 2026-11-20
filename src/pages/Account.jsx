@@ -8,7 +8,7 @@ import { quota } from '../lib/quota.js';
 import { syncAccount } from '../lib/account.js';
 import { isIOSApp, loadProducts, buy as appleBuy, restore as appleRestore, manage as appleManage, productFor } from '../lib/iap.js';
 import { download, fmtDate, fmtDateTime, cx } from '../lib/util.js';
-import { Button, Card, CardHead, Input, Textarea, Select, Field, PageHeader, Notice, Badge, Tabs, Modal, toast, confirmDialog, Stat, Empty } from '../ui.jsx';
+import { AiConsentText, Button, Card, CardHead, Input, Textarea, Select, Field, PageHeader, Notice, Badge, Tabs, Modal, toast, confirmDialog, Stat, Empty } from '../ui.jsx';
 
 const ACCENTS = [['teal', '#0f766e', 'ティール'], ['indigo', '#4338ca', 'インディゴ'], ['coral', '#c2472a', 'コーラル'], ['violet', '#7c3aed', 'バイオレット'], ['navy', '#1e4b8f', 'ネイビー']];
 
@@ -104,6 +104,7 @@ function DataTab() {
 function AiTab() {
   const cfg = useConfig(); const d = useDisplay();
   const [code, setCode] = useState(d.accessCode);
+  const profile = useStore((st) => st.profile);
   return (
     <div className="grid lg:grid-cols-2 gap-5 items-start">
       <Card><CardHead icon={Cpu} title="AI（Claude）の接続状態" />
@@ -111,6 +112,14 @@ function AiTab() {
           <div className="flex items-center gap-2"><Badge tone={cfg.ai ? 'good' : 'warn'}>{cfg.ai ? '接続済み' : '未接続（見本モード）'}</Badge>{cfg.ai && <span className="text-sm text-mute">モデル：{cfg.model}</span>}</div>
           {!cfg.ai && <Notice tone="warn">サーバー（Vercel）の環境変数に <code>ANTHROPIC_API_KEY</code> を設定すると、Claude による本番の生成に切り替わります。設定するまでは、入力内容を当てはめた見本を表示します。</Notice>}
           <p className="text-sm text-mute leading-relaxed">AIに送るのは、作業に必要な情報だけです。児童生徒の名前は仮名に置き換え、指導者名・学校名は送りません。APIキーはサーバーにだけ置かれ、この画面からは見えません。</p>
+        </div>
+      </Card>
+      <Card><CardHead icon={Shield} title="AIへのデータ送信の同意" desc={profile?.aiConsentAt ? `同意済み（${fmtDateTime(profile.aiConsentAt)}）` : 'まだ同意していません'} />
+        <div className="px-5 pb-5 space-y-3">
+          <AiConsentText />
+          {profile?.aiConsentAt
+            ? <Button variant="danger" onClick={() => { db.set('profile', { ...profile, aiConsentAt: null }); toast('同意を取り消しました。AI機能は次に使う時に改めて確認します'); }}>同意を取り消す</Button>
+            : <Button onClick={() => { db.set('profile', { ...profile, aiConsentAt: new Date().toISOString() }); toast('同意しました'); }}>同意する</Button>}
         </div>
       </Card>
       {cfg.accessCode && <Card><CardHead icon={KeyRound} title="アクセスコード" desc="管理者が利用者を限定しています" />

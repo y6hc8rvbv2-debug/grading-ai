@@ -8,7 +8,11 @@ export const avg = (arr) => (arr.length ? Math.round(arr.reduce((a, b) => a + b,
 export const clamp = (n, lo = 0, hi = 100) => Math.min(hi, Math.max(lo, Math.round(Number(n) || 0)));
 export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+import { isNative, shareFile } from './platform.js';
+
 export function download(blob, filename) {
+  // アプリでは「共有」メニューから保存・送信する（アプリの画面部品は通常のダウンロードに対応していないため）
+  if (isNative()) { shareFile(blob, filename).catch((e) => alert(e.message)); return; }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename;

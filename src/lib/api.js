@@ -1,15 +1,18 @@
 // サーバー（/api/app）との通信。設定されていない機能は、呼び出し側が「この端末だけ」の動作に切り替える。
 import { useSyncExternalStore } from 'react';
 import { getState } from './store.js';
+import { apiUrl, isNative } from './platform.js';
 
 let config = { loaded: false, ai: false, store: false, stripe: false, webhook: false, pii: false, admin: false, accessCode: false, googleClientId: '', model: '' };
 const listeners = new Set();
 
 export async function loadConfig() {
   try {
-    const r = await fetch('/api/app?action=config');
+    const r = await fetch(apiUrl('/api/app?action=config'));
     if (r.ok) config = { ...config, ...(await r.json()) };
   } catch { /* サーバーに届かない時は、すべて未設定として端末内だけで動かす */ }
+  // Google の認証画面はアプリの中では使えない（Web 版でだけ使う）
+  if (isNative()) config.googleClientId = '';
   config = { ...config, loaded: true };
   listeners.forEach((l) => l());
 }
@@ -20,7 +23,7 @@ export function useConfig() {
 
 export async function api(action, body = {}) {
   const profile = getState().profile || {};
-  const r = await fetch('/api/app', {
+  const r = await fetch(apiUrl('/api/app'), {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ action, userId: profile.id, deviceKey: profile.deviceKey, ...body }),
   });

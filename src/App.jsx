@@ -9,7 +9,8 @@ import { useRoute, navigate, match, href } from './lib/router.js';
 import { useConfig } from './lib/api.js';
 import { useT } from './lib/i18n.js';
 import { cx } from './lib/util.js';
-import { Toaster, ConfirmHost, Badge } from './ui.jsx';
+import { isIOSApp } from './lib/platform.js';
+import { Toaster, ConfirmHost, Badge, AiConsentHost } from './ui.jsx';
 
 import { Welcome, Dashboard } from './pages/Home.jsx';
 import CreatePlan from './pages/Create.jsx';
@@ -33,6 +34,10 @@ const NAV = [
   ['みんなで', [['/testimonials', '利用者の声', Star], ['/suggestions', '機能提案', Lightbulb]]],
   ['サポート', [['/help', 'ヘルプ', LifeBuoy], ['/subscription', 'プラン', CreditCard], ['/settings', '設定', SettingsIcon]]],
 ];
+// iPhoneアプリでは、他の利用者の投稿を表示する機能（ライブラリ・利用者の声）を出さない。
+// App Store の審査基準 1.2（投稿の通報・ブロック・監視の仕組み）に対応するまでは Web 版だけで提供する
+const WEB_ONLY = new Set(['/library', '/testimonials']);
+const NAV_ITEMS = isIOSApp() ? NAV.map(([g, items]) => [g, items.filter(([to]) => !WEB_ONLY.has(to))]) : NAV;
 
 const ROUTES = [
   ['/', Dashboard], ['/create', CreatePlan], ['/plans', PlanList], ['/plans/:id', PlanDetail], ['/plans/:id/edit', PlanEdit],
@@ -80,14 +85,14 @@ function Shell({ path, query }) {
   let page = null;
   for (const [pattern, C] of ROUTES) {
     const params = match(pattern, path);
-    if (params) { page = <C {...params} query={query} />; break; }
+    if (params) { page = isIOSApp() && WEB_ONLY.has(pattern) ? <WebOnly /> : <C {...params} query={query} />; break; }
   }
   if (!page) page = <div className="text-center py-20"><p className="text-lg font-bold">ページが見つかりません</p><a className="text-brand underline mt-3 inline-block" href={href('/')}>ダッシュボードへ戻る</a></div>;
   const active = (to) => (to === '/' ? path === '/' : path === to || path.startsWith(`${to}/`));
 
   const nav = (
     <nav className="flex flex-col gap-5 px-3 py-4">
-      {NAV.map(([group, items]) => (
+      {NAV_ITEMS.map(([group, items]) => (
         <div key={group}>
           <div className="px-3 mb-1 text-[0.7rem] font-bold tracking-wider text-mute/80 uppercase">{t(group)}</div>
           {items.map(([to, label, Icon]) => (
@@ -129,7 +134,7 @@ function Shell({ path, query }) {
         </footer>
       </div>
       <Palette open={palette} onClose={() => setPalette(false)} />
-      <Toaster /><ConfirmHost />
+      <Toaster /><ConfirmHost /><AiConsentHost />
     </div>
   );
 }
@@ -182,7 +187,7 @@ function Palette({ open, onClose }) {
   useEffect(() => { if (open) { setQ(''); setI(0); setTimeout(() => ref.current?.focus(), 10); } }, [open]);
   const items = useMemo(() => {
     const k = q.trim().toLowerCase();
-    const pages = NAV.flatMap(([, list]) => list).map(([to, label, Icon]) => ({ kind: '画面', label: t(label), icon: Icon, run: () => navigate(to) }));
+    const pages = NAV_ITEMS.flatMap(([, list]) => list).map(([to, label, Icon]) => ({ kind: '画面', label: t(label), icon: Icon, run: () => navigate(to) }));
     const actions = [
       { kind: '操作', label: 'ダークモードに切り替え', icon: Moon, run: () => setDisplay({ theme: 'dark' }) },
       { kind: '操作', label: 'ライトモードに切り替え', icon: Sun, run: () => setDisplay({ theme: 'light' }) },
@@ -227,3 +232,7 @@ function Palette({ open, onClose }) {
     </div>
   );
 }
+
+const WebOnly = () => (
+  <div className="text-center py-20 px-6"><p className="text-lg font-bold">この機能はWeb版でご利用いただけます</p><p className="text-sm text-mute mt-2">他の先生と共有する機能は、Web版の授業スタジオで提供しています。</p><a className="text-brand underline mt-4 inline-block" href={href('/')}>ダッシュボードへ戻る</a></div>
+);

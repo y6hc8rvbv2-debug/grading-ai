@@ -7,6 +7,7 @@ import { api, useConfig } from '../../lib/api.js';
 import { href } from '../../lib/router.js';
 import { shrinkImage, makeAliases, planForAi, fmtDateTime, avg, cx } from '../../lib/util.js';
 import { SPECIAL_NEEDS_GUIDES } from '../../lib/content.js';
+import { publicUrl } from '../../lib/platform.js';
 import { Button, Card, CardHead, Field, Input, Select, Textarea, AiProgress, Notice, toast, confirmDialog, Badge, Empty, ScoreRing, Section, BulletList, DemoNote, Modal, Bar } from '../../ui.jsx';
 import { useDictation } from './RecordTabs.jsx';
 
@@ -138,7 +139,7 @@ function UploadSession({ open, onClose, plan }) {
   const [busy, setBusy] = useState(false);
   const [got, setGot] = useState(0);
   const timer = useRef(null);
-  const url = session ? `${location.origin}${location.pathname}#/upload/${session.code}` : '';
+  const url = session ? publicUrl(`/upload/${session.code}`) : '';
 
   const pull = async () => {
     if (!session) return;

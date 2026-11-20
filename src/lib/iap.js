@@ -1,11 +1,10 @@
 // iPhoneアプリ内課金（Apple）。アプリとして開いている時だけ使う。Web では Stripe を使う。
 // 購入・復元した取引は、Apple の署名付きデータのままサーバーへ送り、サーバーで本物か確かめてからプランに反映する。
-import { Capacitor } from '@capacitor/core';
 import { api, getConfig } from './api.js';
 import { getState } from './store.js';
 import { syncAccount } from './account.js';
 
-export const isIOSApp = () => Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
+export { isIOSApp } from './platform.js';
 
 const plugin = async () => (await import('@capgo/native-purchases'));
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

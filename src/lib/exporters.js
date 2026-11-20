@@ -1,5 +1,6 @@
 // 指導案の書き出し（すべてブラウザの中で作るので、サーバーに内容を送らない）
 import { download, esc, fmtDate, schoolLabel } from './util.js';
+import { isNative } from './platform.js';
 
 const safeName = (s) => String(s || '指導案').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60);
 const list = (v) => (Array.isArray(v) ? v.join('、') : v || '');
@@ -52,11 +53,14 @@ ${forPrint ? '<script>window.onload=()=>setTimeout(()=>print(),300)</script>' : 
 }
 
 export function printPlan(p) {
+  // アプリでは印刷用のページを共有メニューで開く（共有メニューの「プリント」から印刷・PDF保存できる）
+  if (isNative()) { download(new Blob([planToHtml(p)], { type: 'text/html;charset=utf-8' }), `${safeName(p.title)}.html`); return; }
   const w = window.open('', '_blank');
   if (!w) throw new Error('ポップアップがブロックされました。ブラウザの設定で許可してください。');
   w.document.write(planToHtml(p, { forPrint: true })); w.document.close();
 }
 export function printHtml(title, bodyHtml) {
+  if (isNative()) { download(new Blob([`<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>${esc(title)}</title></head><body>${bodyHtml}</body></html>`], { type: 'text/html;charset=utf-8' }), `${safeName(title)}.html`); return; }
   const w = window.open('', '_blank');
   if (!w) throw new Error('ポップアップがブロックされました。');
   w.document.write(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>${esc(title)}</title><style>body{font-family:"Hiragino Sans","Yu Gothic",sans-serif;max-width:800px;margin:24px auto;padding:0 20px;line-height:1.8}table{border-collapse:collapse;width:100%}th,td{border:1px solid #888;padding:6px}th{background:#f1f1f1}</style></head><body>${bodyHtml}<script>window.onload=()=>setTimeout(()=>print(),300)</script></body></html>`);

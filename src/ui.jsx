@@ -232,3 +232,34 @@ export const Stat = ({ label, value, icon: Icon, hint }) => (
     {hint && <div className="text-xs text-mute mt-0.5">{hint}</div>}
   </Card>
 );
+
+// ── AIへのデータ送信の同意（App Store 審査基準 5.1.2：外部のAIに個人に関わるデータを送る前に、送信先と内容を示して許可を得る） ──
+let consentState = null; const csl = new Set();
+export function requestAiConsent() {
+  return new Promise((resolve) => { consentState = { resolve }; csl.forEach((l) => l()); });
+}
+export function AiConsentHost() {
+  const st = useSyncExternalStore((l) => { csl.add(l); return () => csl.delete(l); }, () => consentState);
+  const close = (v) => { st?.resolve(v); consentState = null; csl.forEach((l) => l()); };
+  return (
+    <Modal open={Boolean(st)} onClose={() => close(false)} title="AI機能の利用について"
+      footer={<><Button variant="outline" onClick={() => close(false)}>同意しない</Button><Button onClick={() => close(true)}>同意してAIを使う</Button></>}>
+      <AiConsentText />
+    </Modal>
+  );
+}
+export function AiConsentText() {
+  return (
+    <div className="text-sm leading-relaxed space-y-3">
+      <p>指導案の作成・分析・教材づくりなどのAI機能を使うと、次の情報が<strong>外部のAIサービスに送信</strong>されます。</p>
+      <dl className="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-2 rounded-xl bg-sunken p-4">
+        <dt className="font-bold">送信先</dt><dd>Anthropic, PBC（米国）のAI「Claude」</dd>
+        <dt className="font-bold">送る情報</dt><dd>授業の条件・指導案の本文、教材やAI相談で入力した文章、ノートや教室の写真、協議会の文字起こしなど、使う機能に必要な情報</dd>
+        <dt className="font-bold">送らない情報</dt><dd>指導者名・学校名は送りません。名簿の児童生徒の名前は「生徒1」などの仮名に置き換えてから送ります</dd>
+        <dt className="font-bold">目的</dt><dd>指導案・分析結果・教材を作るためだけに使います</dd>
+      </dl>
+      <p className="text-mute">写真や自由に入力した文章の中の名前・顔などは自動では置き換えられません。送る前にご確認ください。Anthropic社の商用サービスの規約では、API経由で受け取ったデータは原則としてAIの学習に使われません。</p>
+      <p className="text-mute">同意は「設定 → AI接続」でいつでも取り消せます。取り消すとAI機能は使えなくなりますが、それ以外の機能はそのまま使えます。</p>
+    </div>
+  );
+}

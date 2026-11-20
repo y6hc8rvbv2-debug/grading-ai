@@ -127,3 +127,10 @@ export async function takeQuota(userId, user) {
 export async function refundQuota(userId) {
   await kv('DECR', `js:use:${userId}:${monthKey()}`);
 }
+
+// iPhoneアプリ（Capacitor）の画面からの通信だけを、別の住所からの通信として許可する
+export const APP_ORIGINS = new Set(['capacitor://localhost', 'ionic://localhost', 'https://localhost']);
+export function corsHeaders(origin) {
+  if (!APP_ORIGINS.has(origin)) return {};
+  return { 'access-control-allow-origin': origin, 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type', 'access-control-max-age': '600', vary: 'Origin' };
+}

@@ -12,6 +12,7 @@ import { addToGoogleCalendar, uploadToDrive } from '../lib/google.js';
 import { download, fmtDate, fmtDateTime, schoolLabel } from '../lib/util.js';
 import { Button, Card, Badge, Tabs, Modal, Field, Input, Textarea, toast, confirmDialog, Notice, CopyButton, Empty } from '../ui.jsx';
 import { PlanMeta, PlanBody } from './PlanView.jsx';
+import { publicUrl, isIOSApp } from '../lib/platform.js';
 import { MaterialsTab, AssistantTab } from './tabs/AiTabs.jsx';
 import { RecordTab, ReflectionTab } from './tabs/RecordTabs.jsx';
 import { NotesTab, ObserveTab, SpecialTab } from './tabs/StudentTabs.jsx';
@@ -93,7 +94,7 @@ function PlanTab({ plan: p }) {
           <h3 className="font-bold text-sm mb-1">便利な操作</h3>
           <Button variant="outline" className="w-full justify-start" icon={Share2} onClick={() => setShare(true)}>共有リンクをつくる</Button>
           <Button variant="outline" className="w-full justify-start" icon={CalendarPlus} onClick={() => setCal(true)}>カレンダーに登録</Button>
-          <Button variant="outline" className="w-full justify-start" icon={Library} onClick={() => setPub(true)}>ライブラリに公開</Button>
+          {!isIOSApp() && <Button variant="outline" className="w-full justify-start" icon={Library} onClick={() => setPub(true)}>ライブラリに公開</Button>}
           <Button variant="outline" className="w-full justify-start" icon={Copy} onClick={() => navigate(`/create?copy=${p.id}`)}>条件を複製して新規作成</Button>
           <Button variant="ghost" className="w-full justify-start text-bad" icon={Trash2} onClick={remove}>削除</Button>
         </Card>
@@ -172,7 +173,7 @@ function ShareModal({ open, onClose, p }) {
   if (!open) return null;
   const { instructorName, schoolName, schoolEnvironment, studentCharacteristics, specialNeedsInfo, comments, reactions, ...pub } = p;
   const d = LZString.compressToEncodedURIComponent(JSON.stringify(pub));
-  const url = `${location.origin}${location.pathname}#/shared?d=${d}`;
+  const url = publicUrl(`/shared?d=${d}`);
   return (
     <Modal open={open} onClose={onClose} title="共有リンク">
       <p className="text-sm text-mute mb-3">指導案の内容をリンクに埋め込みます（サーバーには保存しません）。指導者名・学校名・児童生徒の特徴などは含みません。</p>

@@ -5,7 +5,7 @@
 //   個人情報の暗号化 : PII_KEY_V1 / PII_INDEX_KEY（PII Shield）
 //   管理者          : ADMIN_KEY
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import { hasStore, kv, parse, HttpError, need, PLANS, claimUser, getSubscription, saveSubscription, entitlement, usage, monthKey } from './_store.js';
+import { corsHeaders, hasStore, kv, parse, HttpError, need, PLANS, claimUser, getSubscription, saveSubscription, entitlement, usage, monthKey } from './_store.js';
 import { hasApple, APPLE_PRODUCTS, verifyTransaction, saveAppleTransaction } from './_apple.js';
 
 const hasStripe = Boolean(process.env.STRIPE_SECRET_KEY);
@@ -400,6 +400,8 @@ const actions = {
 };
 
 export default async function handler(req, res) {
+  for (const [k, v] of Object.entries(corsHeaders(req.headers.origin))) res.setHeader(k, v);
+  if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
   try {
     let body = req.body;
     if (typeof body === 'string') body = parse(body) || {};
