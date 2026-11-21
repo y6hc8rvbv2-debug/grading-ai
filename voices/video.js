@@ -218,20 +218,94 @@
     slides.forEach((_, i) => { ctx.fillStyle = i <= idx ? '#ffffff' : 'rgba(255,255,255,.35)'; ctx.beginPath(); ctx.arc(W - m - (slides.length - 1 - i) * 36 * u - 8 * u, by, 9 * u, 0, Math.PI * 2); ctx.fill(); });
   }
 
+  // ---------- 音（BGM と効果音）----------
+  // 曲はその場で合成するオリジナル（外部の音源を使わないので著作権の心配がない）。
+  // 明るすぎず落ち着いた、ニュース解説向けの曲調（100BPM・C→G→Am→F の繰り返し）。
+  const hz = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
+  const CHORDS = [[48, 52, 55, 60], [43, 50, 55, 59], [45, 52, 57, 60], [41, 48, 53, 57]]; // C, G, Am, F（最初が低音）
+  function makeAudio(total, slideCount) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    const ac = new AC();
+    const dest = ac.createMediaStreamDestination();
+    // 音量の調整：まとめて圧縮 → 持ち上げ → 音割れ防止（スマホでも聞こえる大きさにする）
+    const comp = ac.createDynamicsCompressor(); comp.threshold.value = -20; comp.ratio.value = 4; comp.attack.value = 0.01; comp.release.value = 0.2;
+    const makeup = ac.createGain(); makeup.gain.value = 2.6;
+    const limit = ac.createDynamicsCompressor(); limit.threshold.value = -2; limit.knee.value = 0; limit.ratio.value = 20; limit.attack.value = 0.002; limit.release.value = 0.08;
+    const master = ac.createGain(); master.gain.value = 0;
+    master.connect(comp); comp.connect(makeup); makeup.connect(limit); limit.connect(dest);
+    // 真っ白な雑音（ハイハット用）
+    const noise = ac.createBuffer(1, ac.sampleRate * 0.2, ac.sampleRate);
+    const nd = noise.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+
+    function tone(t, freq, dur, { type = 'triangle', vol = 0.1, attack = 0.01, cutoff = 2400, out = master } = {}) {
+      const o = ac.createOscillator(), g = ac.createGain(), f = ac.createBiquadFilter();
+      o.type = type; o.frequency.value = freq; f.type = 'lowpass'; f.frequency.value = cutoff;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + attack);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(f); f.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 0.05);
+    }
+    function kick(t) {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.frequency.setValueAtTime(130, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.16);
+      g.gain.setValueAtTime(0.28, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+      o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.3);
+    }
+    function hat(t, vol) {
+      const src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+      src.buffer = noise; f.type = 'highpass'; f.frequency.value = 7000;
+      g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+      src.connect(f); f.connect(g); g.connect(master); src.start(t); src.stop(t + 0.08);
+    }
+    function chime(t) { // 場面が変わる合図（やわらかい鈴の音）
+      tone(t, hz(84), 0.9, { type: 'sine', vol: 0.1, attack: 0.005, cutoff: 8000 });
+      tone(t + 0.07, hz(91), 0.8, { type: 'sine', vol: 0.075, attack: 0.005, cutoff: 8000 });
+    }
+    function schedule(t0) {
+      const beat = 0.6, bar = beat * 4, end = t0 + total;
+      master.gain.setValueAtTime(0, t0);
+      master.gain.linearRampToValueAtTime(0.75, t0 + 1.2); // はじめはゆっくり大きく
+      master.gain.setValueAtTime(0.75, end - 2.2);
+      master.gain.linearRampToValueAtTime(0, end - 0.1); // 終わりはゆっくり小さく
+      for (let b = 0; t0 + b * bar < end - 0.5; b++) {
+        const tb = t0 + b * bar, ch = CHORDS[b % 4];
+        const last = tb + bar > end - 2.5;
+        ch.slice(1).forEach((n) => tone(tb, hz(n + 12), last ? 2.6 : bar + 0.2, { vol: 0.04, attack: 0.35, cutoff: 1800 })); // 和音（土台）
+        [0, 2].forEach((k) => tone(tb + k * beat, hz(ch[0]), beat * 1.6, { vol: 0.12, attack: 0.01, cutoff: 700 })); // 低音（スマホでも聞こえる高さ）
+        if (b > 0 && !last) {
+          [0, 2].forEach((k) => kick(tb + k * beat));
+          for (let k = 0; k < 8; k++) hat(tb + k * beat / 2, k % 2 ? 0.05 : 0.025);
+        }
+        if (!last) { // 旋律の粒（8分音符で和音の音をたどる）
+          const arp = [ch[1] + 12, ch[2] + 12, ch[3] + 12, ch[2] + 12, ch[1] + 24, ch[3] + 12, ch[2] + 12, ch[3] + 12];
+          arp.forEach((n, k) => { if (b === 0 && k < 4) return; tone(tb + k * beat / 2, hz(n), 0.35, { vol: 0.075, attack: 0.008, cutoff: 3200 }); });
+        }
+      }
+      for (let i = 1; i < slideCount; i++) chime(t0 + i * SLIDE - 0.05);
+    }
+    return { ac, stream: dest.stream, schedule };
+  }
+
   async function record(canvas, s, meta, onProgress) {
     await loadIcon();
     const slides = buildSlides(s, meta), total = slides.length * SLIDE;
-    const mime = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
-      .find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
+    const audio = meta.sound ? makeAudio(total, slides.length) : null;
+    const types = audio
+      ? ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4;codecs=avc1,opus', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
+      : ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+    const mime = types.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
     if (!mime || !canvas.captureStream) throw new Error('このブラウザは動画の作成に対応していません。パソコンの Chrome・Edge でお試しください。');
     const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
     frame(ctx, W, H, slides, 0, meta);
-    const stream = canvas.captureStream(FPS);
-    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6e6 });
+    const video = canvas.captureStream(FPS);
+    const stream = new MediaStream([...video.getVideoTracks(), ...(audio ? audio.stream.getAudioTracks() : [])]);
+    if (audio) await audio.ac.resume();
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6e6, audioBitsPerSecond: 128000 });
     const chunks = [];
     rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
     const stopped = new Promise((r) => { rec.onstop = r; });
     rec.start(1000);
+    if (audio) audio.schedule(audio.ac.currentTime + 0.02); // 映像と同時に曲を始める
     const t0 = performance.now();
     await new Promise((resolve) => {
       const tick = () => {
@@ -245,9 +319,10 @@
     });
     await new Promise((r) => setTimeout(r, 300)); // 最後のコマを確実に入れる
     rec.stop(); await stopped;
-    stream.getTracks().forEach((tr) => tr.stop());
+    stream.getTracks().forEach((tr) => tr.stop()); video.getTracks().forEach((tr) => tr.stop());
+    if (audio) audio.ac.close();
     if (onProgress) onProgress(1);
-    return { blob: new Blob(chunks, { type: mime.split(';')[0] }), ext: mime.startsWith('video/mp4') ? 'mp4' : 'webm', seconds: total, slides: slides.length };
+    return { blob: new Blob(chunks, { type: mime.split(';')[0] }), ext: mime.startsWith('video/mp4') ? 'mp4' : 'webm', seconds: total, slides: slides.length, sound: !!audio };
   }
 
   // サムネイル（1280×720）

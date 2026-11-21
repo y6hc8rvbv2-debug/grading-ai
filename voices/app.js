@@ -608,7 +608,7 @@
 
   // YouTube 用の動画・サムネイル・説明文を作る（半自動：保存して自分で投稿する）
   function openVideoMaker(stats, meta) {
-    let vertical = true;
+    let vertical = true, sound = true;
     const out = h('div', { class: 'video-out' });
     const bar = h('progress', { max: 100, value: 0, hidden: true, class: 'video-bar' });
     const status = h('p', { class: 'muted small' });
@@ -620,7 +620,7 @@
       const W = vertical ? 1080 : 1920, H = vertical ? 1920 : 1080;
       const canvas = h('canvas', { width: W, height: H, class: 'video-canvas' + (vertical ? ' v' : '') });
       out.replaceChildren(canvas);
-      const m = { ...meta, vertical };
+      const m = { ...meta, vertical, sound };
       status.textContent = '作成中です…（30秒ほどかかります。このタブを開いたままにしてください）';
       try {
         const r = await KGVideo.record(canvas, stats, m, (p) => { bar.value = Math.round(p * 100); });
@@ -630,7 +630,7 @@
         const date = new Date().toISOString().slice(0, 10);
         const title = h('input', { type: 'text', readOnly: true, value: md.title });
         const desc = h('textarea', { rows: 10, readOnly: true, value: md.description });
-        status.textContent = `できました（${r.seconds}秒・${r.slides}枚の場面）。内容を確認してから保存してください。`;
+        status.textContent = `できました（${r.seconds}秒・${r.slides}枚の場面・${r.sound ? 'BGMあり' : '音なし'}）。再生して内容と音を確認してから保存してください。`;
         out.replaceChildren(
           h('video', { src: url, controls: true, playsInline: true, class: 'video-canvas' + (vertical ? ' v' : '') }),
           h('div', { class: 'row wrap' },
@@ -652,6 +652,9 @@
       meta.demo && h('p', { class: 'note', text: '⚠ 現在はデモ用の架空データです。動画にも「デモ・架空データ」と表示されます。公開しないでください。' }),
       h('div', { class: 'field' }, h('span', { class: 'field-label', text: '動画の形' }),
         chips([{ k: 'v', name: '📱 縦長（ショート向け・1080×1920）' }, { k: 'h', name: '🖥️ 横長（通常の動画・1920×1080）' }], 'v', (v) => { vertical = v === 'v'; }, { required: true })),
+      h('div', { class: 'field' }, h('span', { class: 'field-label', text: '音' }),
+        chips([{ k: 'on', name: '🎵 BGMと効果音あり' }, { k: 'off', name: '🔇 音なし' }], 'on', (v) => { sound = v === 'on'; }, { required: true }),
+        h('small', { class: 'muted', text: 'BGMはこのアプリがその場で作るオリジナル曲です（市販の曲は使っていないので、著作権の申し立ての心配はありません）。作成中は音が鳴りません。' })),
       h('div', { class: 'row' }, make), bar, status, out), { wide: true });
   }
 
