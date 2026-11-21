@@ -38,3 +38,9 @@
 | `X_API_KEY` / `X_API_SECRET` / `X_ACCESS_TOKEN` / `X_ACCESS_SECRET` | X（旧Twitter）に投稿するための鍵 |
 | `BSKY_HANDLE` / `BSKY_APP_PASSWORD` | Bluesky のアカウント名とアプリパスワード |
 | `MASTODON_URL` / `MASTODON_TOKEN` | Mastodon のサーバーURLとアクセストークン |
+
+## YouTube 用の動画（半自動）
+
+「統計」ページの「🎬 動画を作る」で、表示中の統計から約30秒の動画（縦長のショート向け／横長）、
+サムネイル画像、タイトルと説明文を作れます。動画は利用者のブラウザの中で作るため、サーバーの費用はかかりません。
+保存した動画を内容確認のうえ、YouTube Studio から手で投稿してください。デモ用データの動画には「デモ・架空データ」と表示されます。

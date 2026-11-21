@@ -558,6 +558,7 @@
           pv.skip && h('p', { class: 'err', text: '今週は発信されません：' + pv.skip }),
           h('pre', { class: 'digest notranslate', text: pv.short }), h('details', {}, h('summary', { class: 'small', text: '長い版（Mastodon用）を見る' }), h('pre', { class: 'digest notranslate', text: pv.long })))),
         h('div', { class: 'row' }, send),
+        h('p', { class: 'muted small' }, 'YouTube 用の動画は「統計」ページの「🎬 動画を作る」から作れます（期間を「直近7日」にすると週報になります）。 ', h('a', { href: '#/stats', text: '統計ページへ' })),
         d.history.length ? h('details', {}, h('summary', { class: 'small', text: `発信の記録（${d.history.length}件）` }), KGChart.table(['日時', '国', 'SNS', '結果', '詳細'], d.history.map((r) => [new Date(r.at).toLocaleString('ja-JP'), r.country, r.platform, r.ok ? '成功' : '失敗', h('span', { class: 'small', text: r.detail || '' })]))) : null).childNodes);
     }).catch((e) => box.replaceChildren(h('h2', { text: '集計結果の自動発信（週報）' }), h('p', { class: 'err', text: e.message })));
     load();
@@ -605,6 +606,55 @@
   }
   const empty = () => h('p', { class: 'muted', text: 'この条件ではまだ十分なデータがありません。' });
 
+  // YouTube 用の動画・サムネイル・説明文を作る（半自動：保存して自分で投稿する）
+  function openVideoMaker(stats, meta) {
+    let vertical = true;
+    const out = h('div', { class: 'video-out' });
+    const bar = h('progress', { max: 100, value: 0, hidden: true, class: 'video-bar' });
+    const status = h('p', { class: 'muted small' });
+    const copyBtn = (label, getText) => h('button', { type: 'button', class: 'ghost', text: label, onclick: async () => {
+      try { await navigator.clipboard.writeText(getText()); toast('コピーしました。'); } catch { toast('コピーできませんでした。文字を選んでコピーしてください。'); }
+    } });
+    const make = h('button', { class: 'primary', text: '🎬 動画を作る', onclick: async () => {
+      make.disabled = true; bar.hidden = false; bar.value = 0;
+      const W = vertical ? 1080 : 1920, H = vertical ? 1920 : 1080;
+      const canvas = h('canvas', { width: W, height: H, class: 'video-canvas' + (vertical ? ' v' : '') });
+      out.replaceChildren(canvas);
+      const m = { ...meta, vertical };
+      status.textContent = '作成中です…（30秒ほどかかります。このタブを開いたままにしてください）';
+      try {
+        const r = await KGVideo.record(canvas, stats, m, (p) => { bar.value = Math.round(p * 100); });
+        const url = URL.createObjectURL(r.blob);
+        const thumb = await KGVideo.thumbnail(stats, m);
+        const md = KGVideo.metadata(stats, m);
+        const date = new Date().toISOString().slice(0, 10);
+        const title = h('input', { type: 'text', readOnly: true, value: md.title });
+        const desc = h('textarea', { rows: 10, readOnly: true, value: md.description });
+        status.textContent = `できました（${r.seconds}秒・${r.slides}枚の場面）。内容を確認してから保存してください。`;
+        out.replaceChildren(
+          h('video', { src: url, controls: true, playsInline: true, class: 'video-canvas' + (vertical ? ' v' : '') }),
+          h('div', { class: 'row wrap' },
+            h('a', { class: 'primary btn', href: url, download: `kunigoe_${date}_${vertical ? 'short' : 'video'}.${r.ext}`, text: '⬇ 動画を保存' }),
+            !vertical && h('a', { class: 'ghost btn', href: thumb, download: `kunigoe_${date}_thumbnail.png`, text: '⬇ サムネイル画像を保存' })),
+          !vertical && h('img', { src: thumb, alt: 'サムネイル画像', class: 'video-thumb' }),
+          field('タイトル（YouTube に貼り付け）', title), h('div', { class: 'row' }, copyBtn('タイトルをコピー', () => md.title)),
+          field('説明文（YouTube に貼り付け）', desc), h('div', { class: 'row' }, copyBtn('説明文をコピー', () => md.description)),
+          h('ol', { class: 'steps small' },
+            h('li', { text: '「動画を保存」で動画をパソコンやスマホに保存する' }),
+            h('li', { text: 'YouTube Studio（またはYouTubeアプリ）で「作成」→「動画をアップロード」から保存した動画を選ぶ' }),
+            h('li', { text: 'タイトルと説明文をコピーして貼り付ける' + (vertical ? '（縦長で3分以内なのでショートとして公開されます）' : '。サムネイル画像も設定する') }),
+            h('li', { text: '数字に誤りや不適切なタグがないか確認してから公開する' })));
+      } catch (e) { status.textContent = ''; out.replaceChildren(h('p', { class: 'err', text: e.message })); }
+      finally { make.disabled = false; bar.hidden = true; }
+    } });
+    modal('YouTube用の動画を作る', h('div', { class: 'modal-body' },
+      h('p', { class: 'muted small', text: `いま表示している統計（${meta.where}・${meta.period}${meta.sub ? '・' + meta.sub : ''}）から、約30秒の動画・サムネイル・説明文を作ります。動画はこの端末の中で作るので、データが外に送られることはありません。` }),
+      meta.demo && h('p', { class: 'note', text: '⚠ 現在はデモ用の架空データです。動画にも「デモ・架空データ」と表示されます。公開しないでください。' }),
+      h('div', { class: 'field' }, h('span', { class: 'field-label', text: '動画の形' }),
+        chips([{ k: 'v', name: '📱 縦長（ショート向け・1080×1920）' }, { k: 'h', name: '🖥️ 横長（通常の動画・1920×1080）' }], 'v', (v) => { vertical = v === 'v'; }, { required: true })),
+      h('div', { class: 'row' }, make), bar, status, out), { wide: true });
+  }
+
   pages.stats = (qs) => {
     const f = store.get('kg_stats', { days: 30, topic: '', deskType: '' });
     const deskId = Number(qs.get('desk')) || null;
@@ -619,8 +669,21 @@
     days.addEventListener('change', reload); topic.addEventListener('change', reload); deskSel.addEventListener('change', reload);
     // 特定の窓口だけの統計（窓口ページの「統計を見る」から来たとき）
     const deskChip = h('p', { class: 'note', hidden: !deskId });
-    if (deskId) api('desks', { id: deskId }).then((o) => { const d = o.desks[0]; if (d) deskChip.replaceChildren(`窓口「${deskLabel(d)}」（${cName(d.country)}）に届いた声だけを集計しています。 `, h('a', { href: '#/stats', text: '絞り込みを解除' })); }).catch(() => {});
-    let csvRows = [];
+    if (deskId) api('desks', { id: deskId }).then((o) => { const d = o.desks[0]; if (d) deskName = `${d.name}（${cName(d.country).replace(/^\S+\s/, '')}）`;
+      if (d) deskChip.replaceChildren(`窓口「${deskLabel(d)}」（${cName(d.country)}）に届いた声だけを集計しています。 `, h('a', { href: '#/stats', text: '絞り込みを解除' })); }).catch(() => {});
+    let csvRows = [], lastStats = null, deskName = '';
+    const videoBtn = h('button', { class: 'ghost', text: '🎬 動画を作る', onclick: () => {
+      if (!lastStats) return;
+      const sel = (x) => x.selectedOptions[0].textContent;
+      const now = new Date(), d0 = new Date(now - (f.days - 1) * 864e5), md = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+      const period = f.days ? (f.days === 7 ? `${md(d0)}〜${md(now)}` : `${sel(days)}（${md(d0)}〜${md(now)}）`) : '全期間';
+      const c = deskId ? null : st.country === 'ALL' ? null : KG.country(st.country);
+      openVideoMaker(lastStats, {
+        where: deskId ? (deskName || '窓口') : c ? c.name : '世界', period, demo: st.mode === 'demo',
+        sub: [!deskId && f.deskType && sel(deskSel), f.topic && sel(topic)].filter(Boolean).join('・'),
+        url: location.origin + location.pathname,
+      });
+    } });
     const csvBtn = h('button', { class: 'ghost', text: '⬇ CSVで保存', onclick: () => {
       const esc = (v) => { let s = String(v ?? ''); if (/^[=+\-@]/.test(s)) s = "'" + s; return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
       const blob = new Blob(['﻿' + csvRows.map((r) => r.map(esc).join(',')).join('\r\n')], { type: 'text/csv' });
@@ -632,6 +695,7 @@
       let s;
       try { s = await api('stats', { country: deskId ? 'ALL' : st.country, days: f.days, topic: f.topic, desk: deskId, deskType: deskId ? '' : f.deskType }); } catch (e) { out.replaceChildren(h('p', { class: 'err', text: e.message })); return; }
       const C = KGChart, nm = KG.nameOf, total = s.totals.posts;
+      lastStats = s;
       csvRows = [['クニゴエ 統計', cName(st.country === 'ALL' ? '' : st.country) || 'すべての国', days.selectedOptions[0].textContent, topic.selectedOptions[0].textContent], []];
       const csv = (name, cols, rows) => { csvRows.push([name], cols, ...rows, []); return { cols, rows }; };
       const sorted = (list) => list.slice().sort((a, b) => b.n - a.n);
@@ -714,7 +778,7 @@
     }
     load();
     return h('div', {}, title('みんなの声の統計', '集まった声を、表とグラフで見える化します。'),
-      h('div', { class: 'filters stats-filters' }, !deskId && country, days, !deskId && deskSel, topic, csvBtn), deskChip, out);
+      h('div', { class: 'filters stats-filters' }, !deskId && country, days, !deskId && deskSel, topic, csvBtn, videoBtn), deskChip, out);
   };
 
   // ---------- 画面の枠 ----------
