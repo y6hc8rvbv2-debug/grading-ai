@@ -15,16 +15,17 @@ export function resolveStore(env = process.env) {
   for (const [u, t] of pairs) {
     if (clean(env[u]) && clean(env[t])) return { url: clean(env[u]).replace(/\/$/, ''), token: clean(env[t]), source: u };
   }
-  // 接頭辞付き（例: STORAGE_KV_REST_API_URL と STORAGE_KV_REST_API_TOKEN の組）
+  // 接頭辞付き。Vercel の Storage 連携で接頭辞を変えると「接頭辞_REST_API_URL」の形になる
+  //   例: STORAGE_REST_API_URL と STORAGE_REST_API_TOKEN、STORAGE_KV_REST_API_URL と STORAGE_KV_REST_API_TOKEN
   for (const name of Object.keys(env).sort()) {
-    const m = /^(.+_)(KV_REST_API_URL|UPSTASH_REDIS_REST_URL)$/.exec(name);
+    const m = /^(.+)_(REST_API_URL|REST_URL)$/.exec(name);
     if (!m) continue;
-    const tokenName = `${m[1]}${m[2].replace(/URL$/, 'TOKEN')}`;
+    const tokenName = `${m[1]}_${m[2].replace(/URL$/, 'TOKEN')}`;
     if (clean(env[name]) && clean(env[tokenName])) return { url: clean(env[name]).replace(/\/$/, ''), token: clean(env[tokenName]), source: name };
   }
   // 接続文字列（rediss://…@xxx.upstash.io）からの読み替え
   for (const name of Object.keys(env).sort()) {
-    if (!/(^|_)(KV_URL|REDIS_URL)$/.test(name)) continue;
+    if (!/(^|_)(KV_URL|REDIS_URL|URL)$/.test(name)) continue;
     try {
       const u = new URL(clean(env[name]));
       if (/^rediss?:$/.test(u.protocol) && /\.upstash\.io$/.test(u.hostname) && u.password) return { url: `https://${u.hostname}`, token: decodeURIComponent(u.password), source: name };
@@ -64,7 +65,8 @@ export async function kv(...cmd) {
 
 // 接続の確認（診断用）。保存先に PING を送り、結果の合図だけを返す
 export async function storeHealth() {
-  if (!hasStore) return { configured: false, reachable: false, source: null, error: 'STORE_NOT_CONFIGURED' };
+  // つながらない時の手がかりとして、Redis に関係しそうな環境変数の「名前」だけを返す（値は返さない）
+  if (!hasStore) return { configured: false, reachable: false, source: null, error: 'STORE_NOT_CONFIGURED', envNames: Object.keys(process.env).filter((n) => /KV|REDIS|UPSTASH|STORAGE/i.test(n)).sort() };
   try {
     const pong = await kv('PING');
     return { configured: true, reachable: pong === 'PONG', source: storeSource, error: null };

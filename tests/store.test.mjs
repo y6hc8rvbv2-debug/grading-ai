@@ -18,6 +18,9 @@ test('変数名の違いに対応（KV_ / UPSTASH_ / 接頭辞付き / 接続文
   assert.equal(s.resolveStore({ UPSTASH_REDIS_REST_URL: 'https://u.upstash.io', UPSTASH_REDIS_REST_TOKEN: 't' }).source, 'UPSTASH_REDIS_REST_URL');
   const p = s.resolveStore({ STORAGE_KV_REST_API_URL: 'https://p.upstash.io', STORAGE_KV_REST_API_TOKEN: 't2' });
   assert.equal(p.source, 'STORAGE_KV_REST_API_URL'); assert.equal(p.token, 't2');
+  const v = s.resolveStore({ STORAGE_REST_API_URL: 'https://v.upstash.io', STORAGE_REST_API_TOKEN: 't3', STORAGE_REST_API_READ_ONLY_TOKEN: 'ro' });
+  assert.deepEqual([v.source, v.token], ['STORAGE_REST_API_URL', 't3']); // 読み取り専用トークンではなく通常のトークンを使う
+  assert.equal(s.resolveStore({ STORAGE_URL: 'rediss://default:pw@s.upstash.io:6379' }).source, 'STORAGE_URL');
   const c = s.resolveStore({ KV_URL: 'rediss://default:abc%3D@c.upstash.io:6379' });
   assert.deepEqual([c.url, c.token, c.source], ['https://c.upstash.io', 'abc=', 'KV_URL']);
   assert.equal(s.resolveStore({ REDIS_URL: 'redis://default:x@other-host.example:6379' }).source, null); // Upstash 以外は使わない
