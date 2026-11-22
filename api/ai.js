@@ -58,8 +58,10 @@ async function respond(request) {
       await takeQuota(body.userId, user);
       charged = body.userId;
     } catch (err) {
+      // 利用回数を確認できない時は作成を止める（制限を外して動かすことはしない）
+      console.error('[ai] quota check failed:', err instanceof HttpError ? err.message : err?.name);
       if (err instanceof HttpError) return json(err.status, { error: err.message });
-      return json(502, { error: '利用状況を確認できませんでした。時間をおいてお試しください。' });
+      return json(503, { error: 'STORE_UNAVAILABLE' });
     }
   }
 

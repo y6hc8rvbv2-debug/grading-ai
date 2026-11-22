@@ -3,21 +3,74 @@
 //   ・利用者IDと端末の結び付け（他人の利用者IDを名乗って契約や利用枠を使えないようにする）
 //   ・契約状態（Stripe）と、今月のAI作成数
 
-const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-export const hasStore = Boolean(KV_URL && KV_TOKEN);
+// ── 共有データの置き場（Upstash Redis）の接続先 ──
+// Vercel の連携で作られる変数名は、作り方によって次のように変わるため、どれでも使えるようにする。
+//   KV_REST_API_URL / KV_REST_API_TOKEN（Vercel の Upstash 連携。接頭辞付きの例: STORAGE_KV_REST_API_URL）
+//   UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN（Upstash の画面からコピーした場合）
+//   KV_URL / REDIS_URL（rediss://default:トークン@xxx.upstash.io:6379 の形。Upstash のものだけ REST に読み替える）
+// 値の前後の空白・改行・引用符は取り除く（貼り付け時の混入でつながらなくなるのを防ぐ）。値そのものはログにも画面にも出さない。
+const clean = (v) => String(v ?? '').trim().replace(/^["']|["']$/g, '').trim();
+export function resolveStore(env = process.env) {
+  const pairs = [['KV_REST_API_URL', 'KV_REST_API_TOKEN'], ['UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN']];
+  for (const [u, t] of pairs) {
+    if (clean(env[u]) && clean(env[t])) return { url: clean(env[u]).replace(/\/$/, ''), token: clean(env[t]), source: u };
+  }
+  // 接頭辞付き（例: STORAGE_KV_REST_API_URL と STORAGE_KV_REST_API_TOKEN の組）
+  for (const name of Object.keys(env).sort()) {
+    const m = /^(.+_)(KV_REST_API_URL|UPSTASH_REDIS_REST_URL)$/.exec(name);
+    if (!m) continue;
+    const tokenName = `${m[1]}${m[2].replace(/URL$/, 'TOKEN')}`;
+    if (clean(env[name]) && clean(env[tokenName])) return { url: clean(env[name]).replace(/\/$/, ''), token: clean(env[tokenName]), source: name };
+  }
+  // 接続文字列（rediss://…@xxx.upstash.io）からの読み替え
+  for (const name of Object.keys(env).sort()) {
+    if (!/(^|_)(KV_URL|REDIS_URL)$/.test(name)) continue;
+    try {
+      const u = new URL(clean(env[name]));
+      if (/^rediss?:$/.test(u.protocol) && /\.upstash\.io$/.test(u.hostname) && u.password) return { url: `https://${u.hostname}`, token: decodeURIComponent(u.password), source: name };
+    } catch { /* 形式が違うものは使わない */ }
+  }
+  return { url: '', token: '', source: null };
+}
+const STORE = resolveStore();
+export const hasStore = Boolean(STORE.url && STORE.token);
+export const storeSource = STORE.source; // どの変数名を使ったか（値ではなく名前だけ）
 
 export class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 export const need = (cond, status, message) => { if (!cond) throw new HttpError(status, message); };
 
+// 保存先のエラーを、原因が分かる合図（値は含めない）に分ける。どれも 503 にし、利用回数の確認ができない時は作成を止める
+function storeError(code) {
+  console.error(`[store] ${code} (env: ${storeSource || 'none'})`);
+  return new HttpError(503, code);
+}
 export async function kv(...cmd) {
   need(hasStore, 503, 'STORE_NOT_CONFIGURED');
-  const r = await fetch(KV_URL, { method: 'POST', headers: { authorization: `Bearer ${KV_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify(cmd) });
-  const data = await r.json();
-  if (!r.ok || data.error) throw new HttpError(502, '共有データの保存先でエラーが発生しました');
+  let r;
+  try {
+    r = await fetch(STORE.url, { method: 'POST', headers: { authorization: `Bearer ${STORE.token}`, 'content-type': 'application/json' }, body: JSON.stringify(cmd) });
+  } catch {
+    throw storeError('STORE_UNREACHABLE'); // URL の誤り・通信の失敗
+  }
+  let data = {};
+  try { data = await r.json(); } catch { /* 本文なし */ }
+  if (r.status === 401 || r.status === 403) throw storeError('STORE_AUTH_FAILED'); // トークンの誤り
+  if (/NOPERM/i.test(String(data.error || ''))) throw storeError('STORE_READ_ONLY_TOKEN'); // 読み取り専用のトークン
+  if (!r.ok || data.error) throw storeError(`STORE_ERROR_${r.status}`);
   return data.result;
+}
+
+// 接続の確認（診断用）。保存先に PING を送り、結果の合図だけを返す
+export async function storeHealth() {
+  if (!hasStore) return { configured: false, reachable: false, source: null, error: 'STORE_NOT_CONFIGURED' };
+  try {
+    const pong = await kv('PING');
+    return { configured: true, reachable: pong === 'PONG', source: storeSource, error: null };
+  } catch (e) {
+    return { configured: true, reachable: false, source: storeSource, error: e.message };
+  }
 }
 export const parse = (v) => { try { return JSON.parse(v); } catch { return null; } };
 

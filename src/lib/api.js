@@ -41,5 +41,11 @@ const MESSAGES = {
   TRIAL_EXPIRED: '無料期間（3か月）が終了しました。「プラン」画面で有料プランをお選びください。',
   ALREADY_SUBSCRIBED: 'すでに有料プランをご契約中です。プランの変更・解約は「お支払い情報の管理」から行えます。',
   STRIPE_NOT_CONFIGURED: '決済（Stripe）が未設定です。',
+  // 利用回数を記録する保存先（Upstash Redis）につながらない時。利用回数を確認できないため、AIでの作成を止めています
+  STORE_NOT_CONFIGURED: '利用回数の記録先（Upstash Redis）が設定されていません。管理者にお知らせください。',
+  STORE_UNREACHABLE: '利用回数の記録先（Upstash Redis）に接続できませんでした。時間をおいてお試しください。',
+  STORE_AUTH_FAILED: '利用回数の記録先（Upstash Redis）の認証に失敗しました。管理者が KV_REST_API_TOKEN を確認してください。',
+  STORE_READ_ONLY_TOKEN: '利用回数の記録先（Upstash Redis）に書き込めません（読み取り専用のトークンが設定されています）。管理者が KV_REST_API_TOKEN を確認してください。',
+  STORE_UNAVAILABLE: '利用回数を確認できなかったため、AIでの作成を止めました。時間をおいてお試しください。',
 };
-export const friendly = (code) => MESSAGES[code] || code;
+export const friendly = (code) => MESSAGES[code] || (/^STORE_ERROR_/.test(code || '') ? '利用回数の記録先（Upstash Redis）でエラーが発生しました。時間をおいてお試しください。' : code);

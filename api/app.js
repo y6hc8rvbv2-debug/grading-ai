@@ -5,7 +5,7 @@
 //   個人情報の暗号化 : PII_KEY_V1 / PII_INDEX_KEY（PII Shield）
 //   管理者          : ADMIN_KEY
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import { corsHeaders, hasStore, kv, parse, HttpError, need, PLANS, claimUser, getSubscription, saveSubscription, entitlement, usage, monthKey } from './_store.js';
+import { corsHeaders, storeHealth, storeSource, hasStore, kv, parse, HttpError, need, PLANS, claimUser, getSubscription, saveSubscription, entitlement, usage, monthKey } from './_store.js';
 import { hasApple, APPLE_PRODUCTS, verifyTransaction, saveAppleTransaction } from './_apple.js';
 
 const hasStripe = Boolean(process.env.STRIPE_SECRET_KEY);
@@ -78,9 +78,15 @@ const actions = {
       admin: Boolean(process.env.ADMIN_KEY),
       googleClientId: process.env.GOOGLE_CLIENT_ID || '',
       webhook: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
+      storeSource, // 共有データの置き場に使っている環境変数の名前（値は返さない）
       apple: hasApple && hasStore,
       appleProducts: hasApple ? APPLE_PRODUCTS : {},
     };
+  },
+
+  // ── 共有データの置き場の接続確認（GET /api/app?action=health）。値は返さず、つながるかどうかと原因の合図だけ ──
+  async health() {
+    return { store: await storeHealth() };
   },
 
   // ── 利用者の契約状態と今月の利用数（サーバーの記録が正。端末の表示はこれに合わせる） ──
