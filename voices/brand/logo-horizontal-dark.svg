@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 672 200" role="img" aria-label="KuniGoe - Voices of Citizens">
+  <svg x="20" y="20" width="160" height="160" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bgd" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b93f5"/>
+      <stop offset="1" stop-color="#3a49d6"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#bgd)"/>
+  <!-- 吹き出し＝市民の声 -->
+  <path fill="#fff" d="M152 96h208a64 64 0 0 1 64 64v136a64 64 0 0 1-64 64H250l-86 74a10 10 0 0 1-16.500-7.600V360a64 64 0 0 1-59.500-63.800V160a64 64 0 0 1 64-64z"/>
+  <!-- 円グラフ＝集まった声の割合（統計）。さまざまな立場の声を、色の違いで表す -->
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#f26a2e" stroke-width="50" stroke-dasharray="178.0 465.0" stroke-dashoffset="0.0" transform="rotate(-90 256 228)"/>
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#17b07b" stroke-width="50" stroke-dasharray="117.5 465.0" stroke-dashoffset="-186.0" transform="rotate(-90 256 228)"/>
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#f5b301" stroke-width="50" stroke-dasharray="80.3 465.0" stroke-dashoffset="-311.5" transform="rotate(-90 256 228)"/>
+  <circle cx="256" cy="228" r="74" fill="none" stroke="#e8508f" stroke-width="50" stroke-dasharray="57.1 465.0" stroke-dashoffset="-399.9" transform="rotate(-90 256 228)"/>
+</svg>
+  <g transform="translate(222 26) scale(.9)" fill="none" stroke="#ffffff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"><path d="M0 14V90 M46 14L2 58 M19 43L50 90" transform="translate(0 0)"/><path d="M0 38V68a22 22 0 0 0 44 0V38 M44 62V90" transform="translate(76 0)"/><path d="M0 38V90 M0 60a22 22 0 0 1 44 0V90" transform="translate(142 0)"/><path d="M0 40V90" transform="translate(212 0)"/><path d="M68 27A38 38 0 1 0 76 54H46" transform="translate(242 0)"/><path d="M0 64a26 26 0 1 0 52 0a26 26 0 1 0-52 0" transform="translate(338 0)"/><path d="M2 64H50A24 26 0 1 0 42 83" transform="translate(410 0)"/><path d="M212 16v.01" stroke="#f26a2e" stroke-width="17"/></g>
+  <text x="216" y="168" font-family="Arial, 'Liberation Sans', Helvetica, sans-serif" font-size="21" font-weight="700" letter-spacing="6.300" fill="#9ec5f4">VOICES OF CITIZENS</text>
+</svg>
