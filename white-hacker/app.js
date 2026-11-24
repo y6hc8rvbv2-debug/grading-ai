@@ -99,6 +99,7 @@
       el('section', { class: 'hero' },
         el('h1', { text: '🛡️ ホワイトハッカー養成講座' }),
         el('p', { class: 'sub', text: 'ゼロから学ぶ、守るためのハッキング。読む → 手を動かす（模擬実習） → 検定で力試し → 就職へ。' }),
+        el('div', { class: 'chips' }, el('span', { class: 'chip ok', text: '🇯🇵 国産教材' }), el('span', { class: 'chip', text: '日本の法律に準拠' }), el('span', { class: 'chip', text: '国家資格に対応' }), el('span', { class: 'chip', text: '日本の就職事情' })),
         el('div', { class: 'bar', 'aria-label': '学習の進み具合' }, barFill(pct)),
         el('p', { class: 'sub', text: `学習の進み具合：${pct}%` }),
         el('div', { class: 'row' }, el('a', { class: 'btn', href: '#/learn' }, '📖 テキストを読む'), el('a', { class: 'btn sec', href: '#/exam' }, '📝 検定試験'), el('a', { class: 'btn sec', href: '#/career' }, '💼 就職案内'))
@@ -357,7 +358,7 @@
     crypto(box, done) {
       box.append(el('h2', { text: '実習：暗号を解読し、ハッシュを体験しよう' }));
       const caesar = (s, k) => s.replace(/[A-Z]/g, (ch) => String.fromCharCode(((ch.charCodeAt(0) - 65 + k + 26) % 26) + 65));
-      const PLAIN = 'SAFETY FIRST', KEY = 7;
+      const PLAIN = 'YOUJIN GA DAIJI', KEY = 7;
       const cipher = caesar(PLAIN, KEY);
       let s1 = false, s2 = false;
       const check = () => { if (s1 && s2) flag(box, '暗号解読者', done); };
@@ -370,8 +371,8 @@
       range.addEventListener('input', () => {
         const k = Number(range.value); lbl.textContent = String(k);
         const dec = caesar(cipher, -k); outC.textContent = dec;
-        if (dec === PLAIN) { result(r1, true, `解読成功！ ${k}文字ずらした暗号でした。26通り試せば必ず解ける＝弱い暗号です。`); s1 = true; check(); }
-        else result(r1, null, '意味のある英語になるまでスライダーを動かそう。');
+        if (dec === PLAIN) { result(r1, true, `解読成功！「用心が大事」。${k}文字ずらした暗号でした。26通り試せば必ず解ける＝弱い暗号です。`); s1 = true; check(); }
+        else result(r1, null, '意味の通るローマ字の日本語になるまでスライダーを動かそう。');
       });
       box.append(el('h3', { text: 'A. シーザー暗号を総当たりで解読' }), el('p', { class: 'sub', text: '暗号文：' + cipher }), outC, el('label', { class: 'blk' }, 'ずらす数：', lbl), range, r1);
 
@@ -472,7 +473,7 @@
       const show = el('input', { type: 'checkbox', id: 'pwshow' });
       show.addEventListener('change', () => { inp.type = show.checked ? 'text' : 'password'; });
       const meterI = el('i'); const info = el('div', { class: 'result info', text: '入力すると強さが表示されます。' });
-      const COMMON = ['password', '123456', '12345678', 'qwerty', 'abc123', 'iloveyou', 'admin', 'letmein', 'welcome', 'monkey', 'dragon', 'sakura', 'password1', '111111', '000000'];
+      const COMMON = ['password', '123456', '12345678', 'qwerty', 'abc123', 'admin', 'password1', '111111', '000000', 'sakura', 'tokyo', 'nihon', 'nippon', 'doraemon', 'pikachu', 'naruto', 'asdfgh', 'yamada', 'tanaka', 'suzuki', 'kawaii', 'arigato'];
       const fmt = (sec) => {
         if (sec < 1) return '一瞬（1秒未満）';
         const u = [['年', 31536000], ['日', 86400], ['時間', 3600], ['分', 60], ['秒', 1]];
@@ -658,15 +659,21 @@
         const id = [...crypto.getRandomValues(new Uint8Array(4))].map((x) => x.toString(16).padStart(2, '0')).join('').toUpperCase();
         const d = new Date();
         area.replaceChildren(el('div', { class: 'cert' },
-          el('div', { class: 'small', text: 'CERTIFICATE OF COMPLETION' }),
+          el('div', { class: 'small', text: '国産ホワイトハッカー養成講座' }),
           el('div', { class: 'ct', text: '修 了 証' }),
           el('div', { class: 'nm', text: name + ' 殿' }),
           el('p', { text: `あなたは「ホワイトハッカー養成講座」において所定の学習を修め、ホワイトハッカー検定 ${e.name} に ${score}点 で合格したことをここに証します。` }),
-          el('p', { text: `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日　／　証書番号 WH${lv}-${id}` }),
+          el('p', { text: `${wareki(d)}　／　証書番号 第${lv}級-${id}号` }),
           el('div', { class: 'small', text: '※本証はアプリ内の学習到達度を示すもので、公的資格ではありません。' })),
           el('div', { class: 'row no-print' }, el('button', { class: 'btn sec', type: 'button', onclick: () => window.print() }, '🖨️ 印刷・PDF保存')));
       } }, '修了証を表示'))), area);
     return wrap;
+  }
+
+  // 和暦（令和）で日付を表す
+  function wareki(d) {
+    const y = d.getFullYear() - 2018;
+    return `令和${y === 1 ? '元' : y}年${d.getMonth() + 1}月${d.getDate()}日`;
   }
 
   // ---------- 就職案内 ----------
@@ -678,7 +685,8 @@
       ['コツコツ画面を見張り、小さな異変に気づくのが得意', [0, 4]],
       ['パズルや謎解きで「どうやって突破するか」考えるのが好き', [2, 1]],
       ['トラブル時に落ち着いて周りに指示を出せる', [3]],
-      ['人に説明したり、資料を作ったりするのが得意', [5, 1]],
+      ['人に説明したり、資料を作ったりするのが得意', [6, 1]],
+      ['社会や人々の安全を、公の立場で守りたい', [5, 3]],
       ['細かい証拠を集めて真相を突き止めるのが好き', [4, 3]],
       ['プログラムやWebサイトの仕組みに興味がある', [1, 2]]
     ];
@@ -709,9 +717,9 @@
     app.append(el('div', { class: 'panel' }, el('h2', { text: '🗺️ 就職までのロードマップ' }), el('div', { html:
       '<ol>' +
       '<li><b>基礎を固める（1〜3か月）</b>：この講座の全章＋検定3級。ITパスポートなどの国家試験にも挑戦。</li>' +
-      '<li><b>手を動かす（3〜6か月）</b>：自宅PCに練習用の仮想環境を作る。初心者向けCTF（セキュリティの競技・練習問題）に参加。</li>' +
+      '<li><b>手を動かす（3〜6か月）</b>：自宅PCに練習用の仮想環境を作る。SECCONなど国内のCTF（セキュリティの競技）や勉強会に参加。</li>' +
       '<li><b>実績を見える化</b>：学んだことをブログやGitHubにまとめる（CTFの解き方の記録など）。<b>※許可のない実サイトの診断結果は絶対に載せない</b>。</li>' +
-      '<li><b>資格で証明</b>：情報セキュリティマネジメント試験、CompTIA Security+ などで知識を客観的に示す。</li>' +
+      '<li><b>国家資格で証明</b>：情報セキュリティマネジメント → 基本情報 → 応用情報 → 情報処理安全確保支援士 の順でステップアップ。</li>' +
       '<li><b>応募する</b>：未経験ならSOC・ヘルプデスク・インフラ運用など「入口になる職種」から始め、経験を積んで専門職へ。</li>' +
       '</ol>' })));
 
@@ -722,25 +730,34 @@
       el('p', { class: 'explain', text: '※試験の内容・日程・受験料は変わることがあります。受験前に必ず各実施団体の公式サイトで最新情報を確認してください。' })));
 
     // 求人の探し方・面接
+    app.append(el('div', { class: 'panel' }, el('h2', { text: '🇯🇵 日本の就職事情' }), el('div', { html:
+      '<ul>' +
+      '<li><b>人材不足</b>：国内ではセキュリティ人材が大きく不足していると言われ、未経験者を育てる求人もあります。</li>' +
+      '<li><b>主な就職先</b>：セキュリティ専門企業、SIer（システム開発会社）、通信会社、金融機関、一般企業の情報システム部門・CSIRT、官公庁・警察・自衛隊。</li>' +
+      '<li><b>新卒</b>：IT企業の総合職・技術職として入社し、研修後にセキュリティ部門へ配属される流れが一般的です。</li>' +
+      '<li><b>中途・転職</b>：インフラ運用やヘルプデスクの経験 ＋ 国家資格 があると、SOCや診断の職種に応募しやすくなります。</li>' +
+      '</ul>' })));
     app.append(el('div', { class: 'panel' }, el('h2', { text: '🔎 求人の探し方' }), el('div', { html:
       '<ul>' +
       '<li><b>転職・求人サイト</b>で「セキュリティ」「SOC」「脆弱性診断」「未経験可」などのキーワードで検索する。</li>' +
       '<li><b>IT・セキュリティ専門の転職エージェント</b>に相談し、自分に合う入口職種を紹介してもらう。</li>' +
       '<li><b>勉強会・コミュニティ・CTF大会</b>に参加して人脈を作る（企業の採用担当が来ていることも）。</li>' +
       '<li><b>学生・若手向け</b>には、IPAなどが関わる「セキュリティ・キャンプ」のような育成プログラムもある。</li>' +
+      '<li><b>公務員</b>を目指すなら、警察・防衛省・各省庁の採用ページで「サイバー」の募集区分を確認する。</li>' +
       '</ul>' }),
       el('h3', { text: '💬 面接でよく聞かれること' }), el('div', { html:
       '<ul><li>なぜセキュリティの仕事をしたいのか</li><li>これまでに勉強したこと・手を動かしたこと（CTF、自宅ラボなど）</li><li>最近気になったセキュリティのニュースとその対策</li><li>倫理観（「許可のない調査はしない」と説明できるか）</li></ul>' })));
 
     // 学習リソース
     const links = [
-      ['IPA 情報セキュリティ', 'https://www.ipa.go.jp/security/', '国の機関による最新の脅威情報・ガイドライン・脆弱性届出窓口'],
+      ['IPA 情報セキュリティ', 'https://www.ipa.go.jp/security/', '「安全なウェブサイトの作り方」「情報セキュリティ10大脅威」、脆弱性の届出窓口'],
       ['セキュリティ・キャンプ', 'https://www.security-camp.or.jp/', '若手向けの合宿型セキュリティ人材育成'],
       ['SECCON', 'https://www.seccon.jp/', '日本最大級のCTF大会・セキュリティイベント'],
-      ['picoCTF', 'https://picoctf.org/', '初心者向けの練習用CTF（英語）'],
-      ['OWASP Top 10', 'https://owasp.org/www-project-top-ten/', 'Webアプリの重大な脆弱性ランキング（英語）']
+      ['JPCERT/CC', 'https://www.jpcert.or.jp/', '日本のインシデント対応の調整機関。注意喚起や対応の手引き'],
+      ['JVN（Japan Vulnerability Notes）', 'https://jvn.jp/', '日本で使われる製品の脆弱性対策情報'],
+      ['JNSA（日本ネットワークセキュリティ協会）', 'https://www.jnsa.org/', 'セキュリティ人材のスキルマップや業界の調査資料']
     ];
-    app.append(el('div', { class: 'panel' }, el('h2', { text: '📚 次に学ぶための公式リソース' }),
+    app.append(el('div', { class: 'panel' }, el('h2', { text: '📚 次に学ぶための国内の公式リソース' }),
       el('ul', null, links.map(([t, u, d]) => el('li', null, el('a', { href: u, target: '_blank', rel: 'noopener noreferrer' }, t), ' — ', d))),
       el('p', { class: 'explain', text: '外部サイトへ移動します。練習は必ず「攻略が許可された環境」で行いましょう。' })));
   }
