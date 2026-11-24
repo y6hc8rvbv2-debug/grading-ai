@@ -8,3 +8,10 @@ security-guard/.env
 security-guard/.env.example
 security-guard/.gitignore
 security-guard/CLAUDE.md
+white-hacker/package.json
+white-hacker/lib
+white-hacker/.github
+white-hacker/.env
+white-hacker/.env.example
+white-hacker/.gitignore
+white-hacker/CLAUDE.md
