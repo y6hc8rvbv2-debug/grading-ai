@@ -1,4 +1,7 @@
 {
+  "framework": null,
+  "buildCommand": "mkdir -p public/white-hacker && cp index.html public/ && cp white-hacker/index.html white-hacker/app.js white-hacker/data.js white-hacker/style.css public/white-hacker/",
+  "outputDirectory": "public",
   "headers": [
     {
       "source": "/white-hacker/(.*)",
