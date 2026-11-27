@@ -5,10 +5,45 @@
 //  - 個人情報は集めない・保存しない。修了証の氏名は画面表示だけに使い、保存も送信もしない
 'use strict';
 (function () {
-  const D = window.WH_DATA;
   const app = document.getElementById('app');
-  const STORE_KEY = 'wh-progress-v1';
   const MAX_INPUT = 200; // 入力の長さ上限（入力検査）
+
+  // ---------- 編（コース）：初級編＝改訂前の入門版、専門編＝現行の上級版 ----------
+  const EX3 = { ic: '🥉', unlock: null, name: '3級（基礎）', n: 15, min: 20, pass: 70 };
+  const EX2 = { ic: '🥈', unlock: '3', name: '2級（応用）', n: 15, min: 25, pass: 75 };
+  const EX1 = { ic: '🥇', unlock: '2', name: '1級（上級）', n: 12, min: 30, pass: 80 };
+  const EDITIONS = {
+    basic: {
+      key: 'basic', label: '初級編', icon: '🌱',
+      blurb: 'はじめての人向け。やさしい言葉で基礎を学ぶ全8章＋検定3級・2級。',
+      data: window.WH_DATA_BASIC,
+      exams: {
+        3: { ...EX3, desc: '倫理・ネットワーク・Linux・暗号・認証・フィッシングの基礎' },
+        2: { ...EX2, desc: 'Web脆弱性・暗号応用・認証・インシデント対応の実践知識' }
+      }
+    },
+    pro: {
+      key: 'pro', label: '専門編', icon: '🎓',
+      blurb: '攻撃者視点で深く。全11章の専門解説＋検定3級〜1級＋攻撃手順の方法論。',
+      data: window.WH_DATA,
+      exams: {
+        3: { ...EX3, desc: '倫理・ネットワーク・Linux・暗号・認証・フィッシングの基礎' },
+        2: { ...EX2, desc: 'Web脆弱性・暗号応用・認証・クラウド・インシデント対応の実践知識' },
+        1: { ...EX1, desc: '暗号の実装的失敗・クラウド/コンテナ・AI/LLM・攻撃手順の方法論' }
+      }
+    }
+  };
+  let edition, D, EXAMS, STORE_KEY, P;
+  function loadEdition() { try { const e = localStorage.getItem('wh-edition'); if (e === 'basic' || e === 'pro') return e; } catch (e) { } return 'pro'; }
+  function setCourse(key) {
+    edition = EDITIONS[key] ? key : 'pro';
+    try { localStorage.setItem('wh-edition', edition); } catch (e) { }
+    const c = EDITIONS[edition];
+    D = c.data; EXAMS = c.exams; STORE_KEY = 'wh-progress-v1-' + edition;
+    // 旧バージョン（編を分ける前）の記録は専門編へ引き継ぐ
+    try { if (edition === 'pro' && !localStorage.getItem(STORE_KEY)) { const old = localStorage.getItem('wh-progress-v1'); if (old) localStorage.setItem(STORE_KEY, old); } } catch (e) { }
+    P = load();
+  }
 
   // ---------- 小さな道具 ----------
   function el(tag, attrs, ...kids) {
@@ -31,7 +66,6 @@
 
   // ---------- 学習記録（端末内のみ） ----------
   const blank = () => ({ v: 1, read: {}, quiz: {}, labs: {}, exam: { 3: { best: 0, passed: false, tries: 0 }, 2: { best: 0, passed: false, tries: 0 }, 1: { best: 0, passed: false, tries: 0 } } });
-  let P = load();
   function load() {
     try { const raw = localStorage.getItem(STORE_KEY); if (raw) return sanitize(JSON.parse(raw)); } catch (e) { /* 保存領域が使えない環境でも動く */ }
     return blank();
@@ -69,6 +103,17 @@
     themeBtn.title = { auto: '自動', dark: 'ダーク', light: 'ライト' }[theme];
   });
 
+  // ---------- 編（コース）の切替：ヘッダーのセレクタ ----------
+  const edSel = el('select', { id: 'editionSel', class: 'icon-btn', 'aria-label': 'コース（編）を切り替え' },
+    Object.values(EDITIONS).map((c) => el('option', { value: c.key, text: `${c.icon} ${c.label}` })));
+  edSel.addEventListener('change', () => switchEdition(edSel.value));
+  const topIn = document.querySelector('.top-in');
+  if (topIn && themeBtn) topIn.insertBefore(edSel, themeBtn);
+  function switchEdition(key) {
+    if (key === edition) return;
+    setCourse(key); edSel.value = edition; route();
+  }
+
   // ---------- ルーター ----------
   let cleanup = null;
   function route() {
@@ -95,22 +140,35 @@
   // ---------- ホーム ----------
   function viewHome() {
     const pct = overall();
+    const cur = EDITIONS[edition];
     app.append(
       el('section', { class: 'hero' },
         el('h1', { text: '🛡️ ホワイトハッカー養成講座' }),
         el('p', { class: 'sub', text: 'ゼロから学ぶ、守るためのハッキング。読む → 手を動かす（模擬実習） → 検定で力試し → 就職へ。' }),
-        el('div', { class: 'chips' }, el('span', { class: 'chip ok', text: '🇯🇵 国産教材' }), el('span', { class: 'chip', text: '日本の法律に準拠' }), el('span', { class: 'chip', text: '国家資格に対応' }), el('span', { class: 'chip', text: '日本の就職事情' })),
+        el('div', { class: 'chips' }, el('span', { class: 'chip ok', text: `${cur.icon} ${cur.label}を表示中` }), el('span', { class: 'chip', text: `全${D.lessons.length}章` }), el('span', { class: 'chip', text: '🇯🇵 国産教材' }), el('span', { class: 'chip', text: '国家資格に対応' })),
         el('div', { class: 'bar', 'aria-label': '学習の進み具合' }, barFill(pct)),
         el('p', { class: 'sub', text: `学習の進み具合：${pct}%` }),
         el('div', { class: 'row' }, el('a', { class: 'btn', href: '#/learn' }, '📖 テキストを読む'), el('a', { class: 'btn sec', href: '#/exam' }, '📝 検定試験'), el('a', { class: 'btn sec', href: '#/career' }, '💼 就職案内'))
+      ),
+      el('div', { class: 'panel' },
+        el('h2', { text: '📚 コースを選ぶ' }),
+        el('p', { class: 'sub', text: 'レベルに合わせて2つのコースを用意しています。いつでも上の切り替えや、このカードから変更できます（学習記録はコースごとに別々に保存されます）。' }),
+        el('div', { class: 'grid' }, Object.values(EDITIONS).map((c) => {
+          const on = c.key === edition;
+          return el('div', { class: 'card' }, el('div', { class: 'ic', text: c.icon }),
+            el('div', { class: 't', text: c.label + (on ? '（表示中）' : '') }),
+            el('div', { class: 'd', text: c.blurb }),
+            on ? el('span', { class: 'chip ok', text: '✔ いま選択中' })
+               : el('button', { class: 'btn sm', type: 'button', onclick: () => switchEdition(c.key) }, `${c.label}に切り替える`));
+        }))
       ),
       el('div', { class: 'notice' }, '🔒', el('div', { html: '<b>安心して学べます。</b>実習はすべてこのブラウザの中だけで動く模擬環境です。個人情報の登録は不要で、学習記録はこの端末にだけ保存されます。' })),
       el('div', { class: 'notice warn' }, '⚖️', el('div', { html: '<b>大切な約束：</b>学んだ技術を、<b>許可なく他人のシステムに使ってはいけません</b>（不正アクセス禁止法などで処罰されます）。' })),
       el('h2', { text: '講座の流れ' }),
       el('div', { class: 'grid' },
-        card('📖', '1. テキスト', `全${D.lessons.length}章。図表つきで初心者にもわかりやすく解説。`, '#/learn'),
+        card('📖', '1. テキスト', `全${D.lessons.length}章。図表つきでわかりやすく解説。`, '#/learn'),
         card('🧑‍💻', '2. デジタル実習', '各章に模擬ターミナル・模擬ログイン画面などの実習つき。', '#/learn'),
-        card('📝', '3. 検定試験', '3級（基礎）・2級（応用）。合格すると修了証を発行。', '#/exam'),
+        card('📝', '3. 検定試験', `合格すると修了証を発行（${cur.label}は検定${Object.keys(cur.exams).map((l) => l + '級').join('・')}）。`, '#/exam'),
         card('💼', '4. 就職案内', '職種・資格ロードマップ・適職診断で次の一歩を。', '#/career')
       )
     );
@@ -687,15 +745,10 @@
   };
 
   // ---------- 検定試験 ----------
-  const EXAMS = {
-    3: { ic: '🥉', unlock: null, name: '3級（基礎）', n: 15, min: 20, pass: 70, desc: '倫理・ネットワーク・Linux・暗号・認証・フィッシングの基礎' },
-    2: { ic: '🥈', unlock: '3', name: '2級（応用）', n: 15, min: 25, pass: 75, desc: 'Web脆弱性・暗号応用・認証・クラウド・インシデント対応の実践知識' },
-    1: { ic: '🥇', unlock: '2', name: '1級（上級）', n: 12, min: 30, pass: 80, desc: '暗号の実装的失敗・クラウド/コンテナ・AI/LLM・高度な攻撃面の専門知識' }
-  };
   function viewExam() {
     app.append(el('h1', { text: '📝 検定試験' }), el('p', { class: 'sub', text: '問題は毎回ランダムに出題されます。合格するとアプリ内の修了証を表示・印刷できます。' }),
       el('div', { class: 'notice warn' }, 'ℹ️', el('div', { text: 'この検定はアプリ内の学習到達度チェックで、公的な資格ではありません。公的資格は「就職案内」の資格ロードマップを参考にしてください。' })));
-    app.append(el('div', { class: 'grid' }, ['3', '2', '1'].map((lv) => {
+    app.append(el('div', { class: 'grid' }, Object.keys(EXAMS).map((lv) => {
       const e = EXAMS[lv], r = P.exam[lv];
       const locked = e.unlock && !P.exam[e.unlock].passed;
       return el('div', { class: 'card' }, el('div', { class: 'ic', text: e.ic }), el('div', { class: 't', text: `ホワイトハッカー検定 ${e.name}` }),
@@ -706,7 +759,7 @@
     })));
     app.append(el('div', { class: 'panel' }, el('h2', { text: '📖 問題集＆解答集' }),
       el('p', { class: 'sub', text: '全級の問題と正解・解説を一覧で確認できます（分野別）。試験対策や答え合わせにどうぞ。' }),
-      el('div', { class: 'row' }, ['3', '2', '1'].map((lv) => el('a', { class: 'btn sec', href: `#/exam/answers/${lv}` }, `${EXAMS[lv].ic} ${EXAMS[lv].name}の解答集`)))));
+      el('div', { class: 'row' }, Object.keys(EXAMS).map((lv) => el('a', { class: 'btn sec', href: `#/exam/answers/${lv}` }, `${EXAMS[lv].ic} ${EXAMS[lv].name}の解答集`)))));
   }
 
   // 解答集（全問の正解・解説を一覧表示）
@@ -810,10 +863,10 @@
         const id = [...crypto.getRandomValues(new Uint8Array(4))].map((x) => x.toString(16).padStart(2, '0')).join('').toUpperCase();
         const d = new Date();
         area.replaceChildren(el('div', { class: 'cert' },
-          el('div', { class: 'small', text: '国産ホワイトハッカー養成講座' }),
+          el('div', { class: 'small', text: `国産ホワイトハッカー養成講座 ${EDITIONS[edition].label}` }),
           el('div', { class: 'ct', text: '修 了 証' }),
           el('div', { class: 'nm', text: name + ' 殿' }),
-          el('p', { text: `あなたは「ホワイトハッカー養成講座」において所定の学習を修め、ホワイトハッカー検定 ${e.name} に ${score}点 で合格したことをここに証します。` }),
+          el('p', { text: `あなたは「ホワイトハッカー養成講座 ${EDITIONS[edition].label}」において所定の学習を修め、ホワイトハッカー検定 ${e.name} に ${score}点 で合格したことをここに証します。` }),
           el('p', { text: `${wareki(d)}　／　証書番号 第${lv}級-${id}号` }),
           el('div', { class: 'small', text: '※本証はアプリ内の学習到達度を示すもので、公的資格ではありません。' })),
           el('div', { class: 'row no-print' }, el('button', { class: 'btn sec', type: 'button', onclick: () => window.print() }, '🖨️ 印刷・PDF保存')));
@@ -920,9 +973,7 @@
     app.append(el('div', { class: 'panel' }, el('div', { class: 'stats' },
       stat(overall() + '%', '全体の進み具合'), stat(`${Object.keys(P.read).length}/${n}`, '読了した章'), stat(`${Object.keys(P.labs).length}/${n}`, 'クリアした実習'),
       stat(`${Object.keys(P.quiz).length}/${n}`, '合格した確認テスト'),
-      stat(P.exam[3].passed ? '合格' : (P.exam[3].tries ? P.exam[3].best + '点' : '—'), '検定3級'),
-      stat(P.exam[2].passed ? '合格' : (P.exam[2].tries ? P.exam[2].best + '点' : '—'), '検定2級'),
-      stat(P.exam[1].passed ? '合格' : (P.exam[1].tries ? P.exam[1].best + '点' : '—'), '検定1級'))));
+      Object.keys(EXAMS).map((lv) => stat(P.exam[lv].passed ? '合格' : (P.exam[lv].tries ? P.exam[lv].best + '点' : '—'), '検定' + lv + '級')))));
     app.append(el('div', { class: 'panel' }, el('div', { class: 'tbl-wrap' }, el('table', { class: 'tbl' },
       el('tr', null, el('th', { text: '章' }), el('th', { text: '読了' }), el('th', { text: '実習' }), el('th', { text: '確認テスト' })),
       D.lessons.map((l) => { const id = String(l.id); return el('tr', null, el('td', null, el('a', { href: `#/lesson/${l.id}` }, `第${l.id}章 ${l.title}`)), el('td', { text: P.read[id] ? '✔' : '' }), el('td', { text: P.labs[id] ? '✔' : '' }), el('td', { text: P.quiz[id] ? '✔' : '' })); })))));
@@ -955,5 +1006,7 @@
   }
   function stat(nv, l) { return el('div', { class: 'stat' }, el('div', { class: 'n', text: nv }), el('div', { class: 'l', text: l })); }
 
+  setCourse(loadEdition());
+  edSel.value = edition;
   route();
 })();
