@@ -616,6 +616,73 @@
           } }), el('span', { text: c }))), fb));
       });
       box.append(res);
+    },
+
+    // 第11章：ペネトレーションテストの工程を組み立てる
+    pentest(box, done) {
+      box.append(el('h2', { text: '実習：攻撃手順（ペネトレーションテスト）を組み立てよう' }),
+        el('div', { class: 'notice warn' }, '⚖️', el('div', { html: '<b>工程の理解のための演習です。</b>学んだ手順を、許可のない実在システムに使ってはいけません。練習は Juice Shop・DVWA・CTF など<b>攻略が許可された環境</b>だけで行います。' })));
+      let a1 = false, a2 = false, a3 = false;
+      const check = () => { if (a1 && a2 && a3) flag(box, 'ペンテスト・プランナー', done); };
+
+      // A: フェーズの並べ替え（正しい順を選ぶ）
+      box.append(el('h3', { text: 'A. 5つのフェーズを正しい順に並べる' }));
+      const phases = ['偵察（OSINT）', 'スキャンと列挙', '侵入（PoCで立証）', '侵入後（到達範囲の評価）', '報告と再試験'];
+      const correct = phases.slice();
+      const selects = [];
+      const pr1 = el('div');
+      for (let i = 0; i < 5; i++) {
+        const s = el('select', { 'aria-label': `${i + 1}番目のフェーズ` }, el('option', { value: '', text: `${i + 1}番目…` }), shuffle(phases).map((ph) => el('option', { value: ph, text: ph })));
+        selects.push(s); box.append(s);
+      }
+      box.append(el('div', { class: 'row' }, el('button', { class: 'btn sm', type: 'button', onclick: () => {
+        const ok = selects.every((s, i) => s.value === correct[i]);
+        if (ok) { result(pr1, true, '正解！ 許可(RoE)を前提に、偵察→スキャン/列挙→侵入→侵入後→報告 と進みます。'); a1 = true; check(); }
+        else result(pr1, false, '順番が違います。痕跡の少ない情報収集から始め、最後に報告・再試験で締めます。');
+      } }, '確認')), pr1);
+
+      // B: 道具とフェーズのマッチング
+      box.append(el('h3', { text: 'B. 道具（の種類）を使うフェーズに結びつける' }));
+      const tools = [
+        ['証明書透明性(CT)ログでサブドメインを洗い出す', '偵察（OSINT）'],
+        ['ポートスキャナで開放ポートとサービス版を調べる', 'スキャンと列挙'],
+        ['見つけた弱点が悪用可能か最小限のPoCで確かめる', '侵入（PoCで立証）'],
+        ['足場から管理コンソールに到達できるか評価する', '侵入後（到達範囲の評価）'],
+        ['CVSSでリスクを評価し修正指針をまとめる', '報告と再試験']
+      ];
+      const opts = ['偵察（OSINT）', 'スキャンと列挙', '侵入（PoCで立証）', '侵入後（到達範囲の評価）', '報告と再試験'];
+      const msel = [];
+      const mtbl = el('table', { class: 'tbl' }, el('tr', null, el('th', { text: '作業' }), el('th', { text: 'フェーズ' })));
+      tools.forEach(([t]) => { const s = el('select', { 'aria-label': t }, el('option', { value: '', text: '選択…' }), opts.map((o) => el('option', { value: o, text: o }))); msel.push(s); mtbl.append(el('tr', null, el('td', { text: t }), el('td', null, s))); });
+      box.append(mtbl);
+      const pr2 = el('div');
+      box.append(el('div', { class: 'row' }, el('button', { class: 'btn sm', type: 'button', onclick: () => {
+        const wrong = tools.filter(([, ph], i) => msel[i].value !== ph).length;
+        if (!wrong) { result(pr2, true, '全問正解！ 各作業がどのフェーズの営みかを掴めています。'); a2 = true; check(); }
+        else result(pr2, false, `${wrong}か所違います。本文のフェーズ説明を見直しましょう。`);
+      } }, '答え合わせ')), pr2);
+
+      // C: 作法（やってよい/ダメ）の判断
+      box.append(el('h3', { text: 'C. 侵入フェーズでの作法：適切なのはどれ？' }));
+      const pr3 = el('div');
+      const cItems = [
+        ['突破できたら、証拠として顧客の個人情報DBを全件ダウンロードして保管する', false, 'データは壊さず持ち出さない。到達できる事実の立証で止めます。'],
+        ['突破を再現できる手順・時刻・リクエストを証跡として記録する', true, '顧客ログと突合でき、再現性のある報告になります。'],
+        ['影響の大きいDoSや削除は、RoEで明示合意がある場合に限り行う', true, '範囲外の破壊的操作は厳禁。合意が唯一の条件です。'],
+        ['見つけた脆弱性をその場でSNSに公開して注意喚起する', false, '守秘義務違反。協調開示(IPA届出等)の手順に従います。']
+      ];
+      cItems.forEach(([t, good, why], i) => {
+        const fb = el('div', { class: 'explain' });
+        const mk = (label, val) => el('button', { class: 'btn sm sec', type: 'button', onclick: () => {
+          cItems[i].done = val === good; fb.textContent = (val === good ? '⭕ 正解：' : '❌ 不正解：') + why;
+          if (cItems.every((x) => x.done !== undefined)) {
+            if (cItems.every((x) => x.done)) { result(pr3, true, '作法もばっちりです。'); a3 = true; check(); }
+            else result(pr3, false, '誤りがあります。解説を読んで選び直しましょう。');
+          }
+        } }, label);
+        box.append(el('div', { class: 'q' }, el('div', { class: 'qt', text: `${i + 1}. ${t}` }), el('div', { class: 'row' }, mk('⭕ 適切', true), mk('❌ 不適切', false)), fb));
+      });
+      box.append(pr3);
     }
   };
 
