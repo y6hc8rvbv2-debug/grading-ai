@@ -149,3 +149,7 @@ footer{max-width:980px; margin:0 auto; padding:24px 16px 40px; color:var(--muted
   body{background:#fff; color:#000}
   .cert{border-color:#0b7d5e}
 }
+
+/* 解答集 */
+.q ul{margin:6px 0 0; padding-left:20px}
+.q li.ans-ok{color:var(--ok); font-weight:700; list-style:none; margin-left:-16px}
