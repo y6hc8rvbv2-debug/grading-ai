@@ -1,0 +1,4 @@
+# サーバー専用のファイル（PII Shield）は公開しない
+lib
+package.json
+CLAUDE.md
