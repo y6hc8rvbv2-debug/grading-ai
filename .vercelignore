@@ -8,3 +8,6 @@ security-guard/.env
 security-guard/.env.example
 security-guard/.gitignore
 security-guard/CLAUDE.md
+mansion-agent/package.json
+mansion-agent/lib
+mansion-agent/CLAUDE.md
